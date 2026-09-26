@@ -25,6 +25,8 @@ export const config = {
   permittedEventsDataset: env("PERMITTED_EVENTS_DATASET", "tvpp-9vvx"),
   timezone: env("TIMEZONE", "America/New_York"),
   databaseUrl: env("DATABASE_URL"),
+  /** With DATABASE_URL, only one running agent answers each message. MESSAGE_CLAIMS=off disables it. */
+  messageClaims: env("MESSAGE_CLAIMS", "on").toLowerCase() !== "off",
   backboardApiKey: env("BACKBOARD_API_KEY"),
   backboardMemoryMode: memoryMode(env("BACKBOARD_MEMORY_MODE", "Auto")),
   backboardMemoryPro: env("BACKBOARD_MEMORY_PRO", "false").toLowerCase() === "true",
