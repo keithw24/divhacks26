@@ -61,6 +61,16 @@ export const config = {
   nessieBaseUrl: env("NESSIE_BASE_URL", "http://api.nessieisreal.com"),
   nessieCustomerId: env("NESSIE_CUSTOMER_ID"),
   nessieAccountId: env("NESSIE_ACCOUNT_ID"),
+  // Website API (sign-in codes over iMessage, onboarding). WEB_API_PORT=off disables it.
+  webApiPort: env("WEB_API_PORT", "8788"),
+  webAllowedOrigins: env("WEB_ALLOWED_ORIGINS", "http://localhost:5174,http://localhost:8080")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+  webMaxUsers: positiveNumber(env("WEB_MAX_USERS", "100"), 100),
+  webAuthSecret: env("WEB_AUTH_SECRET"),
+  webStatePath: env("WEB_STATE_PATH", "data/web-users.json"),
+  agentNumber: env("AGENT_NUMBER", "+14155951440"),
 };
 
 export type PaymentsMode = "mock" | "ripple_test" | "nessie" | "nessie_ripple";

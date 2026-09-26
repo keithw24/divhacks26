@@ -41,6 +41,17 @@ export interface BackboardClient {
   createThread(assistantId: string): Promise<{ threadId: string }>;
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>;
   searchMemories(assistantId: string, query: string, limit?: number): Promise<string[]>;
+  /** Every stored memory with its id (for the website's "what the agent remembers" page). */
+  listMemories?(assistantId: string): Promise<StoredMemory[]>;
+  deleteMemory?(assistantId: string, memoryId: string): Promise<void>;
+  /** Deletes all memories on the assistant. Irreversible; used on account deletion. */
+  resetMemories?(assistantId: string): Promise<void>;
+}
+
+export interface StoredMemory {
+  id: string;
+  text: string;
+  createdAt?: string;
 }
 
 export interface BackboardClientOptions {
@@ -138,6 +149,34 @@ export function createBackboardClient(options: BackboardClientOptions): Backboar
       );
       if (!payload || typeof payload !== "object") throw new BackboardRequestError("malformed");
       return readMemories(payload);
+    },
+
+    async listMemories(assistantId) {
+      const out: StoredMemory[] = [];
+      for (let page = 1; page <= 5; page++) {
+        const payload = await request(
+          "GET",
+          `/assistants/${encodeURIComponent(assistantId)}/memories?page=${page}&page_size=100`,
+        );
+        const rows = (payload as { memories?: unknown })?.memories;
+        if (!Array.isArray(rows)) break;
+        for (const row of rows as Record<string, unknown>[]) {
+          const id = row.id ?? row.memory_id;
+          const text = row.content ?? row.memory;
+          if (typeof id !== "string" || typeof text !== "string" || !text.trim()) continue;
+          out.push({ id, text: text.trim(), ...(typeof row.created_at === "string" && { createdAt: row.created_at }) });
+        }
+        if (rows.length < 100) break;
+      }
+      return out;
+    },
+
+    async deleteMemory(assistantId, memoryId) {
+      await request("DELETE", `/assistants/${encodeURIComponent(assistantId)}/memories/${encodeURIComponent(memoryId)}`);
+    },
+
+    async resetMemories(assistantId) {
+      await request("DELETE", `/assistants/${encodeURIComponent(assistantId)}/memories`);
     },
   };
 }
