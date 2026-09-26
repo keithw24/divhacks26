@@ -37,9 +37,68 @@ export interface BlockSafetyReport {
   neighborhoodByHour: HourBucket[];
   topOffenses: OffenseCount[];
   precincts: Array<{ precinct: number | null; borough: string | null; n: number }>;
+  placeLabel?: string;
   shootings: LayerCounts;
   collisions: LayerCounts & { pedCycHurt: number };
   lights: LayerCounts & { openNeighborhood: number };
+  baselines: SafetyBaselines;
+}
+
+/** Complaint density here vs NYC / this borough / this area's typical hour (1 = even). */
+export interface SafetyBaselines {
+  borough: string | null;
+  areaVsNyc: number | null;
+  hourVsNyc: number | null;
+  hourVsArea: number | null;
+  areaVsBorough: number | null;
+  hourVsBorough: number | null;
+}
+
+export const NYC_LAND_KM2 = 778.2;
+export const BOROUGH_LAND_KM2: Record<string, number> = {
+  MANHATTAN: 59.13,
+  BROOKLYN: 179.7,
+  QUEENS: 281.5,
+  BRONX: 109.04,
+  "STATEN ISLAND": 151.47,
+};
+
+export function circleKm2(meters: number): number {
+  const km = meters / 1000;
+  return Math.PI * km * km;
+}
+
+function densityRatio(local: number, localKm2: number, ref: number, refKm2: number): number | null {
+  if (!(localKm2 > 0) || !(refKm2 > 0) || ref <= 0) return null;
+  return local / localKm2 / (ref / refKm2);
+}
+
+export function computeBaselines(input: {
+  neighborhoodMeters: number;
+  neighborhoodCount: number;
+  hourNeighborhoodCount: number;
+  cityComplaints: number;
+  cityHourComplaints: number;
+  borough: string | null;
+  boroughComplaints: number;
+  boroughHourComplaints: number;
+}): SafetyBaselines {
+  const localKm2 = circleKm2(input.neighborhoodMeters);
+  const boroughKey = (input.borough ?? "").toUpperCase().replace(/_/g, " ");
+  const boroughKm2 = BOROUGH_LAND_KM2[boroughKey];
+  const typicalHourHere = input.neighborhoodCount / 24;
+  return {
+    borough: input.borough,
+    areaVsNyc: densityRatio(input.neighborhoodCount, localKm2, input.cityComplaints, NYC_LAND_KM2),
+    hourVsNyc: densityRatio(input.hourNeighborhoodCount, localKm2, input.cityHourComplaints, NYC_LAND_KM2),
+    hourVsArea: typicalHourHere > 0 ? input.hourNeighborhoodCount / typicalHourHere : null,
+    areaVsBorough: boroughKm2
+      ? densityRatio(input.neighborhoodCount, localKm2, input.boroughComplaints, boroughKm2)
+      : null,
+    hourVsBorough: boroughKm2
+      ? densityRatio(input.hourNeighborhoodCount, localKm2, input.boroughHourComplaints, boroughKm2)
+      : null,
+  };
 }
 
 const BLOCK_METERS = 250;
@@ -88,6 +147,30 @@ WITH pt AS (
   WHERE L.occurred_at >= now() - interval '2 years'
     AND L.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
     AND L.longitude BETWEEN pt.lon - 0.012 AND pt.lon + 0.012
+), area_borough AS (
+  SELECT borough
+  FROM nearby
+  WHERE meters < $5 AND borough IS NOT NULL
+  GROUP BY borough
+  ORDER BY count(*) DESC
+  LIMIT 1
+), citywide AS (
+  SELECT
+    count(*)::int AS complaints,
+    count(*) FILTER (
+      WHERE extract(hour from occurred_at AT TIME ZONE 'America/New_York')::int = (SELECT hour_et FROM pt)
+    )::int AS hour_complaints,
+    count(*) FILTER (
+      WHERE (SELECT borough FROM area_borough) IS NOT NULL
+        AND borough = (SELECT borough FROM area_borough)
+    )::int AS borough_complaints,
+    count(*) FILTER (
+      WHERE (SELECT borough FROM area_borough) IS NOT NULL
+        AND borough = (SELECT borough FROM area_borough)
+        AND extract(hour from occurred_at AT TIME ZONE 'America/New_York')::int = (SELECT hour_et FROM pt)
+    )::int AS borough_hour_complaints
+  FROM nypd_complaints
+  WHERE occurred_at >= now() - interval '2 years'
 )
 SELECT jsonb_build_object(
   'blockCount', (SELECT count(*) FROM nearby WHERE meters < $4),
@@ -132,7 +215,12 @@ SELECT jsonb_build_object(
     'neighborhoodCount', (SELECT count(*) FROM lamp WHERE meters < $5),
     'hourNeighborhoodCount', (SELECT count(*) FROM lamp, pt WHERE meters < $5 AND lamp.hour_et = pt.hour_et),
     'openNeighborhood', (SELECT count(*) FROM lamp WHERE meters < $5 AND status ILIKE 'open%')
-  )
+  ),
+  'areaBorough', (SELECT borough FROM area_borough),
+  'cityComplaints', (SELECT complaints FROM citywide),
+  'cityHourComplaints', (SELECT hour_complaints FROM citywide),
+  'boroughComplaints', (SELECT borough_complaints FROM citywide),
+  'boroughHourComplaints', (SELECT borough_hour_complaints FROM citywide)
 ) AS report
 `;
 
@@ -220,6 +308,18 @@ export async function lookupBlockSafety(
   const shoot = payload.shootings ?? {};
   const crash = payload.collisions ?? {};
   const lamp = payload.lights ?? {};
+  const neighborhoodCount = Number(payload.neighborhoodCount ?? 0);
+  const hourNeighborhoodCount = Number(payload.hourNeighborhoodCount ?? 0);
+  const baselines = computeBaselines({
+    neighborhoodMeters: NEIGHBORHOOD_METERS,
+    neighborhoodCount,
+    hourNeighborhoodCount,
+    cityComplaints: Number(payload.cityComplaints ?? 0),
+    cityHourComplaints: Number(payload.cityHourComplaints ?? 0),
+    borough: payload.areaBorough ?? payload.precincts?.[0]?.borough ?? null,
+    boroughComplaints: Number(payload.boroughComplaints ?? 0),
+    boroughHourComplaints: Number(payload.boroughHourComplaints ?? 0),
+  });
 
   return {
     latitude,
@@ -231,9 +331,9 @@ export async function lookupBlockSafety(
     blockMeters: BLOCK_METERS,
     neighborhoodMeters: NEIGHBORHOOD_METERS,
     blockCount: Number(payload.blockCount ?? 0),
-    neighborhoodCount: Number(payload.neighborhoodCount ?? 0),
+    neighborhoodCount,
     hourBlockCount: Number(payload.hourBlockCount ?? 0),
-    hourNeighborhoodCount: Number(payload.hourNeighborhoodCount ?? 0),
+    hourNeighborhoodCount,
     peakHour,
     peakHourCount,
     neighborhoodByHour: byHour,
@@ -256,5 +356,6 @@ export async function lookupBlockSafety(
       hourNeighborhoodCount: Number(lamp.hourNeighborhoodCount ?? 0),
       openNeighborhood: Number(lamp.openNeighborhood ?? 0),
     },
+    baselines,
   };
 }

@@ -162,4 +162,63 @@ describe("response renderer", () => {
     expect(text).toContain("https://example.test/event");
     expect(text).not.toContain("restaurant");
   });
+
+  it("summarizes safety vs NYC instead of listing report counts", () => {
+    const text = renderResponse({
+      picks: [],
+      safety: {
+        status: "ok",
+        data: {
+          placeLabel: "Columbia University",
+          latitude: 40.80775,
+          longitude: -73.96249,
+          hourEt: 13,
+          asOfEt: "Sat",
+          years: 2,
+          hourNeighborhoodFelonies: 0,
+          blockMeters: 250,
+          neighborhoodMeters: 800,
+          blockCount: 1,
+          neighborhoodCount: 40,
+          hourBlockCount: 0,
+          hourNeighborhoodCount: 1,
+          peakHour: 18,
+          peakHourCount: 9,
+          neighborhoodByHour: [],
+          topOffenses: [],
+          precincts: [],
+          shootings: { blockCount: 0, neighborhoodCount: 0, hourBlockCount: 0, hourNeighborhoodCount: 0 },
+          collisions: {
+            blockCount: 0,
+            neighborhoodCount: 0,
+            hourBlockCount: 0,
+            hourNeighborhoodCount: 0,
+            pedCycHurt: 0,
+          },
+          lights: {
+            blockCount: 0,
+            neighborhoodCount: 0,
+            hourBlockCount: 0,
+            hourNeighborhoodCount: 0,
+            openNeighborhood: 0,
+          },
+          baselines: {
+            borough: "MANHATTAN",
+            areaVsNyc: 0.8,
+            hourVsNyc: 0.3,
+            hourVsArea: 0.4,
+            areaVsBorough: 0.7,
+            hourVsBorough: 0.35,
+          },
+        },
+        sources: [],
+        warnings: [],
+      },
+      warnings: [],
+    });
+    expect(text).toContain("Columbia University");
+    expect(text).toContain("relatively safe");
+    expect(text).toContain("typical NYC");
+    expect(text).not.toMatch(/reports at this hour/i);
+  });
 });

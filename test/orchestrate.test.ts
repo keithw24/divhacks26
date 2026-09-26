@@ -52,6 +52,15 @@ describe("skill dispatcher", () => {
     expect(getRoute).not.toHaveBeenCalled();
   });
 
+  it("still queries Tiger when Gemini omits the safety skill", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["food"] });
+    await orchestrate({ question: "how safe is Columbia at 1pm", transcript: [], location });
+    expect(getSafety).toHaveBeenCalledOnce();
+    expect(getSafety).toHaveBeenCalledWith(
+      expect.objectContaining({ when: "how safe is Columbia at 1pm" }),
+    );
+  });
+
   it("fans out a broad plan and routes the selected result", async () => {
     const event = {
       id: "event:parks:1",
