@@ -77,11 +77,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "plansaroundus — @agent for your iMessage group chat" },
+      {
+        title: "plansaroundus — Message the agent privately. It coordinates everyone involved.",
+      },
       {
         name: "description",
         content:
-          "An AI assistant that lives inside iMessage group chats, with group context, personal memory, and real actions.",
+          "Message the agent privately. From dinner plans to concert tickets and payments, the agent talks to each person individually across separate 1:1 threads and coordinates the action across everyone involved.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

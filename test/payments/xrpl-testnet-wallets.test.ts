@@ -549,7 +549,7 @@ describe("Photon payment flow settles between customer wallets", () => {
   it("asks first, then pays Keith $5 from Rohan's own Testnet wallet after yes", async () => {
     const { s, provider, service, say } = chat();
     const ask = await say("Pay Keith $5 for dinner");
-    expect(ask.reply).toBe("Send Keith $5 for dinner?");
+    expect(ask.reply).toBe("Do you want to send $5 to Keith for dinner?");
     expect(s.ledger.submits).toHaveLength(0);
     expect(service.payments.active("group")).toMatchObject({
       settlement: "XRPL_TESTNET_CUSTOMER_WALLET",

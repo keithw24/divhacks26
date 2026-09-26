@@ -111,7 +111,7 @@ describe("confirmation flow", () => {
   it("asks before sending Keith $20 and does not execute", async () => {
     const { say, provider, service } = setup();
     const reply = await say("space", "Send Keith $20");
-    expect(reply.reply).toBe("Send Keith $20?");
+    expect(reply.reply).toBe("Do you want to send $20 to Keith?");
     expect(provider.calls).toHaveLength(0);
     expect(service.payments.active("space")?.status).toBe("AWAITING_CONFIRMATION");
     expect(service.payments.active("space")?.destination).toBe(DEFAULT_TEST_RECIPIENTS.Keith?.rippleDestination);
@@ -120,14 +120,14 @@ describe("confirmation flow", () => {
   it("keeps the Uber memo in the confirmation", async () => {
     const { say, provider } = setup();
     const reply = await say("space", "Send Keith $20 for the Uber.");
-    expect(reply.reply).toBe("Send Keith $20 for the Uber?");
+    expect(reply.reply).toBe("Do you want to send $20 to Keith for the Uber?");
     expect(provider.calls).toHaveLength(0);
   });
 
   it("parses twenty dollars and dinner", async () => {
     const { say, provider } = setup();
-    expect((await say("a", "Pay Keith twenty dollars")).reply).toBe("Send Keith $20?");
-    expect((await say("b", "Give Ben $15 for dinner")).reply).toBe("Send Ben $15 for dinner?");
+    expect((await say("a", "Pay Keith twenty dollars")).reply).toBe("Do you want to send $20 to Keith?");
+    expect((await say("b", "Give Ben $15 for dinner")).reply).toBe("Do you want to send $15 to Ben for dinner?");
     expect(provider.calls).toHaveLength(0);
   });
 
@@ -146,9 +146,12 @@ describe("confirmation flow", () => {
   it("cancels on no without sending", async () => {
     const { say, provider, service } = setup();
     await say("space", "Send Keith $20");
-    const cancelled = await say("space", "no");
-    expect(cancelled.reply).toBe("Okay, I won't send it.");
+    const declined = await say("space", "no");
+    expect(declined.reply).toBe("How much would you like to send instead?");
     expect(provider.calls).toHaveLength(0);
+    expect(service.payments.active("space")?.status).toBe("AWAITING_NEW_AMOUNT");
+    const cancelled = await say("space", "nothing");
+    expect(cancelled.reply).toBe("Okay, I cancelled the payment. Nothing was sent.");
     expect(service.payments.active("space")).toBeUndefined();
     const later = await say("space", "yes");
     expect(later.handled).toBe(false);
@@ -159,7 +162,7 @@ describe("confirmation flow", () => {
     const { say, provider, service } = setup();
     await say("space", "Send Keith $20 for the Uber.");
     const changed = await say("space", "Actually make it $15.");
-    expect(changed.reply).toBe("Send Keith $15 for the Uber?");
+    expect(changed.reply).toBe("Do you want to send $15 to Keith for the Uber?");
     expect(provider.calls).toHaveLength(0);
     expect(service.payments.active("space")?.status).toBe("AWAITING_CONFIRMATION");
     expect(service.payments.active("space")?.amountUsd).toBe(15);
@@ -210,7 +213,7 @@ describe("confirmation flow", () => {
     expect(provider.calls).toHaveLength(0);
     expect(service.payments.active("space")).toBeUndefined();
     const other = await say("space-b", "Send Keith $20", { senderId: "ben-id", senderName: "Ben" });
-    expect(other.reply).toBe("Send Keith $20?");
+    expect(other.reply).toBe("Do you want to send $20 to Keith?");
     expect(provider.calls).toHaveLength(0);
   });
 
@@ -283,7 +286,7 @@ describe("context, isolation, and groups", () => {
   it("resolves him from a clear recent person in this space", async () => {
     const { say, provider } = setup();
     const reply = await say("space", "Send him $10", { recentTexts: ["Keith is on his way"] });
-    expect(reply.reply).toBe("Send Keith $10?");
+    expect(reply.reply).toBe("Do you want to send $10 to Keith?");
     expect(provider.calls).toHaveLength(0);
   });
 
@@ -423,7 +426,7 @@ describe("model extraction cannot send", () => {
     );
     const { say, provider } = setup({ interpreter });
     const reply = await say("space", "Could you possibly transfer twenty bucks to Keith for the ride?");
-    expect(reply.reply).toBe("Send Keith $20 for Uber?");
+    expect(reply.reply).toBe("Do you want to send $20 to Keith for Uber?");
     expect(provider.calls).toHaveLength(0);
     const sent = await say("space", "yes");
     expect(provider.calls).toHaveLength(1);
@@ -502,7 +505,7 @@ describe("dispatcher precedence", () => {
     const { turn, provider } = world();
     const result = await turn("Send Keith $20 for Uber");
     expect(result.outcome).toBe("payment");
-    expect(result.reply).toBe("Send Keith $20 for Uber?");
+    expect(result.reply).toBe("Do you want to send $20 to Keith for Uber?");
     expect(provider.calls).toHaveLength(0);
   });
 

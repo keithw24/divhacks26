@@ -84,6 +84,7 @@ const payments = createPaymentRuntime({
   nessieBaseUrl: config.nessieBaseUrl,
   nessieCustomerId: config.nessieCustomerId,
   nessieAccountId: config.nessieAccountId,
+  audit: xrpl?.guard.audit,
 });
 const meetup = createMeetupRuntime({
   googleMapsApiKey: config.googleMapsApiKey,

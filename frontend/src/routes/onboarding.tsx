@@ -27,7 +27,7 @@ const STEPS = [
   {
     key: "food",
     title: "What works for you?",
-    sub: "Used whenever it suggests food or plans for your group. You can change this anytime.",
+    sub: "Used whenever it coordinates food or plans across people. You can change this anytime.",
   },
   { key: "voice", title: "Talk or text?", sub: "Voice memos go both ways." },
 ] as const;

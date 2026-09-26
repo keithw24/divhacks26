@@ -100,7 +100,11 @@ export function collectPendingActions(spaceId: string, sources: PendingSources, 
   }
 
   const payment = sources.payments?.active(spaceId);
-  if (payment && payment.status === "AWAITING_CONFIRMATION" && payment.purpose !== "RESERVATION_DEPOSIT") {
+  if (
+    payment &&
+    (payment.status === "AWAITING_CONFIRMATION" || payment.status === "AWAITING_NEW_AMOUNT") &&
+    payment.purpose !== "RESERVATION_DEPOSIT"
+  ) {
     actions.push({
       domain: "person_payment",
       referenceId: payment.id,
@@ -118,7 +122,7 @@ export function confirmationKind(text: string): "confirm" | "cancel" | undefined
   const ticket = classifyTicketingMessage(text, { results: [], hasPending: true, fresh: false }).kind;
   const payment = classifyPaymentMessage(text).kind;
   if (ticket === "confirm" || payment === "confirm" || isClearAffirmative(text) || isDepositAffirmative(text)) return "confirm";
-  if (ticket === "cancel" || payment === "cancel" || isNegative(text)) return "cancel";
+  if (ticket === "cancel" || payment === "cancel" || payment === "decline" || isNegative(text)) return "cancel";
   return undefined;
 }
 
@@ -127,7 +131,10 @@ export function domainReads(domain: PendingDomain, text: string, kind: "confirm"
   if (domain === "ticket_purchase") {
     return classifyTicketingMessage(text, { results: [], hasPending: true, fresh: false }).kind === kind;
   }
-  if (domain === "person_payment") return classifyPaymentMessage(text).kind === kind;
+  if (domain === "person_payment") {
+    const pKind = classifyPaymentMessage(text).kind;
+    return pKind === kind || (kind === "cancel" && pKind === "decline");
+  }
   if (kind === "cancel") return isNegative(text);
   if (domain === "reservation_deposit") return isDepositAffirmative(text);
   return isClearAffirmative(text);

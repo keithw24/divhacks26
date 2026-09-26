@@ -357,7 +357,7 @@ describe("reservation deposits", () => {
   it("keeps standalone person payments and deposit-free reservations", async () => {
     const keith = session();
     const asked = await keith.say("Send Keith $20", { messageId: "keith" });
-    expect(asked.reply).toMatch(/^Send Keith \$20\?/);
+    expect(asked.reply).toMatch(/^Do you want to send \$20 to Keith\?/);
     expect(asked.outcome).toBe("payment");
     const sent = await keith.say("Yes", { messageId: "keith-yes" });
     expect(sent.reply).toMatch(/^Sent \$20 to Keith/);

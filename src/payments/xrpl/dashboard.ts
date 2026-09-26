@@ -124,6 +124,8 @@ export interface XrplDashboard {
   operatorPayments: PublicXrplTransaction[];
   /** Ticket purchase trail from the ticketing agent. */
   ticketPurchases?: DashboardTicketPurchase[];
+  /** Chronological human-readable audit trail of payment lifecycle. */
+  auditTrail?: string[];
 }
 
 export interface XrplDashboardOptions {
@@ -267,6 +269,8 @@ export class XrplDashboardBuilder {
       ticketPurchases = [];
     }
 
+    const auditTrail = formatAuditTrail(snapshot.events).slice(-limit);
+
     const dashboard: XrplDashboard = {
       network: "XRPL_TESTNET",
       realMoney: false,
@@ -278,9 +282,57 @@ export class XrplDashboardBuilder {
       approvals,
       operatorPayments,
       ticketPurchases,
+      auditTrail,
     };
     return redactValue(dashboard, this.options.secrets()) as XrplDashboard;
   }
+}
+
+export function formatAuditTrail(events: Array<{ eventType: string; metadata?: Record<string, unknown> }>): string[] {
+  const trail: string[] = [];
+  for (const event of events) {
+    switch (event.eventType) {
+      case "PAYMENT_PROPOSED":
+      case "PAYMENT_INTENT_CREATED": {
+        const amt = event.metadata?.requestedAmountUsd != null ? `$${event.metadata.requestedAmountUsd}` : "payment";
+        const to = event.metadata?.recipientName ? ` → ${event.metadata.recipientName}` : "";
+        trail.push(`PROPOSED: ${amt}${to}`);
+        break;
+      }
+      case "CONFIRMATION_PROMPTED":
+        trail.push(`PROMPTED: ${event.metadata?.prompt ?? "Confirmation prompt"}`);
+        break;
+      case "USER_DECLINED":
+        trail.push("DECLINED");
+        break;
+      case "PAYMENT_REVISED": {
+        const amt = event.metadata?.amountUsd != null ? `$${event.metadata.amountUsd}` : "payment";
+        const to = event.metadata?.recipientName ? ` → ${event.metadata.recipientName}` : "";
+        trail.push(`REVISED: ${amt}${to}`);
+        break;
+      }
+      case "USER_CONFIRMED":
+        trail.push("CONFIRMED");
+        break;
+      case "POLICY_CHECK_PASSED":
+        trail.push("GUARDRAIL: ALLOW");
+        break;
+      case "POLICY_CHECK_FAILED":
+        trail.push(`GUARDRAIL: DENY (${event.metadata?.reasonCode ?? "DENY"})`);
+        break;
+      case "TRANSACTION_SUBMITTED":
+        trail.push(`XRPL: ${event.metadata?.engineResult ?? "tesSUCCESS"}`);
+        break;
+      case "TRANSACTION_VALIDATED":
+      case "PAYMENT_SUCCEEDED":
+        trail.push("VALIDATED");
+        break;
+      case "PAYMENT_CANCELLED":
+        trail.push("CANCELLED");
+        break;
+    }
+  }
+  return trail;
 }
 
 /** Event → quote → confirmation → payment/checkout → confirmation. */

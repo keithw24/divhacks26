@@ -11,7 +11,19 @@ export function forClause(memo: string | null | undefined): string {
 }
 
 export function confirmationText(input: { recipientName: string; amountUsd: number; memo: string | null }): string {
-  return `Send ${input.recipientName} ${formatUsd(input.amountUsd)}${forClause(input.memo)}?`;
+  return `Do you want to send ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)}?`;
+}
+
+export function askNewAmountText(): string {
+  return "How much would you like to send instead?";
+}
+
+export function cancelledPaymentText(): string {
+  return "Okay, I cancelled the payment. Nothing was sent.";
+}
+
+export function expiredConfirmationText(input: { recipientName: string; amountUsd: number }): string {
+  return `That payment confirmation request expired. Tell me if you'd still like to send ${formatUsd(input.amountUsd)} to ${input.recipientName}.`;
 }
 
 export function successText(input: {
