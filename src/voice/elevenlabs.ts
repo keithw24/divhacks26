@@ -29,6 +29,8 @@ export async function transcribe(
 ): Promise<string> {
   const form = new FormData();
   form.append("model_id", opts.model);
+  // Laughter, sighs etc. come back inline as "(laughter)"; the caller splits them out as tone cues.
+  form.append("tag_audio_events", "true");
   form.append("file", new Blob([new Uint8Array(audio)], { type: opts.mimeType }), opts.filename);
   const response = await (opts.fetcher ?? fetch)(`${API}/speech-to-text`, {
     method: "POST",
@@ -43,13 +45,13 @@ export async function transcribe(
 /** Synthesize speech. Returns MP3 audio (44.1 kHz, 128 kbps). */
 export async function synthesize(
   text: string,
-  opts: ElevenLabsOptions & { voiceId: string; model: string },
+  opts: ElevenLabsOptions & { voiceId: string; model: string; voiceSettings?: Record<string, number> },
 ): Promise<Buffer> {
   const url = `${API}/text-to-speech/${encodeURIComponent(opts.voiceId)}?output_format=mp3_44100_128`;
   const response = await (opts.fetcher ?? fetch)(url, {
     method: "POST",
     headers: { "xi-api-key": opts.apiKey, "Content-Type": "application/json", Accept: "audio/mpeg" },
-    body: JSON.stringify({ text, model_id: opts.model }),
+    body: JSON.stringify({ text, model_id: opts.model, ...(opts.voiceSettings && { voice_settings: opts.voiceSettings }) }),
     signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
   });
   return Buffer.from(await (await check(response, "text-to-speech")).arrayBuffer());

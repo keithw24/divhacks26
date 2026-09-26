@@ -2,6 +2,8 @@ import type { SuggestInput } from "./suggest.js";
 import type { ReservationHandlerResult, TurnActions, TurnOutcome } from "./turn.js";
 import { runConversationTurn } from "./turn.js";
 import { classifyMemory, isDurableMemory } from "./classify.js";
+import { checkInLine, checkInTopic, scheduleCheckIn, takeCheckIn } from "./checkin.js";
+import { isReplayVoiceRequest, localSocialRead, type SocialInput, type SocialRead } from "./social.js";
 import { decisionConstraints, reconcileMemories, requestConcernsOthers } from "./decisions.js";
 import { logAgentTurn, logBackboardFailure, type AgentTurnLog } from "./log.js";
 import { sanitizeGroupReply, type AttributedMemory } from "./privacy.js";
@@ -28,6 +30,15 @@ export interface InboundMessage {
   canInvoke?: boolean;
   direction?: "inbound" | "outbound";
   senderKind?: string;
+  /** Arrived as a voice memo (text is the transcript). */
+  isVoice?: boolean;
+  /** Sounds heard in the voice memo, e.g. "laughter". Tone cues only. */
+  audioEvents?: string[];
+}
+
+export interface AssistantReplyMeta {
+  social?: SocialRead;
+  outcome?: TurnOutcome;
 }
 
 export interface InboundDeps {
@@ -51,8 +62,15 @@ export interface InboundDeps {
   transcript(): SuggestInput["transcript"];
   location?: SuggestInput["location"];
   recordChatMessage(spaceId: string, who: string, text: string): void;
-  recordAssistant(text: string): void;
+  recordAssistant(text: string, meta?: AssistantReplyMeta): void;
   noteCoordinates?: () => void;
+  /** Mood / urgency / group dynamic for this turn. Defaults to the local keyword read. */
+  readSocial?: (input: SocialInput) => Promise<SocialRead>;
+  /** Re-send the last answer as a voice memo ("say that out loud"). False when there's nothing to speak. */
+  speakLast?: (social: SocialRead) => Promise<boolean>;
+  /** For late-night follow-ups. Defaults to America/New_York. */
+  timeZone?: string;
+  now?: () => Date;
   loadParticipants?: () => Promise<Participant[] | undefined>;
   reservations?: {
     observe(spaceId: string, text: string): void;
@@ -154,7 +172,40 @@ export async function handleInboundMessage(
   }
 
   const group = readGroupContext(deps.store, message.spaceId);
-  const loaded = await loadMemory(message, senderId, question, group.recentMessages.map((line) => line.text), group.participants, deps);
+  const now = deps.now?.() ?? new Date();
+  const socialInput: SocialInput = {
+    question,
+    isGroup: message.isGroup,
+    recentLines: group.recentMessages
+      .filter((line) => line.id !== message.messageId)
+      .map((line) => ({ who: line.senderName || line.senderId, text: line.text })),
+    now,
+    isVoice: message.isVoice,
+    audioEvents: message.audioEvents,
+  };
+  const [loaded, social] = await Promise.all([
+    loadMemory(message, senderId, question, group.recentMessages.map((line) => line.text), group.participants, deps),
+    (deps.readSocial ?? (async (input: SocialInput) => localSocialRead(input)))(socialInput).catch(() => localSocialRead(socialInput)),
+  ]);
+  logSocialRead(social);
+  void rememberFeeling(message, senderId, social, deps);
+
+  if (deps.speakLast && isReplayVoiceRequest(question)) {
+    const spoken = await deps.speakLast(social).catch(() => false);
+    if (spoken) {
+      if (actions.react) await actions.react("👍").catch(() => undefined);
+      return "voice";
+    }
+  }
+
+  // One gentle follow-up line, only in 1:1 chats, only once.
+  let checkIn = message.isGroup ? undefined : takeCheckIn(deps.store, message.spaceId, senderId, now);
+  const withCheckIn = (reply: string) => {
+    if (!checkIn) return reply;
+    const line = checkInLine(checkIn);
+    checkIn = undefined;
+    return `${line}\n\n${reply}`;
+  };
   const recentText = group.recentMessages.map((line) => line.text).join("\n");
   const attributed: AttributedMemory[] = [
     { userId: loaded.userId, displayName: message.senderName, memories: loaded.memories },
@@ -173,6 +224,7 @@ export async function handleInboundMessage(
       isGroup: message.isGroup,
       question,
       messageId: message.messageId,
+      social,
     },
     actions,
     {
@@ -188,7 +240,7 @@ export async function handleInboundMessage(
         });
         if (result.usedGemini) geminiCalled = true;
         if (!result.reply) return result;
-        return { ...result, reply: sanitizeGroupReply(result.reply, attributed, recentText) };
+        return { ...result, reply: withCheckIn(sanitizeGroupReply(result.reply, attributed, recentText)) };
       },
       suggest: async (input) => {
         geminiCalled = true;
@@ -208,12 +260,13 @@ export async function handleInboundMessage(
             text: line.text,
           })),
           personalized: true,
+          social,
         });
-        return sanitizeGroupReply(answer, attributed, recentText);
+        return withCheckIn(sanitizeGroupReply(answer, attributed, recentText));
       },
       transcript: () => deps.transcript(),
       location: deps.location,
-      recordAssistant: (text) => deps.recordAssistant(text),
+      recordAssistant: (text, turnOutcome) => deps.recordAssistant(text, { social, outcome: turnOutcome }),
       noteCoordinates: deps.noteCoordinates,
       handleReservation: deps.reservations
         ? (request) =>
@@ -271,6 +324,9 @@ export async function handleInboundMessage(
     },
   );
 
+  const followUp = checkInTopic({ read: social, outcome, isGroup: message.isGroup, now, timeZone: deps.timeZone ?? "America/New_York" });
+  if (followUp) scheduleCheckIn(deps.store, message.spaceId, senderId, followUp, now);
+
   const responseSent =
     outcome === "payment" ||
     outcome === "reservation" ||
@@ -295,6 +351,42 @@ export async function handleInboundMessage(
     verboseMemories: deps.verboseMemory ? loaded.memories : undefined,
   });
   return outcome;
+}
+
+/** Enum fields only; nothing the person said. */
+function logSocialRead(read: SocialRead): void {
+  console.info(
+    `social.read ${JSON.stringify({
+      source: read.source,
+      mood: read.mood,
+      urgency: read.urgency,
+      groupDynamic: read.groupDynamic,
+      onTheMove: read.onTheMove,
+      wantsVoice: read.wantsVoice,
+      pattern: Boolean(read.durablePattern),
+      confidence: Math.round(read.confidence * 100) / 100,
+    })}`,
+  );
+}
+
+/**
+ * Keep a recurring feeling the person stated about themselves ("I always get nervous on late trains")
+ * in their own memory, so later suggestions can quietly account for it. Never for other people.
+ */
+async function rememberFeeling(message: InboundMessage, senderId: string, social: SocialRead, deps: InboundDeps): Promise<void> {
+  const memory = activeMemory(deps);
+  if (!memory || !social.durablePattern || social.confidence < 0.7) return;
+  if (!deps.memoryPro && deps.writeMode !== "Auto") return;
+  try {
+    await memory.store({
+      userId: senderId,
+      text: `Feeling: ${social.durablePattern}`,
+      spaceId: message.spaceId,
+      displayName: message.senderName,
+    });
+  } catch (error) {
+    logBackboardFailure(failureKind(error), deps.secrets);
+  }
 }
 
 async function maybeIngest(message: InboundMessage, senderId: string, deps: InboundDeps): Promise<void> {

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { MeetupPersistence, MeetupPlan, PersonLocation } from "../meetup/types.js";
+import type { CheckIn } from "../agent/checkin.js";
 
 export interface Participant {
   id: string;
@@ -52,6 +53,8 @@ export interface AgentState {
   payments: PaymentPersistence;
   /** Group meetup leave times. Scoped by Photon space id. */
   meetups: MeetupPersistence;
+  /** Gentle follow-ups keyed `${spaceId}:${senderId}` (1:1 chats only). */
+  checkIns?: Record<string, CheckIn>;
 }
 
 /** Enough to match a webhook back to a Photon space after restart. */
@@ -156,6 +159,7 @@ function readStateFile(filePath: string): AgentState {
       reservations: readReservationBook(parsed.reservations),
       payments: readPaymentBook(parsed.payments),
       meetups: readMeetupBook(parsed.meetups),
+      checkIns: parsed.checkIns && typeof parsed.checkIns === "object" ? parsed.checkIns : {},
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

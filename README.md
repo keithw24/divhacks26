@@ -652,3 +652,27 @@ The demo provisions Rohan and Keith from the official Testnet faucet, or reuses 
 The demo exits non-zero if any step does not behave as expected. Seeds stay in `data/ripple-demo/secrets.json` (mode 0600, gitignored). Public wallet metadata (`wallets.json`) and the append-only audit log (`audit.jsonl`) are separate files, and the demo checks that neither contains a seed.
 
 The website's XRPL Testnet section reads `GET http://127.0.0.1:8790/api/xrpl/dashboard`. The agent serves it in `ripple_test`, and `npm run xrpl:dashboard` serves it on its own. It lists wallets with live validated balances, recent payments, and attempts that were denied before signing. A hash is linked to the explorer only after it has been re-verified on XRPL Testnet. Set `VITE_XRPL_DASHBOARD_URL` in the frontend to point it elsewhere.
+
+## Social context, emotion and tone
+
+Every addressed message gets a quick **social read** (`src/agent/social.ts`): mood, urgency,
+the group's dynamic (aligned, disagreeing, someone left out) and the sender's texting style.
+Gemini does it with a 2.5 s timeout; without Gemini, or if the call fails, a keyword read
+takes over. Voice memos add the sounds ElevenLabs heard (laughter, sighs) as cues.
+
+The read shapes *how* the agent answers, never the facts:
+
+- the prompt gets tone rules: mirror their length and emoji use, lead with one option when
+  someone is stressed or in a hurry, give each side an option when a group disagrees;
+- the tapback matches the moment (👍, ❤️, 😂, ‼️);
+- voice replies change delivery: steadier and slower for stress, brighter for excitement;
+- a recurring feeling someone states about themselves ("I always get nervous on the subway
+  late") is saved to their own Backboard memory as `Feeling: …` and is never mentioned in groups;
+- after a rough moment or a late-night trip in a 1:1 chat, the next reply at least 8 hours later
+  opens with one short follow-up line.
+
+Only enum fields from the read are logged (`social.read`), never message text.
+
+**Voice beyond voice memos.** `VOICE_REPLIES=smart` (the default) also speaks when someone asks
+("send that as audio", "say it out loud" replays the last answer) or is walking or driving and
+needs a route. Payment confirmations always stay text-only.

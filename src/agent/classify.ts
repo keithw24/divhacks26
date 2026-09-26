@@ -20,6 +20,8 @@ const FACT =
 export function classifyMemory(text: string): MemoryClass {
   const trimmed = text.trim();
   if (!trimmed) return "EPHEMERAL";
+  // Recurring feelings the social read picked out ("Feeling: gets nervous on late trains").
+  if (/^Feeling:\s*\S/.test(trimmed)) return "DURABLE_FACT";
   const statements = trimmed
     .split(/(?<=[.!])\s+/)
     .map((part) => part.replace(/\?+$/g, "").trim())
