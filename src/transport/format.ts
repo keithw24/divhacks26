@@ -117,6 +117,24 @@ export function formatSources(sources: MapsSource[]): string | undefined {
   return `Sources: ${names} — Google Maps`;
 }
 
+const OPTIONAL_FOLLOW_UP =
+  /\b(?:want me to|would you like me to|should i check|i can check|want directions|check train status|want walking directions|i can look up|if you(?:'|’)d like)\b/i;
+
+/** Drop unsolicited "want me to check…" offers. Required clarifications do not match. */
+export function stripOptionalFollowUps(text: string): string {
+  return text
+    .split("\n")
+    .map((line) =>
+      line
+        .split(/(?<=[.!?])\s+/)
+        .filter((sentence) => sentence.trim() && !OPTIONAL_FOLLOW_UP.test(sentence))
+        .join(" ")
+        .trim(),
+    )
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function formatClarification(kind: "origin" | "destination" | "ambiguous", places?: PlaceLocation[]): string {
   if (kind === "origin") {
     return "Where are you starting from? A neighborhood, landmark, or nearest intersection works.";
@@ -138,6 +156,7 @@ export function formatRouteReply(input: {
   partySize?: number;
   sources?: MapsSource[];
   extraNote?: string;
+  preferFastest?: boolean;
 }): string {
   const lines: string[] = [];
   const destOutside =
@@ -151,10 +170,14 @@ export function formatRouteReply(input: {
   if (options.length === 0) {
     lines.push("I couldn’t get a usable route for that trip just now.");
   } else {
+    const fastest = options[0];
+    if (input.preferFastest && fastest?.durationSeconds !== undefined && options.length > 1) {
+      lines.push(`${modeLabel(fastest.mode)} is the fastest option.`);
+    }
     for (const route of options) {
       lines.push(optionLine(route));
     }
-    const rec = recommendation(options);
+    const rec = input.preferFastest ? undefined : recommendation(options);
     if (rec) lines.push(rec);
   }
 

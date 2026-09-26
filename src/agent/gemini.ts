@@ -3,7 +3,7 @@ import { config } from "../config.js";
 
 let client: GoogleGenAI | undefined;
 
-export async function generateJson<T>(prompt: string, schema: object): Promise<T> {
+export async function generateJson<T>(prompt: string, schema: object, systemInstruction?: string): Promise<T> {
   if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is not configured");
   client ??= new GoogleGenAI({ apiKey: config.geminiApiKey });
   const response = await client.models.generateContent({
@@ -13,6 +13,7 @@ export async function generateJson<T>(prompt: string, schema: object): Promise<T
       responseMimeType: "application/json",
       responseJsonSchema: schema,
       temperature: 0.1,
+      ...(systemInstruction ? { systemInstruction } : {}),
     },
   });
   const text = response.text?.trim();

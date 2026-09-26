@@ -28,9 +28,27 @@ export class ConversationMemory {
   rememberPlace(spaceId: string, place: PlaceLocation, role?: "origin" | "destination"): SpaceTravelContext {
     const ctx = this.get(spaceId);
     ctx.recentPlaces = [place, ...ctx.recentPlaces.filter((item) => item.name !== place.name)].slice(0, MAX_PLACES);
-    if (role === "origin") ctx.origin = place;
-    if (role === "destination") ctx.destination = place;
+    if (role === "origin") {
+      ctx.origin = place;
+      ctx.pendingOrigin = undefined;
+    }
+    if (role === "destination") {
+      ctx.destination = place;
+      ctx.pendingDestination = undefined;
+    }
     return ctx;
+  }
+
+  /** Keep a place name that could not be resolved, and drop the previous place for that role. */
+  noteUnresolved(spaceId: string, role: "origin" | "destination", query: string): void {
+    const ctx = this.get(spaceId);
+    if (role === "origin") {
+      ctx.origin = undefined;
+      ctx.pendingOrigin = query;
+    } else {
+      ctx.destination = undefined;
+      ctx.pendingDestination = query;
+    }
   }
 
   setMode(spaceId: string, mode?: TravelMode): void {

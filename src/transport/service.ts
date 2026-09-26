@@ -5,11 +5,13 @@ import {
   formatNearbyReply,
   formatRouteReply,
   groundedTextMatchesRoutes,
+  stripOptionalFollowUps,
 } from "./format.js";
 import { extractMentionedPlaces, extractTransportIntent } from "./intent.js";
 import { displayName, hasCoordinates, lookupGazetteer } from "./locations.js";
 import { logTransportError } from "./log.js";
 import { collectRoutes } from "./routing.js";
+import { applyRoutePreferences, type RoutePreferences } from "./preferences.js";
 import {
   UNGROUNDED_FALLBACK,
   USER_FALLBACK,
@@ -18,6 +20,7 @@ import {
   type MapsSource,
   type PlaceLocation,
   type PlaceResolver,
+  type RouteResult,
   type RoutingProvider,
   type TravelMode,
 } from "./types.js";
@@ -27,12 +30,14 @@ export interface TransportationRequest {
   text: string;
   senderId?: string;
   isGroup?: boolean;
+  preferences?: RoutePreferences;
 }
 
 export interface TransportationResult {
   handled: boolean;
   reply?: string;
   acknowledgement: string;
+  usedGemini?: boolean;
 }
 
 export interface TransportationDependencies {
@@ -60,6 +65,11 @@ export class TransportationService {
     this.resolver = deps.resolver;
     this.gemini = deps.gemini;
     this.routing = deps.routing;
+  }
+
+  hasPlaceContext(spaceId: string): boolean {
+    const ctx = this.memory.get(spaceId);
+    return Boolean(ctx.origin || ctx.destination);
   }
 
   async observe(spaceId: string, text: string, senderId?: string): Promise<void> {
@@ -108,49 +118,67 @@ export class TransportationService {
     }
 
     const destination = await this.resolveRole(spaceId, {
-      query: intent.destinationQuery,
+      query: intent.destinationQuery ?? (ctx.destination ? undefined : ctx.pendingDestination),
       useContext: intent.destinationFromThere || !intent.destinationQuery,
       contextual: ctx.destination,
     });
 
-    if (destination.status === "ambiguous") {
-      return {
+    const destinationKnown = destination.status === "resolved" && Boolean(destination.place);
+    const destinationStep = chooseTransportStep({
+      destinationAmbiguous: destination.status === "ambiguous",
+      originAmbiguous: false,
+      destinationKnown,
+      originKnown: true,
+    });
+    if (destinationStep === "ask-which") {
+      return this.done({
         handled: true,
         acknowledgement: "👀",
         reply: formatClarification("ambiguous", destination.places),
-      };
+      });
     }
-
-    if (destination.status === "unknown" || !destination.place) {
-      return {
+    if (destinationStep === "ask-destination") {
+      return this.done({
         handled: true,
         acknowledgement: "👀",
         reply: intent.destinationQuery
           ? `I couldn’t tell which ${intent.destinationQuery} you mean. Which address should I use?`
           : formatClarification("destination"),
-      };
+      });
     }
 
-    const origin = await this.resolveRole(spaceId, {
-      query: intent.originQuery,
+    let origin = await this.resolveRole(spaceId, {
+      query: intent.originQuery ?? (ctx.origin ? undefined : ctx.pendingOrigin),
       useContext: intent.originFromHere || !intent.originQuery,
       contextual: ctx.origin,
     });
+    if (origin.status === "unknown" && !intent.originFromHere && request.preferences?.defaultOrigin) {
+      const inferred = await this.resolveRole(spaceId, {
+        query: request.preferences.defaultOrigin,
+        useContext: false,
+      });
+      if (inferred.status === "resolved" && inferred.place) origin = inferred;
+    }
 
-    if (origin.status === "ambiguous") {
-      return {
+    const originStep = chooseTransportStep({
+      destinationAmbiguous: false,
+      originAmbiguous: origin.status === "ambiguous",
+      destinationKnown: true,
+      originKnown: origin.status === "resolved" && Boolean(origin.place),
+    });
+    if (originStep === "ask-which") {
+      return this.done({
         handled: true,
         acknowledgement: "👀",
         reply: formatClarification("ambiguous", origin.places),
-      };
+      });
     }
-
-    if (origin.status === "unknown" || !origin.place) {
-      return {
+    if (originStep === "ask-origin" || !origin.place || !destination.place) {
+      return this.done({
         handled: true,
         acknowledgement: "👀",
-        reply: `Where are you starting from to get to ${displayName(destination.place)}? A neighborhood or nearest intersection works.`,
-      };
+        reply: `Where are you starting from to get to ${displayName(destination.place!)}? A neighborhood or nearest intersection works.`,
+      });
     }
 
     this.memory.rememberPlace(spaceId, origin.place, "origin");
@@ -164,13 +192,36 @@ export class TransportationService {
       };
     }
 
-    const modes = modesFor(intent.kind, intent.modes, intent.compareModes);
+    let modes = modesFor(intent.kind, intent.modes, intent.compareModes);
+    if (request.preferences?.preferTransit && !request.preferences.explicitRequest && !modes.includes("TRANSIT")) {
+      modes = ["TRANSIT", ...modes];
+    }
     this.memory.setMode(spaceId, modes[0]);
-    const { routes, failed } = await collectRoutes(this.routing, origin.place, destination.place, modes);
+    const collected = await collectRoutes(this.routing, origin.place, destination.place, modes);
+    const failed = collected.failed;
+    const adjusted = applyRoutePreferences(collected.routes, request.preferences);
+    let routes = adjusted.routes;
+    if (intent.wantsFastest) {
+      routes = [...routes].sort(
+        (a, b) =>
+          (a.durationSeconds ?? Number.MAX_SAFE_INTEGER) - (b.durationSeconds ?? Number.MAX_SAFE_INTEGER),
+      );
+    }
+    const preferenceNote = adjusted.note;
+    const routeReply = () =>
+      formatRouteReply({
+        origin: origin.place!,
+        destination: destination.place!,
+        routes,
+        partySize: intent.partySize ?? ctx.partySize,
+        sources: destination.sources,
+        extraNote: preferenceNote,
+        preferFastest: intent.wantsFastest,
+      });
 
     if (this.routing && routes.length === 0) {
       if (failed) logTransportError("routing", new Error("route lookup failed"));
-      return { handled: true, acknowledgement: "👀", reply: USER_FALLBACK };
+      return this.done({ handled: true, acknowledgement: "👀", reply: USER_FALLBACK });
     }
 
     if (this.gemini) {
@@ -183,81 +234,71 @@ export class TransportationService {
           modes,
           partySize: intent.partySize ?? ctx.partySize,
           bias: hasCoordinates(origin.place) ? origin.place : undefined,
+          preferenceNotes: request.preferences?.notes,
         });
-        const groundedText = grounded.text.trim();
+        const groundedText = withoutUnsupportedRouteClaims(stripOptionalFollowUps(grounded.text.trim()), routes);
         const usable =
           grounded.grounded &&
           groundedText &&
           groundedTextMatchesRoutes(groundedText, routes);
         if (usable) {
-          return {
-            handled: true,
-            acknowledgement: "👍",
-            reply: formatGroundedDirections(groundedText, [...(destination.sources ?? []), ...grounded.sources]),
-          };
+          return this.done(
+            {
+              handled: true,
+              acknowledgement: "👍",
+              reply: formatGroundedDirections(groundedText, [...(destination.sources ?? []), ...grounded.sources]),
+              usedGemini: true,
+            },
+            routes.length > 0 ? routeReply() : undefined,
+          );
         }
         if (routes.length > 0) {
-          return {
+          return this.done({
             handled: true,
             acknowledgement: "👍",
-            reply: formatRouteReply({
-              origin: origin.place,
-              destination: destination.place,
-              routes,
-              partySize: intent.partySize ?? ctx.partySize,
-              sources: destination.sources,
-            }),
-          };
+            reply: routeReply(),
+            usedGemini: true,
+          });
         }
         if (grounded.grounded && grounded.sources.length > 0) {
           const safeSummary =
             `Origin: ${displayName(origin.place)}. Destination: ${displayName(destination.place)}. ` +
             "Google Maps found both places, but I couldn’t verify route details.";
-          return {
+          return this.done({
             handled: true,
             acknowledgement: "👀",
             reply: formatGroundedDirections(safeSummary, grounded.sources),
-          };
+          });
         }
         logTransportError("gemini.ungrounded", new Error("Maps grounding metadata missing"));
-        return { handled: true, acknowledgement: "👀", reply: UNGROUNDED_FALLBACK };
+        return this.done({ handled: true, acknowledgement: "👀", reply: UNGROUNDED_FALLBACK, usedGemini: true });
       } catch (error) {
         logTransportError("gemini.phraseDirections", error);
         if (routes.length > 0) {
-          return {
+          return this.done({
             handled: true,
             acknowledgement: "👍",
-            reply: formatRouteReply({
-              origin: origin.place,
-              destination: destination.place,
-              routes,
-              partySize: intent.partySize ?? ctx.partySize,
-            }),
-          };
+            reply: routeReply(),
+            usedGemini: true,
+          });
         }
-        return { handled: true, acknowledgement: "👀", reply: USER_FALLBACK };
+        return this.done({ handled: true, acknowledgement: "👀", reply: USER_FALLBACK, usedGemini: true });
       }
     }
 
     if (failed && routes.length === 0) {
-      return { handled: true, acknowledgement: "👀", reply: USER_FALLBACK };
+      return this.done({ handled: true, acknowledgement: "👀", reply: USER_FALLBACK });
     }
 
     if (routes.length === 0) {
-      return { handled: true, acknowledgement: "👀", reply: USER_FALLBACK };
+      return this.done({ handled: true, acknowledgement: "👀", reply: USER_FALLBACK });
     }
 
-    return {
+    return this.done({
       handled: true,
       acknowledgement: "👍",
-      reply: formatRouteReply({
-        origin: origin.place,
-        destination: destination.place,
-        routes,
-        partySize: intent.partySize ?? ctx.partySize,
-        sources: destination.sources,
-      }),
-    };
+      reply: routeReply(),
+    });
   }
 
   private async handleNearby(
@@ -266,30 +307,41 @@ export class TransportationService {
     origin?: PlaceLocation,
   ): Promise<TransportationResult> {
     if (!origin) {
-      return { handled: true, acknowledgement: "👀", reply: formatClarification("origin") };
+      return this.done({ handled: true, acknowledgement: "👀", reply: formatClarification("origin") });
     }
     if (!this.gemini) {
-      return {
+      return this.done({
         handled: true,
         acknowledgement: "👀",
         reply: `I know you’re near ${displayName(origin)}, but I need Gemini Maps grounding enabled to look up what’s nearby.`,
-      };
+      });
     }
     try {
       const grounded = await this.gemini.nearby(origin, text);
       this.memory.rememberPlace(spaceId, origin, "origin");
       if (!grounded.grounded) {
-        return { handled: true, acknowledgement: "👀", reply: UNGROUNDED_FALLBACK };
+        return this.done({ handled: true, acknowledgement: "👀", reply: UNGROUNDED_FALLBACK });
       }
-      return {
+      return this.done({
         handled: true,
         acknowledgement: "👍",
-        reply: formatNearbyReply(grounded.text, grounded.sources),
-      };
+        reply: formatNearbyReply(stripOptionalFollowUps(grounded.text), grounded.sources),
+      });
     } catch (error) {
       logTransportError("gemini.nearby", error);
-      return { handled: true, acknowledgement: "👀", reply: USER_FALLBACK };
+      return this.done({ handled: true, acknowledgement: "👀", reply: USER_FALLBACK });
     }
+  }
+
+  private done(result: TransportationResult, fallback?: string): TransportationResult {
+    if (!result.reply) return result;
+    const cleaned = stripOptionalFollowUps(result.reply).trim();
+    if (cleaned) return { ...result, reply: cleaned };
+    if (fallback) {
+      const safe = stripOptionalFollowUps(fallback).trim();
+      if (safe) return { ...result, reply: safe };
+    }
+    return { ...result, reply: USER_FALLBACK };
   }
 
   private async captureMentions(spaceId: string, text: string): Promise<void> {
@@ -298,12 +350,16 @@ export class TransportationService {
       const resolved = await this.resolveQuery(mentions.origin);
       if (resolved.status === "resolved" && resolved.places[0]) {
         this.memory.rememberPlace(spaceId, resolved.places[0], "origin");
+      } else {
+        this.memory.noteUnresolved(spaceId, "origin", mentions.origin);
       }
     }
     if (mentions.destination) {
       const resolved = await this.resolveQuery(mentions.destination);
       if (resolved.status === "resolved" && resolved.places[0]) {
         this.memory.rememberPlace(spaceId, resolved.places[0], "destination");
+      } else {
+        this.memory.noteUnresolved(spaceId, "destination", mentions.destination);
       }
     }
   }
@@ -355,6 +411,23 @@ function samePlace(origin: PlaceLocation, destination: PlaceLocation): boolean {
   return displayName(origin).toLowerCase() === displayName(destination).toLowerCase();
 }
 
+/**
+ * Answer as soon as origin and destination are known.
+ * Ambiguous or missing endpoints are the only clarification steps.
+ */
+export function chooseTransportStep(input: {
+  destinationAmbiguous: boolean;
+  originAmbiguous: boolean;
+  destinationKnown: boolean;
+  originKnown: boolean;
+}): "answer" | "ask-destination" | "ask-origin" | "ask-which" {
+  if (input.destinationAmbiguous) return "ask-which";
+  if (!input.destinationKnown) return "ask-destination";
+  if (input.originAmbiguous) return "ask-which";
+  if (!input.originKnown) return "ask-origin";
+  return "answer";
+}
+
 function modesFor(
   kind: ReturnType<typeof extractTransportIntent>["kind"],
   modes: TravelMode[],
@@ -363,6 +436,16 @@ function modesFor(
   if (kind === "walk-check") return ["WALK", "TRANSIT"];
   if (modes.length > 0) return compareModes && !modes.includes("TRANSIT") ? [...modes, "TRANSIT"] : modes;
   return ["WALK", "TRANSIT"];
+}
+
+/** Gemini-only replies may name the trip. They may not add lines, fares, or times no route payload supports. */
+function withoutUnsupportedRouteClaims(text: string, routes: RouteResult[]): string {
+  if (!text || routes.length > 0) return text;
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence && groundedTextMatchesRoutes(sentence, []))
+    .join(" ");
 }
 
 export function createTransportationService(deps?: TransportationDependencies): TransportationService {

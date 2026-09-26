@@ -52,7 +52,16 @@ function isUsefulPlace(value: string | undefined): value is string {
   if (cleaned.length < 2) return false;
   if (STOP_WORDS.has(cleaned.toLowerCase())) return false;
   if (/^(here|there|it|that|this)$/i.test(cleaned)) return false;
+  if (/^(subway|train|walk|walking|uber|lyft|taxi|cab|bus|metro|bike|biking|transit|car)$/i.test(cleaned)) return false;
   return true;
+}
+
+function trailingDestination(raw: string): string | undefined {
+  const matches = [...raw.matchAll(/\bto\s+([^?.!]+)/gi)];
+  const last = matches.at(-1)?.[1];
+  if (!last) return undefined;
+  const place = stripFiller(last.replace(/\b(?:by|via|using|on)\b.*$/i, ""));
+  return isUsefulPlace(place) ? place : undefined;
 }
 
 function extractPartySize(text: string): number | undefined {
@@ -104,7 +113,7 @@ export function extractTransportIntent(text: string): TransportIntent {
   const toFrom = raw.match(/\bto\s+(.+?)\s+from\s+(.+?)(?:[?.!,:]|$)/i);
   const imAt = raw.match(/\b(?:i(?:['’]m| am)|we(?:['’]re| are))\s+(?:at|in)\s+(.+?)(?:[?.!,:]|$)/i);
   const takeTo = raw.match(/\b(?:take|bring)\s+(?:me|us)\s+to\s+(.+?)(?:[?.!,:]|$)/i);
-  const goTo = raw.match(/\b(?:go|get|head|headed)\s+to\s+(.+?)(?:[?.!,:]|$)/i);
+  const goTo = raw.match(/\b(?:go(?:ing)?|get(?:ting)?|head(?:ing|ed)?)\s+to\s+(.+?)(?:[?.!,:]|$)/i);
   const getTo = raw.match(/\bget\s+(?:me|us)?\s*to\s+(.+?)(?:[?.!,:]|$)/i);
   const shouldGo = raw.match(/\b(?:should|lets|let's|lets)\s+go\s+to\s+(.+?)(?:[?.!,:]|$)/i);
   const weShould = raw.match(/\bwe should go to\s+(.+?)(?:[?.!,:]|$)/i);
@@ -132,6 +141,8 @@ export function extractTransportIntent(text: string): TransportIntent {
     const modeOnly = /^(subway|train|walk|walking|uber|lyft|taxi|cab|bus|metro|bike|biking)$/i.test(place);
     if (!modeOnly && isUsefulPlace(place)) destinationQuery = place;
   }
+
+  if (!destinationQuery) destinationQuery = trailingDestination(raw);
 
   const originFromHere = /\bfrom here\b/i.test(raw) || /\bnear me\b/i.test(raw);
   const destinationFromThere = /\b(there|that (?:place|restaurant|spot)|the place)\b/i.test(raw);
@@ -177,6 +188,7 @@ export function extractTransportIntent(text: string): TransportIntent {
     destinationFromThere,
     modes: resolvedModes,
     compareModes: compare || (walkCheck === false && resolvedModes.length === 0 && Boolean(directions)),
+    wantsFastest: /\bfastest\b/i.test(raw),
     partySize,
     rawPlaceMentions,
   };

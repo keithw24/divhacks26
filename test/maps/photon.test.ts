@@ -86,11 +86,15 @@ describe("Photon inbound path", () => {
   });
 
   it("listener source calls the transportation handler with the chat space id", () => {
-    const source = readFileSync(new URL("../../src/index.ts", import.meta.url), "utf8");
-    expect(source).not.toMatch(/<<<<<<<|>>>>>>>/);
-    expect(source).toContain("transport.handle");
-    expect(source).toContain("transport.observe");
-    expect(source).toContain("space.id");
-    expect(source).toContain("addressedText");
+    const listener = readFileSync(new URL("../../src/index.ts", import.meta.url), "utf8");
+    const inbound = readFileSync(new URL("../../src/agent/inbound.ts", import.meta.url), "utf8");
+    expect(listener).not.toMatch(/<<<<<<<|>>>>>>>/);
+    expect(inbound).not.toMatch(/<<<<<<<|>>>>>>>/);
+    expect(listener).toContain("space.id");
+    expect(listener).toContain("transport,");
+    expect(inbound).toContain("transport.handle");
+    expect(inbound).toContain("transport.observe");
+    expect(inbound).toContain("addressedText");
+    expect(inbound).toContain("message.spaceId");
   });
 });

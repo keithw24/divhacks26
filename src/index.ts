@@ -1,12 +1,16 @@
-import { Spectrum, type Message, type Space } from "spectrum-ts";
+import { Spectrum, type Message } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { terminal } from "spectrum-ts/providers/terminal";
+import { handleInboundMessage } from "./agent/inbound.js";
 import { suggestNext } from "./agent/suggest.js";
-import { errorCategory, runConversationTurn } from "./agent/turn.js";
+import { errorCategory } from "./agent/turn.js";
 import { lastLocation, recordLocation, recordMessage, transcript } from "./chat/context.js";
-import { addressedText } from "./chat/gate.js";
+import { senderDisplayName } from "./chat/invoke.js";
 import { parseLatLng } from "./chat/location.js";
 import { config } from "./config.js";
+import { createBackboardMemoryService } from "./memory/backboard.js";
+import { openAgentStateStore } from "./store/state.js";
+import { createReservationRuntime } from "./reservations/runtime.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
 
 const transport = createTransportationServiceFromEnv({
@@ -14,6 +18,40 @@ const transport = createTransportationServiceFromEnv({
   geminiModel: config.geminiModel,
   googleMapsApiKey: config.googleMapsApiKey,
 });
+const spaceSenders = new Map<string, (text: string) => Promise<unknown>>();
+const agentState = openAgentStateStore(config.agentStatePath);
+const reservations = createReservationRuntime({
+  callMode: config.reservationCallMode,
+  mockScenario: config.reservationMockScenario,
+  allowGazetteerDial: config.reservationAllowGazetteerDial,
+  geminiApiKey: config.geminiApiKey,
+  geminiModel: config.geminiModel,
+  googleMapsApiKey: config.googleMapsApiKey,
+  elevenLabsApiKey: config.elevenLabsApiKey,
+  elevenLabsAgentId: config.elevenLabsAgentId,
+  elevenLabsAgentPhoneNumberId: config.elevenLabsAgentPhoneNumberId,
+  webhookSecret: config.elevenLabsWebhookSecret,
+  timeZone: config.timezone,
+  callTimeoutMs: config.reservationCallTimeoutMs,
+  stateStore: agentState,
+  notify: async (spaceId, text) => {
+    recordMessage(spaceId, config.agentName, text);
+    const send = spaceSenders.get(spaceId);
+    if (!send) {
+      console.info(JSON.stringify({ event: "reservation_result_undelivered", spaceId }));
+      return;
+    }
+    await send(text);
+  },
+});
+const memory = config.backboardApiKey
+  ? createBackboardMemoryService({
+      apiKey: config.backboardApiKey,
+      store: agentState,
+      memoryPro: config.backboardMemoryPro,
+      writeMode: config.backboardMemoryMode,
+    })
+  : undefined;
 
 async function connect() {
   if (config.chatProvider === "imessage") {
@@ -61,36 +99,6 @@ async function readMessage(spaceId: string, who: string, message: Message): Prom
   }
 }
 
-async function reply(space: Space, message: Message, isGroup: boolean, who: string, question: string) {
-  const location = lastLocation(space.id);
-  await runConversationTurn(
-    {
-      spaceId: space.id,
-      senderId: who,
-      direction: "inbound",
-      isGroup,
-      question,
-    },
-    {
-      reply: (text) => message.reply(text),
-      send: (text) => space.send(text),
-      react: (emoji) => message.react(emoji),
-      responding: (fn) => space.responding(fn),
-    },
-    {
-      autoReply: config.autoReply,
-      handleTransport: (request) => transport.handle(request),
-      suggest: (input) => suggestNext(input),
-      transcript: () => transcript(space.id),
-      location,
-      recordAssistant: (text) => recordMessage(space.id, config.agentName, text),
-      noteCoordinates: () => {
-        if (location) transport.noteCoordinates(space.id, location);
-      },
-    },
-  );
-}
-
 /** `npm start -- --text +14155551234` opens a 1:1 iMessage chat with that number and says hi. */
 async function startChatWith(app: Awaited<ReturnType<typeof connect>>, rawNumber: string) {
   if (config.chatProvider !== "imessage") throw new Error("--text needs CHAT_PROVIDER=imessage");
@@ -107,12 +115,23 @@ async function startChatWith(app: Awaited<ReturnType<typeof connect>>, rawNumber
 
 const app = await connect();
 console.log(`${config.agentName} is listening on ${config.chatProvider}`);
+if (!config.backboardApiKey) {
+  console.warn("BACKBOARD_API_KEY is not set; persistent memory is disabled. @agent will use recent group context only.");
+}
 if (!config.geminiApiKey) {
   console.info("GEMINI_API_KEY is not set; transportation and Maps-grounded suggestions will fall back.");
 }
 if (config.googleMapsApiKey) {
   console.info("GOOGLE_MAPS_API_KEY is set; structured Routes/Places will supplement Gemini grounding.");
 }
+console.info(
+  config.reservationCallMode === "live"
+    ? "Reservations: live ElevenLabs outbound calls are enabled."
+    : "Reservations: mock mode (no real phone calls).",
+);
+void reservations.listen(config.reservationWebhookPort).catch((error) => {
+  console.error(`reservation webhook failed to listen: ${errorCategory(error)}`);
+});
 
 const textFlag = process.argv.indexOf("--text");
 if (textFlag !== -1) {
@@ -137,15 +156,65 @@ for await (const [space, message] of app.messages) {
   });
   if (text === null) continue;
 
-  recordMessage(space.id, who, text);
-  if (config.autoReply) {
-    void transport.observe(space.id, text, who).catch((err) => {
-      console.error(`transport observe failed: ${errorCategory(err)}`);
-    });
-  }
-
-  const question = message.content.type === "text" ? addressedText(text, isGroup) : null;
-  if (question === null || !config.autoReply) continue;
-
-  void reply(space, message, isGroup, who, question);
+  const location = lastLocation(space.id);
+  spaceSenders.set(space.id, (replyText) => space.send(replyText));
+  await handleInboundMessage(
+    {
+      spaceId: space.id,
+      messageId: message.id,
+      senderId: who,
+      senderName: senderDisplayName(message.sender),
+      text,
+      timestamp: message.timestamp.toISOString(),
+      isGroup,
+      canInvoke: message.content.type === "text",
+      direction: "inbound",
+      senderKind: message.sender?.kind,
+    },
+    {
+      reply: (replyText) => message.reply(replyText),
+      send: (replyText) => space.send(replyText),
+      react: (emoji) => message.react(emoji),
+      responding: (fn) => space.responding(fn),
+    },
+    {
+      autoReply: config.autoReply,
+      store: agentState,
+      memory,
+      memoryPro: config.backboardMemoryPro,
+      writeMode: config.backboardMemoryMode,
+      verboseMemory: config.backboardVerboseMemory,
+      secrets: [
+        config.backboardApiKey,
+        config.geminiApiKey,
+        config.googleMapsApiKey,
+        config.elevenLabsApiKey,
+        config.elevenLabsWebhookSecret,
+      ].filter(Boolean),
+      reservations: reservations.orchestrator,
+      transport,
+      suggest: (input) => suggestNext(input),
+      transcript: () => transcript(space.id),
+      location,
+      recordChatMessage: recordMessage,
+      recordAssistant: (replyText) => recordMessage(space.id, config.agentName, replyText),
+      noteCoordinates: () => {
+        if (location) transport.noteCoordinates(space.id, location);
+      },
+      loadParticipants: async () => {
+        if (!isGroup) return undefined;
+        try {
+          const members = await space.getMembers();
+          return members.map((member) => ({
+            id: member.id,
+            displayName: senderDisplayName(member),
+          }));
+        } catch {
+          return undefined;
+        }
+      },
+    },
+  ).catch((err) => {
+    console.error(`reply failed: ${errorCategory(err)}`);
+  });
 }

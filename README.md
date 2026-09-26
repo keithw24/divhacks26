@@ -242,6 +242,9 @@ That is how place names, nearby results, and geographic context are resolved.
 | `GEMINI_MODEL` | no | default `gemini-3.8-flash` |
 | `GOOGLE_MAPS_API_KEY` | optional | structured Routes/Places |
 | `DATABASE_URL` | only for Tiger ingest | NYPD crime hypertable |
+| `BACKBOARD_API_KEY` | optional | persistent per-person memory |
+| `BACKBOARD_MEMORY_MODE` | no (default `Auto`) | `Auto`, `Readonly`, or `off` |
+| `BACKBOARD_MEMORY_PRO` | no (default false) | use Memory Pro instead of Memory Lite |
 
 ### Run locally
 
@@ -288,11 +291,182 @@ Agent: Walking is about 40 min.
 Times and station names only appear when Maps grounding or optional Routes
 data actually supported them.
 
+## @agent in a group chat
+
+In a group, ordinary messages are stored as recent context and do not call Gemini.
+Someone invokes the agent by writing `@agent` (any capitalization):
+
+```
+Keith: Want to leave at 6?
+Rohan: Yeah, but I don't like walking through Midtown.
+Rohan: @agent how should we get to Times Square?
+```
+
+The listener keeps the Photon `space.id`, message id, sender id, display name when Photon provides one, timestamp, and participants. The reply goes back to that same space. `@agent` is stripped before reasoning, so the model sees `how should we get to Times Square?`.
+
+Direct chats still reply to normal messages. Group chats still reply when mentioned by `AGENT_NAME`. `@agent` is an additional explicit invocation, not a replacement for that.
+
+### Identity
+
+Each human is keyed by their Photon sender id, not their display name.
+
+```
+Photon sender id → photon:<id> → one Backboard assistant_id
+```
+
+That assistant id is stored in `data/agent-state.json` and reused across group chats, direct chats, and restarts. Each person gets their own assistant so one person's preferences cannot land in someone else's memory. A Photon space is not a Backboard assistant. A Backboard thread is just that person's session inside one space; the memories live on the assistant and are available from every thread.
+
+### Memory
+
+Durable lines such as "I don't eat meat" or "I always take the subway instead of Uber" are sent to that sender's assistant with `memory` set to `Auto` (or `memory_pro` when `BACKBOARD_MEMORY_PRO=true`) and `send_to_llm` false. No iMessage reply is generated for that.
+
+Short chatter such as "lol" or "see you in 5" is not stored. The classifier is local and conservative: `DURABLE_PREFERENCE`, `DURABLE_FACT`, `EPHEMERAL`, or `UNCERTAIN`. Only the first two are ingested.
+
+On `@agent`, Gemini still decides the reply. Backboard is asked for relevant memory with `Readonly` (or `memory_pro=Readonly`). If the request is about the group ("where should all four of us eat?"), other participants are queried separately and each fact stays labeled with that person.
+
+Those memories change decisions. A walk through an area someone avoids is dropped when another route exists. "Get us an Uber" still means a car, even if an older memory prefers the subway. A newer line in the chat ("I've started liking sushi") overrides the older memory.
+
+The group reply should use the preference without announcing where it came from. It should not say that someone revealed a fact in an earlier private chat, and it should not quote another person's unrelated memory.
+
+### Backboard setup
+
+1. Create a key at [app.backboard.io](https://app.backboard.io).
+2. Put it in `.env` as `BACKBOARD_API_KEY`. It is only used on the server. It is never sent to iMessage or written to logs.
+3. Optional: `BACKBOARD_MEMORY_MODE=Auto` and `BACKBOARD_MEMORY_PRO=false`.
+4. `BACKBOARD_VERBOSE_MEMORY=true` prints retrieved memory text. Leave it false.
+
+If `BACKBOARD_API_KEY` is missing, the process still starts, logs one warning, and `@agent` answers from recent group context plus Gemini.
+
+If Backboard times out or returns 401, 403, 429, 500, or malformed JSON, the turn continues with recent chat context and Gemini. The iMessage reply does not include the API error or the key.
+
+### Local testing
+
+```bash
+npm test
+npm run typecheck
+```
+
+Automated tests mock Backboard. They do not need an account.
+
+### Live Backboard check
+
+This is not part of `npm test`.
+
+```bash
+npm run test:backboard-live
+```
+
+With `BACKBOARD_API_KEY` set, it stores a subway preference on one assistant, asks again from a second thread, and checks that the preference comes back. The script prints diagnostics and never prints the key. Without a key it exits without calling the API.
+
+## Restaurant reservations
+
+Photon can collect a reservation and, after an explicit yes, ask ElevenLabs to call the restaurant. The listener, Gemini suggestions, transportation, and per-space memory stay in place. Each reservation is tied to its Photon `space.id`. In-progress reservations are also written into the agent state file (`AGENT_STATE_PATH`, default `data/agent-state.json`) so a restart can still match the ElevenLabs conversation id to that space. One chat cannot see another's restaurant or call.
+
+```
+iMessage
+  → Photon listener
+  → existing turn (reservation, then transportation, then Gemini)
+  → reservation state for that space
+  → Gemini slot extraction when a key is set (text only, not audio)
+  → Google Places phone lookup when GOOGLE_MAPS_API_KEY is set
+  → ElevenLabs outbound call
+  → post-call webhook
+  → the same Photon space
+```
+
+A vague mention such as "I heard Carbone is good" does not place a call. "Call them" uses the restaurant mentioned in that space. Directions such as "How do I get to Carbone?" still go to transportation.
+
+### ElevenLabs
+
+Official docs used:
+
+- [Outbound call via Twilio](https://elevenlabs.io/docs/api-reference/integrations/twilio/outbound-call) — `POST https://api.elevenlabs.io/v1/convai/twilio/outbound-call` with `xi-api-key`, `agent_id`, `agent_phone_number_id`, `to_number`, and `conversation_initiation_client_data` (dynamic variables plus the per-call system prompt and first message).
+- [Personalization](https://elevenlabs.io/docs/eleven-agents/customization/personalization) — `conversation_config_override` and `dynamic_variables`. Overrides must be enabled on the agent Security tab or the dashboard prompt is used instead.
+- [Post-call webhooks](https://elevenlabs.io/docs/eleven-agents/workflows/post-call-webhooks) — `post_call_transcription` and `call_initiation_failure`. Audio webhooks should be turned off. Authenticity is HMAC-SHA256 over `timestamp.rawBody`, header `ElevenLabs-Signature: t=<unix>,v0=<hex>`, 30-minute window, matching the official SDK `constructEvent`.
+
+The voice agent is prompted as an AI assistant calling on behalf of the customer. It does not claim to be the customer. It may accept a time only inside the window the user authorized.
+
+Dashboard setup:
+
+1. Create a Conversational AI agent and a Twilio number linked to it.
+2. Copy the agent id and the agent phone number id.
+3. Enable system prompt and first message overrides on the agent Security tab.
+4. Add a post-call webhook in ElevenAgents settings pointing at `https://<your-host>/webhooks/elevenlabs`.
+5. Put the webhook signing secret in `ELEVENLABS_WEBHOOK_SECRET`.
+6. Turn off "Send audio data". Transcription and call-initiation failure events are the ones this app uses.
+
+The local listener serves `POST /webhooks/elevenlabs` on `RESERVATION_WEBHOOK_PORT` (default `8787`). For a laptop demo, expose that port with a tunnel so ElevenLabs can reach it.
+
+### Environment
+
+| Variable | Default | Used for |
+| --- | --- | --- |
+| `RESERVATION_CALL_MODE` | `mock` | `mock` or `live` |
+| `RESERVATION_MOCK_SCENARIO` | `alternative_within_window` | Simulated restaurant outcome |
+| `RESERVATION_WEBHOOK_PORT` | `8787` | Local webhook listener |
+| `RESERVATION_CALL_TIMEOUT_MS` | `600000` | Wait for a terminal webhook before `CALL_FAILED`. Values under one minute are ignored |
+| `RESERVATION_ALLOW_GAZETTEER_DIAL` | false | Allow the built-in 555-number directory when live |
+| `ELEVENLABS_API_KEY` | | `xi-api-key` |
+| `ELEVENLABS_AGENT_ID` | | `agent_id` |
+| `ELEVENLABS_AGENT_PHONE_NUMBER_ID` | | `agent_phone_number_id` |
+| `ELEVENLABS_WEBHOOK_SECRET` | | HMAC secret |
+| `GOOGLE_MAPS_API_KEY` | | Verified restaurant phone via Places `places:searchText` |
+
+`RESERVATION_CALL_MODE` defaults to `mock`. Mock mode records the call payload and finishes it in-process. It does not contact ElevenLabs or a restaurant. The built-in directory uses NANP 555 numbers so a misconfigured live flag still does not reach L'Artusi.
+
+Live mode dials only after the user confirms, and only a phone number returned by Google Places (`internationalPhoneNumber` or `nationalPhoneNumber`, source `places`). A number typed by the user or produced by Gemini is ignored. Set `RESERVATION_ALLOW_GAZETTEER_DIAL=true` only if you intentionally want the local 555 directory.
+
+### Mock mode
+
+```bash
+RESERVATION_CALL_MODE=mock npm run dev
+```
+
+Then, in the terminal chat:
+
+```
+Let's go to L'Artusi Friday.
+4 people. 8 would be ideal, anything 7:30-8:30 works.
+Rohan.
+Yes.
+```
+
+Photon asks for whatever is missing, confirms, says it is calling, and the mock scenario replies. `alternative_within_window` books 7:45. Other scenarios: `exact_time`, `alternative_outside_window`, `fully_booked`, `asks_for_name`, `asks_for_phone`, `voicemail`, `no_answer`, `api_error`, `malformed_completion`.
+
+A full mock lifecycle, using the same orchestrator and webhook path and dialing nobody:
+
+```bash
+npm run demo:reservation
+```
+
+### Tests without calling
+
+```bash
+npm test
+npm run typecheck
+```
+
+Reservation tests use the mock caller and a fake Places client. They never dial.
+
+### Controlled live test
+
+Do this only when you mean to call a real restaurant.
+
+1. Set `RESERVATION_CALL_MODE=live`, `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `ELEVENLABS_AGENT_PHONE_NUMBER_ID`, `ELEVENLABS_WEBHOOK_SECRET`, and `GOOGLE_MAPS_API_KEY`.
+2. Leave `RESERVATION_ALLOW_GAZETTEER_DIAL` unset.
+3. Start the listener and tunnel port `8787` to the webhook URL configured in ElevenLabs.
+4. In a Photon chat, name a restaurant, give party size, date, time window, and name, then answer yes to "Want me to call?"
+5. Photon sends "Calling … now." The webhook later posts the result back into that same space.
+
+A second copy of the same Photon confirmation does not start a second call. A second webhook for the same conversation does not send a second result.
+
 ### Current limitations
 
-- In-memory context only (clears on process restart). Backboard is not wired.
+- Recent chat and the Photon user → Backboard assistant map are stored in `data/agent-state.json`. Transportation place memory inside a space is still in-process and clears on restart.
+- Backboard extraction is asynchronous. A fact from the same second as `@agent` is also applied locally when the chat text contradicts older memory.
 - Shared-pool Photon lines have limited group-event support; DMs work on all plans.
 - Location pins are parsed when they contain NYC coordinates; other attachments are ignored.
 - Ambiguous chains like “Joe’s Pizza” ask one short clarification.
 - Destinations outside NYC are labeled; the agent will not invent a route.
 - Event, food, and safety requests use the unified skill orchestrator; transportation requests use the dedicated context-aware handler.
+- Participant memory is retrieved only for group requests that are clearly about the group (everyone, dinner for us, and similar). A one-person directions question does not pull other people's memories.
