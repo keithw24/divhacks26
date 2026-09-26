@@ -12,6 +12,9 @@ import { createBackboardMemoryService } from "./memory/backboard.js";
 import { openAgentStateStore } from "./store/state.js";
 import { createReservationRuntime } from "./reservations/runtime.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
+import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
+
+const UNHEARD_VOICE_MEMO = "[sent a voice memo]";
 
 const transport = createTransportationServiceFromEnv({
   geminiApiKey: config.geminiApiKey,
@@ -94,6 +97,14 @@ async function readMessage(spaceId: string, who: string, message: Message): Prom
       }
       return `[sent ${content.mimeType || "a file"}]`;
     }
+    case "voice": {
+      // Transcribed with ElevenLabs when configured; otherwise just noted in the transcript.
+      const said = await transcribeVoiceMemo(content).catch((err) => {
+        console.error(`voice transcription failed: ${errorCategory(err)} ${err instanceof Error ? err.message : ""}`);
+        return null;
+      });
+      return said ?? UNHEARD_VOICE_MEMO;
+    }
     default:
       return null;
   }
@@ -121,6 +132,11 @@ if (!config.backboardApiKey) {
 if (!config.geminiApiKey) {
   console.info("GEMINI_API_KEY is not set; transportation and Maps-grounded suggestions will fall back.");
 }
+console.info(
+  voiceEnabled()
+    ? `ElevenLabs voice on (voice replies: ${config.voiceReplies}).`
+    : "ELEVENLABS_API_KEY is not set; voice memos won't be transcribed.",
+);
 if (config.googleMapsApiKey) {
   console.info("GOOGLE_MAPS_API_KEY is set; structured Routes/Places will supplement Gemini grounding.");
 }
@@ -156,6 +172,8 @@ for await (const [space, message] of app.messages) {
   });
   if (text === null) continue;
 
+  const isVoice = message.content.type === "voice";
+  const canInvoke = message.content.type === "text" || (isVoice && text !== UNHEARD_VOICE_MEMO);
   const location = lastLocation(space.id);
   spaceSenders.set(space.id, (replyText) => space.send(replyText));
   await handleInboundMessage(
@@ -167,7 +185,7 @@ for await (const [space, message] of app.messages) {
       text,
       timestamp: message.timestamp.toISOString(),
       isGroup,
-      canInvoke: message.content.type === "text",
+      canInvoke,
       direction: "inbound",
       senderKind: message.sender?.kind,
     },
@@ -197,7 +215,14 @@ for await (const [space, message] of app.messages) {
       transcript: () => transcript(space.id),
       location,
       recordChatMessage: recordMessage,
-      recordAssistant: (replyText) => recordMessage(space.id, config.agentName, replyText),
+      recordAssistant: (replyText) => {
+        recordMessage(space.id, config.agentName, replyText);
+        if (wantsVoiceReply(config.voiceReplies, isVoice)) {
+          void sendVoiceReply(space, replyText).catch((err) => {
+            console.error(`voice reply failed: ${errorCategory(err)} ${err instanceof Error ? err.message : ""}`);
+          });
+        }
+      },
       noteCoordinates: () => {
         if (location) transport.noteCoordinates(space.id, location);
       },

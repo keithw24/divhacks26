@@ -15,6 +15,7 @@ export interface SafetyInput {
 
 export async function getSafety(input: SafetyInput): Promise<SkillResult<BlockSafetyReport | null>> {
   if (!input.databaseUrl) {
+    console.info("tiger: skipped (no DATABASE_URL)");
     return {
       status: "unavailable",
       data: null,
@@ -33,9 +34,14 @@ export async function getSafety(input: SafetyInput): Promise<SkillResult<BlockSa
       hourEt,
       clock.asOfEt,
     );
+    const vsNyc = report.baselines.hourVsNyc;
+    const vsNycLabel = vsNyc == null ? "n/a" : `${vsNyc.toFixed(2)}x NYC`;
+    console.info(
+      `tiger: queried nypd_complaints (${input.origin.label}, ${hourEt}:00 ET, ${vsNycLabel})`,
+    );
     return {
       status: "ok",
-      data: report,
+      data: { ...report, placeLabel: input.origin.label },
       sources: [
         {
           name: "NYPD Complaint Data via Tiger Data",
@@ -43,9 +49,10 @@ export async function getSafety(input: SafetyInput): Promise<SkillResult<BlockSa
           updatedAt: report.asOfEt,
         },
       ],
-      warnings: ["Historical public reports are context, not a live safety score."],
+      warnings: ["Historical public context is not a live safety score."],
     };
   } catch (error) {
+    console.info("tiger: skipped (query failed)");
     console.error("safety skill failed:", error);
     return {
       status: "unavailable",

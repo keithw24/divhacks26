@@ -39,6 +39,12 @@ export const config = {
   elevenLabsAgentId: env("ELEVENLABS_AGENT_ID"),
   elevenLabsAgentPhoneNumberId: env("ELEVENLABS_AGENT_PHONE_NUMBER_ID") || env("ELEVENLABS_PHONE_NUMBER_ID"),
   elevenLabsWebhookSecret: env("ELEVENLABS_WEBHOOK_SECRET") || env("WEBHOOK_SECRET"),
+  // ElevenLabs voice: transcribe inbound voice memos, optionally answer with a voice memo.
+  elevenLabsVoiceId: env("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb"),
+  elevenLabsTtsModel: env("ELEVENLABS_TTS_MODEL", "eleven_multilingual_v2"),
+  elevenLabsSttModel: env("ELEVENLABS_STT_MODEL", "scribe_v2"),
+  /** "match" = answer voice memos with a voice memo; "always"; "off". */
+  voiceReplies: env("VOICE_REPLIES", "match") as "match" | "always" | "off",
 };
 
 function memoryMode(value: string): "Auto" | "Readonly" | "off" {

@@ -1,4 +1,5 @@
 import type { Recommendation, RouteResult, SkillResult } from "../domain/contracts.js";
+import { formatSafetyReply } from "../formatReport.js";
 import type { BlockSafetyReport } from "../safety.js";
 import { generateJson } from "./gemini.js";
 
@@ -81,10 +82,17 @@ export function renderResponse(input: {
 
   const report = input.safety?.data;
   if (report) {
-    const comparison = report.peakHour == null
-      ? "No hourly comparison was available."
-      : `${report.hourNeighborhoodCount} reports at this hour vs a ${report.peakHourCount}-report peak around ${report.peakHour}:00.`;
-    lines.push(`Safety context: ${comparison} Historical NYPD reports, not a live safety score.`);
+    lines.push(
+      formatSafetyReply(
+        {
+          label: report.placeLabel || "this area",
+          latitude: report.latitude,
+          longitude: report.longitude,
+          locality: null,
+        },
+        report,
+      ),
+    );
   }
   if (input.route) {
     lines.push(`Route: ${input.route.data.summary}`);

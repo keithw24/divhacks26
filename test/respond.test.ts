@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatSafetyReply } from "../src/formatReport.js";
 import { parseCoordinates, locationQueryFromMessage } from "../src/geocode.js";
-import { parseRequestedHour } from "../src/safety.js";
+import { computeBaselines, parseRequestedHour } from "../src/safety.js";
 import { wantsSafetySketch } from "../src/safetyIntent.js";
 
 describe("location parsing", () => {
@@ -76,6 +76,14 @@ function sampleReport(overrides: Partial<Parameters<typeof formatSafetyReply>[1]
       hourNeighborhoodCount: 0,
       openNeighborhood: 2,
     },
+    baselines: {
+      borough: "MANHATTAN",
+      areaVsNyc: 0.85,
+      hourVsNyc: 0.2,
+      hourVsArea: 0.15,
+      areaVsBorough: 0.7,
+      hourVsBorough: 0.25,
+    },
     ...overrides,
   };
 }
@@ -93,20 +101,50 @@ describe("formatSafetyReply", () => {
     expect(text).toContain("Columbia University");
     expect(text).toContain("past 2 years");
     expect(text).toContain("relatively safe");
-    expect(text).toContain("block midpoint");
+    expect(text).toContain("typical NYC");
+    expect(text).toContain("neighborhood");
+    expect(text).toContain("personal-risk");
     expect(text).not.toContain("HARRASSMENT");
-    expect(text).not.toMatch(/Shootings|Crashes|311|precinct/i);
+    expect(text).not.toMatch(/Shootings|Crashes|311|precinct|reports at this hour/i);
   });
 
-  it("flags extra caution when serious activity hits that hour", () => {
+  it("flags extra caution when this hour is well above NYC and the area", () => {
     const text = formatSafetyReply(
       place,
       sampleReport({
         hourEt: 23,
         hourNeighborhoodFelonies: 4,
         shootings: { blockCount: 0, neighborhoodCount: 12, hourBlockCount: 0, hourNeighborhoodCount: 2 },
+        baselines: {
+          borough: "MANHATTAN",
+          areaVsNyc: 1.8,
+          hourVsNyc: 2.4,
+          hourVsArea: 2.1,
+          areaVsBorough: 1.6,
+          hourVsBorough: 2.2,
+        },
       }),
     );
     expect(text).toContain("extra caution");
+    expect(text).toContain("busier than typical NYC");
+    expect(text).not.toMatch(/\d+ reports/i);
+  });
+});
+
+describe("computeBaselines", () => {
+  it("marks a quiet hour below the city and area averages", () => {
+    const baselines = computeBaselines({
+      neighborhoodMeters: 800,
+      neighborhoodCount: 40,
+      hourNeighborhoodCount: 0,
+      cityComplaints: 20_000,
+      cityHourComplaints: 900,
+      borough: "MANHATTAN",
+      boroughComplaints: 6_000,
+      boroughHourComplaints: 250,
+    });
+    expect(baselines.hourVsNyc).not.toBeNull();
+    expect(baselines.hourVsNyc ?? 1).toBeLessThan(0.7);
+    expect(baselines.hourVsArea ?? 1).toBeLessThan(0.7);
   });
 });
