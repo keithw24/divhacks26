@@ -56,6 +56,16 @@ export const config = {
   xrplTestnetUrl: env("XRPL_TESTNET_URL", "wss://s.altnet.rippletest.net:51233"),
   xrplTestnetSeed: env("XRPL_TESTNET_SEED"),
   paymentsRecipientsJson: env("PAYMENTS_RECIPIENTS_JSON"),
+  // Website API (sign-in codes over iMessage, onboarding). WEB_API_PORT=off disables it.
+  webApiPort: env("WEB_API_PORT", "8788"),
+  webAllowedOrigins: env("WEB_ALLOWED_ORIGINS", "http://localhost:5174,http://localhost:8080")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+  webMaxUsers: positiveNumber(env("WEB_MAX_USERS", "100"), 100),
+  webAuthSecret: env("WEB_AUTH_SECRET"),
+  webStatePath: env("WEB_STATE_PATH", "data/web-users.json"),
+  agentNumber: env("AGENT_NUMBER", "+14155951440"),
 };
 
 function paymentsMode(value: string): "mock" | "ripple_test" {

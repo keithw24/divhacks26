@@ -14,6 +14,8 @@ import { createPaymentRuntime } from "./payments/runtime.js";
 import { createReservationRuntime } from "./reservations/runtime.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
+import { createBackboardClient } from "./backboard/client.js";
+import { startWebRuntime } from "./web/runtime.js";
 
 const UNHEARD_VOICE_MEMO = "[sent a voice memo]";
 
@@ -166,6 +168,30 @@ if (config.paymentsMode === "ripple_test") {
 } else {
   console.info("Payments: mock mode (no Ripple transaction is submitted).");
 }
+const web =
+  config.webApiPort === "off"
+    ? undefined
+    : startWebRuntime({
+        port: Number(config.webApiPort) || 8788,
+        statePath: config.webStatePath,
+        maxUsers: config.webMaxUsers,
+        allowedOrigins: config.webAllowedOrigins,
+        secret: config.webAuthSecret,
+        agentName: config.agentName,
+        agentNumber: config.agentNumber,
+        async sendText(phone, text) {
+          if (config.chatProvider !== "imessage") {
+            // Local development without iMessage: print instead of sending (includes login codes).
+            console.info(`[dev] text to ${phone.slice(0, 2)}•••${phone.slice(-4)}: ${text}`);
+            return;
+          }
+          const space = await imessage(app as never).space.create(phone);
+          await space.send(text);
+        },
+        memory,
+        backboard: config.backboardApiKey ? createBackboardClient({ apiKey: config.backboardApiKey }) : undefined,
+        agentState,
+      });
 void reservations.listen(config.reservationWebhookPort).catch((error) => {
   console.error(`reservation webhook failed to listen: ${errorCategory(error)}`);
 });
@@ -245,7 +271,8 @@ for await (const [space, message] of app.messages) {
       recordChatMessage: recordMessage,
       recordAssistant: (replyText) => {
         recordMessage(space.id, config.agentName, replyText);
-        if (wantsVoiceReply(config.voiceReplies, isVoice)) {
+        // A signed-up user's own voice setting from the website wins over the global default.
+        if (wantsVoiceReply(web?.voicePreference(who) ?? config.voiceReplies, isVoice)) {
           void sendVoiceReply(space, replyText).catch((err) => {
             console.error(`voice reply failed: ${errorCategory(err)} ${err instanceof Error ? err.message : ""}`);
           });
