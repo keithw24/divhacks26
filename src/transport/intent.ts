@@ -1,4 +1,5 @@
 import type { TransportIntent, TravelMode } from "./types.js";
+import { wantsSafetySketch } from "../safetyIntent.js";
 
 const NUMBER_WORDS: Record<string, number> = {
   one: 1,
@@ -83,6 +84,21 @@ function extractModes(text: string): { modes: TravelMode[]; compare: boolean } {
 export function extractTransportIntent(text: string): TransportIntent {
   const raw = collapse(text);
   const lower = raw.toLowerCase();
+
+  if (wantsSafetySketch(raw)) {
+    return {
+      isTransport: false,
+      kind: undefined,
+      originQuery: undefined,
+      destinationQuery: undefined,
+      originFromHere: false,
+      destinationFromThere: false,
+      modes: [],
+      compareModes: false,
+      partySize: undefined,
+      rawPlaceMentions: [],
+    };
+  }
 
   const fromTo = raw.match(/\bfrom\s+(.+?)\s+to\s+(.+?)(?:[?.!,:]|$)/i);
   const toFrom = raw.match(/\bto\s+(.+?)\s+from\s+(.+?)(?:[?.!,:]|$)/i);

@@ -42,53 +42,71 @@ describe("wantsSafetySketch", () => {
   });
 });
 
+function sampleReport(overrides: Partial<Parameters<typeof formatSafetyReply>[1]> = {}) {
+  return {
+    latitude: 40.80775,
+    longitude: -73.96249,
+    hourEt: 23,
+    asOfEt: "Sat, Sep 26, 11:40 AM EDT",
+    years: 2,
+    hourNeighborhoodFelonies: 0,
+    blockMeters: 250,
+    neighborhoodMeters: 800,
+    blockCount: 1,
+    neighborhoodCount: 60,
+    hourBlockCount: 0,
+    hourNeighborhoodCount: 0,
+    peakHour: 14,
+    peakHourCount: 8,
+    neighborhoodByHour: [],
+    topOffenses: [{ offense: "HARRASSMENT 2", lawCategory: "VIOLATION", n: 13 }],
+    precincts: [{ precinct: 26, borough: "MANHATTAN", n: 40 }],
+    shootings: { blockCount: 0, neighborhoodCount: 1, hourBlockCount: 0, hourNeighborhoodCount: 0 },
+    collisions: {
+      blockCount: 0,
+      neighborhoodCount: 12,
+      hourBlockCount: 0,
+      hourNeighborhoodCount: 1,
+      pedCycHurt: 3,
+    },
+    lights: {
+      blockCount: 0,
+      neighborhoodCount: 8,
+      hourBlockCount: 0,
+      hourNeighborhoodCount: 0,
+      openNeighborhood: 2,
+    },
+    ...overrides,
+  };
+}
+
 describe("formatSafetyReply", () => {
-  it("includes block, hour, and a data caveat", () => {
-    const text = formatSafetyReply(
-      {
-        label: "Columbia University, Morningside Heights",
-        latitude: 40.80775,
-        longitude: -73.96249,
-        locality: "Morningside Heights",
-      },
-      {
-        latitude: 40.80775,
-        longitude: -73.96249,
-        hourEt: 11,
-        asOfEt: "Sat, Sep 26, 11:40 AM EDT",
-        blockMeters: 250,
-        neighborhoodMeters: 800,
-        blockCount: 1,
-        neighborhoodCount: 60,
-        hourBlockCount: 0,
-        hourNeighborhoodCount: 0,
-        peakHour: 14,
-        peakHourCount: 8,
-        neighborhoodByHour: [],
-        topOffenses: [
-          { offense: "HARRASSMENT 2", lawCategory: "VIOLATION", n: 13 },
-        ],
-        precincts: [{ precinct: 26, borough: "MANHATTAN", n: 40 }],
-        shootings: { blockCount: 0, neighborhoodCount: 1, hourBlockCount: 0, hourNeighborhoodCount: 0 },
-        collisions: {
-          blockCount: 0,
-          neighborhoodCount: 12,
-          hourBlockCount: 0,
-          hourNeighborhoodCount: 1,
-          pedCycHurt: 3,
-        },
-        lights: {
-          blockCount: 0,
-          neighborhoodCount: 8,
-          hourBlockCount: 0,
-          hourNeighborhoodCount: 0,
-          openNeighborhood: 2,
-        },
-      },
-    );
+  const place = {
+    label: "Columbia University, Morningside Heights",
+    latitude: 40.80775,
+    longitude: -73.96249,
+    locality: "Morningside Heights",
+  };
+
+  it("gives a short 2-year verdict, not incident lists", () => {
+    const text = formatSafetyReply(place, sampleReport({ hourEt: 11 }));
     expect(text).toContain("Columbia University");
+    expect(text).toContain("past 2 years");
+    expect(text).toContain("relatively safe");
     expect(text).toContain("block midpoint");
-    expect(text).toContain("2pm");
-    expect(text).toContain("Shootings");
+    expect(text).not.toContain("HARRASSMENT");
+    expect(text).not.toMatch(/Shootings|Crashes|311|precinct/i);
+  });
+
+  it("flags extra caution when serious activity hits that hour", () => {
+    const text = formatSafetyReply(
+      place,
+      sampleReport({
+        hourEt: 23,
+        hourNeighborhoodFelonies: 4,
+        shootings: { blockCount: 0, neighborhoodCount: 12, hourBlockCount: 0, hourNeighborhoodCount: 2 },
+      }),
+    );
+    expect(text).toContain("extra caution");
   });
 });

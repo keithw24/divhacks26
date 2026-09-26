@@ -38,7 +38,7 @@ export function buildContext(input: SuggestInput): string {
   }
 
   if (input.citySketch) {
-    lines.push("", "City complaint sketch (NYPD Open Data via Tiger, block-snapped):", input.citySketch);
+    lines.push("", "City safety summary (past 2 years, Open Data via Tiger — paraphrase, do not list incidents):", input.citySketch);
   }
 
   if (input.transcript.length) {
@@ -114,7 +114,7 @@ async function generateWithGemini(input: SuggestInput, citySketch: string | unde
     model,
     contents: [{ role: "user", parts: [{ text: buildContext({ ...input, citySketch }) }] }],
     config: {
-      systemInstruction: systemPrompt(input.isGroup),
+      systemInstruction: systemPrompt(input.isGroup, wantsSafetySketch(input.question) ? "safety" : "hangout"),
       ...(useMaps ? { tools: [{ googleMaps: {} }] } : {}),
       ...(useMaps && input.location
         ? {

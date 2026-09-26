@@ -117,6 +117,11 @@ describe("transport intent", () => {
     expect(intent.originQuery?.toLowerCase()).toContain("columbia");
     expect(intent.destinationQuery?.toLowerCase()).toContain("times square");
   });
+
+  it("does not treat a safety question as directions", () => {
+    expect(extractTransportIntent("is columbia safe at 11pm").isTransport).toBe(false);
+    expect(extractTransportIntent("is it safe there").isTransport).toBe(false);
+  });
 });
 
 describe("transportation service", () => {
