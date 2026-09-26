@@ -20,11 +20,21 @@ export interface DirectoryEntry {
   phoneSource: TrustedPhoneSource;
 }
 
+/** Fictional demo restaurant served by RippleBistroProvider. It requires a deposit. */
+export const RIPPLE_BISTRO: DirectoryEntry = {
+  name: "Ripple Bistro",
+  address: "1 Ledger Ln, New York, NY 10004",
+  phone: "+12125550106",
+  placeId: "demo-ripple-bistro",
+  phoneSource: "gazetteer",
+};
+
 /**
  * Development directory. Numbers are reserved 555 test numbers, not live restaurants.
  * Live dialing uses Google Places unless gazetteer dialing is explicitly enabled.
  */
 export const DEMO_RESTAURANTS: DirectoryEntry[] = [
+  RIPPLE_BISTRO,
   {
     name: "L'Artusi",
     address: "228 W 10th St, New York, NY 10014",

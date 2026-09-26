@@ -33,6 +33,15 @@ export interface PaymentRecord {
   submittedDrops?: string;
   createdAt: string;
   updatedAt: string;
+  /** Person transfers are the default. Reservation deposits are merchant payments linked to a booking. */
+  purpose?: "PERSON_TRANSFER" | "RESERVATION_DEPOSIT";
+  recipientKind?: "PERSON" | "MERCHANT";
+  parentReservationId?: string;
+  /** Set when a person transfer settles between customer wallets on XRPL Testnet. */
+  settlement?: "XRPL_TESTNET_CUSTOMER_WALLET";
+  senderCustomerId?: string;
+  recipientCustomerId?: string;
+  explorerUrl?: string;
 }
 
 export interface PaymentSendInput {

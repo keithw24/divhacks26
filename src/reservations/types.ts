@@ -1,6 +1,17 @@
+import type {
+  PaymentGuardDecision,
+  PaymentHistoryEntry,
+  PaymentRequirementSource,
+  ReservationPaymentProof,
+  ReservationPaymentRequirement,
+  ReservationPaymentState,
+  ReservationPaymentType,
+} from "./payment.js";
+
 export type ReservationStatus =
   | "COLLECTING_DETAILS"
   | "READY_FOR_CONFIRMATION"
+  | "AWAITING_DEPOSIT"
   | "CONFIRMED_BY_USER"
   | "CALLING"
   | "AWAITING_RESTAURANT"
@@ -24,7 +35,8 @@ export type PendingQuestion =
   | "name"
   | "confirm"
   | "phone"
-  | "offer";
+  | "offer"
+  | "deposit";
 
 export interface RestaurantIdentity {
   name: string;
@@ -51,6 +63,21 @@ export interface ReservationResult {
   restaurantMessage?: string;
   questionForUser?: string;
   offeredTime?: string;
+  /** The restaurant asked for money on the call and stated the amount itself. */
+  paymentRequired?: {
+    paymentType: ReservationPaymentType;
+    amountUsd: number;
+    perPersonUsd?: number;
+  };
+  /** Set only after the deposit validated on XRPL Testnet. */
+  payment?: {
+    network: "xrpl-testnet";
+    status: "validated";
+    amountXrp: number;
+    transactionHash: string;
+    ledgerIndex: number | null;
+    explorerUrl: string | null;
+  };
 }
 
 export interface ReservationCall {
@@ -94,6 +121,44 @@ export interface ReservationRequest {
   phoneChecked?: boolean;
   /** Photon message id that already confirmed this attempt. Duplicate events do not dial again. */
   confirmationMessageId?: string;
+  /** Photon sender who started this reservation. Only they can authorize a payment for it. */
+  requester?: { senderId?: string; senderName?: string };
+  /**
+   * Deposit required before this reservation can be booked.
+   * `source: "demo"` is configured fixture data, not a live restaurant policy.
+   */
+  deposit?: ReservationDepositState;
+}
+
+export interface ReservationDepositState {
+  required: boolean;
+  source: PaymentRequirementSource;
+  amountUsd?: number;
+  description?: string;
+  paymentType?: ReservationPaymentType;
+  /** Grounded terms of the payment. Set only when every field came from a trusted source. */
+  requirement?: ReservationPaymentRequirement;
+  state?: ReservationPaymentState;
+  history?: PaymentHistoryEntry[];
+  paymentId?: string;
+  /** PENDING: submitted to XRPL, not validated yet. Never paid again and never treated as failed. */
+  status?: "AWAITING_PAYMENT" | "PAID" | "FAILED" | "CANCELLED" | "UNCERTAIN" | "REJECTED" | "PENDING";
+  initiatorId?: string;
+  initiatorName?: string;
+  transactionId?: string;
+  ledgerResult?: string;
+  senderAddress?: string;
+  paidAt?: string;
+  policy?: PaymentGuardDecision;
+  /** Latest XRPL payment evidence, including a pending hash. */
+  proof?: ReservationPaymentProof;
+  /** Code behind the last failure or refusal. For traces, not for the user. */
+  failureCode?: string;
+  bookingAttemptId?: string;
+  /** When set, the booking result is returned on the payment turn instead of a second message. */
+  quietResult?: boolean;
+  lastReply?: string;
+  confirmMessageId?: string;
 }
 
 export interface ReservationExtraction {

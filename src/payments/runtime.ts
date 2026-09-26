@@ -5,6 +5,7 @@ import { loadRecipientDirectory } from "./recipients.js";
 import { createRippleTestProvider } from "./ripple.js";
 import { PaymentService } from "./service.js";
 import { PaymentStore } from "./state.js";
+import type { CustomerSettlementPort } from "./xrpl/settlement.js";
 
 export interface PaymentRuntimeEnv {
   mode: "mock" | "ripple_test";
@@ -17,6 +18,8 @@ export interface PaymentRuntimeEnv {
   geminiApiKey?: string;
   geminiModel?: string;
   stateStore?: StateStore;
+  /** ripple_test only. Person transfers settle between customer wallets instead of the shared seed. */
+  settlement?: CustomerSettlementPort;
 }
 
 export function createPaymentRuntime(env: PaymentRuntimeEnv) {
@@ -41,6 +44,7 @@ export function createPaymentRuntime(env: PaymentRuntimeEnv) {
     maxUsd: env.maxUsd,
     timeoutMs: env.timeoutMs,
     interpreter,
+    settlement: env.mode === "ripple_test" ? env.settlement : undefined,
   });
   return { service, provider };
 }

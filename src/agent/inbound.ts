@@ -58,6 +58,7 @@ export interface InboundDeps {
     handleTurn(input: {
       spaceId: string;
       senderId?: string;
+      senderName?: string;
       text: string;
       messageId?: string;
     }): Promise<ReservationHandlerResult>;
@@ -71,6 +72,17 @@ export interface InboundDeps {
       text: string;
       messageId?: string;
       recentTexts?: string[];
+    }): Promise<ReservationHandlerResult>;
+  };
+  ticketing?: {
+    handleTurn(input: {
+      spaceId: string;
+      senderId?: string;
+      senderName?: string;
+      text: string;
+      messageId?: string;
+      phase: "priority" | "fallback";
+      location?: { latitude: number; longitude: number };
     }): Promise<ReservationHandlerResult>;
   };
 }
@@ -188,6 +200,7 @@ export async function handleInboundMessage(
             deps.reservations!.handleTurn({
               spaceId: request.spaceId,
               senderId: request.senderId,
+              senderName: request.senderName,
               text: request.text,
               messageId: message.messageId,
             })
@@ -205,11 +218,28 @@ export async function handleInboundMessage(
                 .map((line) => line.text),
             })
         : undefined,
+      handleTicketing: deps.ticketing
+        ? (request) =>
+            deps.ticketing!.handleTurn({
+              spaceId: request.spaceId,
+              senderId: request.senderId,
+              senderName: message.senderName,
+              text: request.text,
+              messageId: message.messageId,
+              phase: request.phase,
+              location: deps.location ? { latitude: deps.location.latitude, longitude: deps.location.longitude } : undefined,
+            })
+        : undefined,
     },
   );
 
   const responseSent =
-    outcome === "payment" || outcome === "reservation" || outcome === "transport" || outcome === "gemini" || outcome === "failed";
+    outcome === "payment" ||
+    outcome === "reservation" ||
+    outcome === "ticketing" ||
+    outcome === "transport" ||
+    outcome === "gemini" ||
+    outcome === "failed";
   const event: AgentTurnLog = {
     spaceId: message.spaceId,
     senderId,

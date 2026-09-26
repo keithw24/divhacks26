@@ -2,6 +2,11 @@ import { buildMockCompletion, type MockOutboundCaller } from "../elevenlabs/call
 import type { MockScenario, OutboundCaller } from "../elevenlabs/types.js";
 import { verifyElevenLabsSignature } from "../elevenlabs/webhook.js";
 import { zonedDateISO } from "./clock.js";
+import { DepositFlow } from "./deposit-flow.js";
+import type { DemoDepositCatalog } from "./deposits.js";
+import type { ReservationPaymentPort } from "./payment.js";
+import type { ReservationProvider } from "./providers.js";
+import { reservationPaymentTrace, type ReservationPaymentTrace } from "./trace.js";
 import { toE164, parseCallbackPhone, parseReservationUtterance, type ParseContext } from "./collect.js";
 import { logReservation } from "./log.js";
 import { callingText, collectionPrompt, confirmationText, resultText } from "./messages.js";
@@ -14,10 +19,12 @@ import { createReservation, ReservationStore } from "./state.js";
 import type { ReservationExtraction, ReservationRequest, ReservationResult } from "./types.js";
 import { classifyReservationMessage, extractKnownRestaurant } from "./intent.js";
 import type { ReservationInterpreter } from "./gemini.js";
+import type { MerchantDirectory } from "../payments/merchants.js";
 
 export interface ReservationTurnInput {
   spaceId: string;
   senderId?: string;
+  senderName?: string;
   text: string;
   transcript?: { who: string; text: string }[];
   messageId?: string;
@@ -75,7 +82,7 @@ export function isAmbiguousConfirm(text: string): boolean {
   return /^(maybe|perhaps|i think so|possibly|probably|not sure|idk)$/i.test(normalizedReply(text));
 }
 
-function applyExtraction(reservation: ReservationRequest, extraction: ReservationExtraction): void {
+function applyExtraction(reservation: ReservationRequest, extraction: ReservationExtraction, overwrite = false): void {
   if (extraction.restaurantName && !reservation.restaurant.phone) {
     if (normalizePlace(extraction.restaurantName) !== normalizePlace(reservation.restaurant.name)) {
       reservation.restaurant = { name: extraction.restaurantName };
@@ -83,9 +90,9 @@ function applyExtraction(reservation: ReservationRequest, extraction: Reservatio
       reservation.locationOptions = undefined;
     }
   }
-  if (extraction.partySize && !reservation.partySize) reservation.partySize = extraction.partySize;
-  if (extraction.requestedDate && !reservation.requestedDate) reservation.requestedDate = extraction.requestedDate;
-  if (extraction.requestedTime && !reservation.requestedTime) reservation.requestedTime = extraction.requestedTime;
+  if (extraction.partySize && (overwrite || !reservation.partySize)) reservation.partySize = extraction.partySize;
+  if (extraction.requestedDate && (overwrite || !reservation.requestedDate)) reservation.requestedDate = extraction.requestedDate;
+  if (extraction.requestedTime && (overwrite || !reservation.requestedTime)) reservation.requestedTime = extraction.requestedTime;
   if (extraction.customerName && !reservation.customer?.name) {
     reservation.customer = { ...reservation.customer, name: extraction.customerName };
   }
@@ -123,6 +130,7 @@ function slotSnapshot(reservation: ReservationRequest): string {
 export class ReservationOrchestrator {
   private readonly store: ReservationStore;
   private readonly timeouts = new Map<string, NodeJS.Timeout>();
+  private readonly deposits: DepositFlow;
 
   constructor(
     private readonly options: {
@@ -137,9 +145,32 @@ export class ReservationOrchestrator {
       callTimeoutMs?: number;
       webhookSecret?: string;
       store?: ReservationStore;
+      deposits?: DemoDepositCatalog;
+      /** Guarded restaurant payment path. Without it, no reservation can require payment. */
+      payments?: ReservationPaymentPort;
+      merchants?: MerchantDirectory;
+      providers?: readonly ReservationProvider[];
+      paymentMode?: "mock" | "ripple_test";
+      depositHoldMinutes?: number;
     },
   ) {
     this.store = options.store ?? new ReservationStore();
+    this.deposits = new DepositFlow(
+      {
+        store: this.store,
+        now: () => this.now(),
+        zone: () => this.zone(),
+        beginCall: (reservation, messageId) => this.beginCall(reservation, messageId),
+      },
+      {
+        payments: options.payments,
+        deposits: options.deposits,
+        merchants: options.merchants,
+        providers: options.providers,
+        paymentMode: options.paymentMode ?? "mock",
+        holdMinutes: options.depositHoldMinutes,
+      },
+    );
     for (const reservation of this.store.inFlight()) this.armTimeout(reservation);
   }
 
@@ -161,6 +192,8 @@ export class ReservationOrchestrator {
   async handleTurn(input: ReservationTurnInput): Promise<ReservationTurnResult> {
     this.observe(input.spaceId, input.text);
     const active = this.store.active(input.spaceId);
+    const replayed = this.deposits.cachedReply(active, input.messageId);
+    if (replayed) return { handled: true, reply: replayed, acknowledgement: "👍" };
     const classification = classifyReservationMessage(input.text, {
       knownRestaurants: this.options.directory.knownNames(),
       activeStatus: active?.status,
@@ -174,21 +207,24 @@ export class ReservationOrchestrator {
       if (classification.kind === "start") {
         const reusable =
           active &&
-          (active.status === "COLLECTING_DETAILS" || active.status === "READY_FOR_CONFIRMATION") &&
+          (active.status === "COLLECTING_DETAILS" ||
+            active.status === "READY_FOR_CONFIRMATION" ||
+            active.status === "AWAITING_DEPOSIT") &&
           (!classification.restaurantName ||
             normalizePlace(classification.restaurantName) === normalizePlace(active.restaurant.name) ||
             !active.restaurant.name);
-        if (reusable && active) return this.advance(active, input.text, input.messageId);
+        if (reusable && active) return this.advance(active, input);
         const created = createReservation(input.spaceId);
+        if (input.senderId) created.requester = { senderId: input.senderId, senderName: input.senderName };
         const mentioned = classification.contextual ? this.store.mention(input.spaceId) : undefined;
         const name = classification.restaurantName ?? mentioned;
         if (name) created.restaurant = { name };
         this.store.save(created);
         logReservation("reservation_created", { reservationId: created.id, spaceId: input.spaceId, restaurant: name });
-        return this.advance(created, input.text, input.messageId);
+        return this.advance(created, input);
       }
       if (!active) return { handled: false };
-      return this.advance(active, input.text, input.messageId);
+      return this.advance(active, input);
     } catch (error) {
       logReservation("call_failed", {
         spaceId: input.spaceId,
@@ -242,7 +278,14 @@ export class ReservationOrchestrator {
     return this.options.timeZone ?? "America/New_York";
   }
 
-  private async advance(reservation: ReservationRequest, text: string, messageId?: string): Promise<ReservationTurnResult> {
+  private async advance(reservation: ReservationRequest, input: ReservationTurnInput): Promise<ReservationTurnResult> {
+    const text = input.text;
+    const messageId = input.messageId;
+    if (!reservation.requester?.senderId && input.senderId) {
+      reservation.requester = { senderId: input.senderId, senderName: input.senderName };
+    }
+    const paymentTurn = await this.deposits.reply(reservation, input);
+    if (paymentTurn) return paymentTurn;
     if (
       (reservation.status === "CALLING" || reservation.status === "AWAITING_RESTAURANT" || reservation.callPlaced) &&
       isClearAffirmative(text)
@@ -315,7 +358,7 @@ export class ReservationOrchestrator {
       return { handled: false };
     }
     await this.refreshRestaurant(reservation, text);
-    return this.askNext(reservation);
+    return this.askNext(reservation, input);
   }
 
   private async answerOffer(reservation: ReservationRequest, text: string, messageId?: string): Promise<ReservationTurnResult> {
@@ -360,9 +403,11 @@ export class ReservationOrchestrator {
       pendingQuestion: reservation.pendingQuestion,
       requestedTime: reservation.requestedTime,
     };
-    applyExtraction(reservation, parseReservationUtterance(text, ctx));
+    applyExtraction(reservation, parseReservationUtterance(text, ctx), reservation.status === "AWAITING_DEPOSIT");
     if (!this.options.interpreter || isClearAffirmative(text) || isNegative(text)) return;
-    if (reservation.pendingQuestion === "name" || reservation.pendingQuestion === "confirm") return;
+    if (reservation.pendingQuestion === "name" || reservation.pendingQuestion === "confirm" || reservation.pendingQuestion === "deposit") {
+      return;
+    }
     try {
       const extracted = await this.options.interpreter.extract({
         text,
@@ -420,7 +465,9 @@ export class ReservationOrchestrator {
     }
   }
 
-  private askNext(reservation: ReservationRequest): ReservationTurnResult {
+  private async askNext(reservation: ReservationRequest, input?: ReservationTurnInput): Promise<ReservationTurnResult> {
+    const held = await this.deposits.hold(reservation, input);
+    if (held) return held;
     const step = collectionPrompt(reservation);
     if (step.kind !== "ready") {
       if (step.kind === "location" || (reservation.phoneChecked && !reservation.restaurant.phone && step.kind !== "restaurant")) {
@@ -521,6 +568,7 @@ export class ReservationOrchestrator {
   private async dial(reservation: ReservationRequest): Promise<void> {
     if (reservation.callPlaced) return;
     reservation.callPlaced = true;
+    if (reservation.deposit) reservation.deposit.bookingAttemptId = reservation.id;
     try {
       const dialable = assertDialable(reservation.restaurant);
       const placed = await this.options.caller.placeCall({
@@ -660,9 +708,26 @@ export class ReservationOrchestrator {
       outcome: result.outcome,
     });
     reservation.resultDelivered = true;
+    const askForPayment = result.paymentRequired ? this.deposits.captureFromCall(reservation, result) : undefined;
+    const afterPayment = askForPayment ? undefined : this.deposits.afterCallResult(reservation);
     this.store.save(reservation);
-    const text = resultText(reservation, result);
+    if (reservation.deposit?.quietResult) return;
+    const text = askForPayment ?? afterPayment ?? resultText(reservation, result);
     await this.options.notify?.(reservation.photonSpaceId, text);
+  }
+
+  /** Inspectable restaurant payment trace for one reservation. Public addresses only. */
+  paymentTrace(reservationId: string): ReservationPaymentTrace | undefined {
+    const reservation = this.store.get(reservationId);
+    return reservation?.deposit ? reservationPaymentTrace(reservation, this.options.paymentMode ?? "mock") : undefined;
+  }
+
+  /** Traces for one Photon space. Other spaces are never included. */
+  paymentTraces(spaceId: string): ReservationPaymentTrace[] {
+    return this.store
+      .forSpace(spaceId)
+      .filter((reservation) => reservation.deposit)
+      .map((reservation) => reservationPaymentTrace(reservation, this.options.paymentMode ?? "mock"));
   }
 }
 
