@@ -23,6 +23,13 @@ export const config = {
   tavilyApiKey: env("TAVILY_API_KEY"),
   parksEventsDataset: env("PARKS_EVENTS_DATASET", "w3wp-dpdi"),
   permittedEventsDataset: env("PERMITTED_EVENTS_DATASET", "tvpp-9vvx"),
+  // ElevenLabs voice: transcribe inbound voice memos, optionally answer with a voice memo.
+  elevenLabsApiKey: env("ELEVENLABS_API_KEY"),
+  elevenLabsVoiceId: env("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb"),
+  elevenLabsTtsModel: env("ELEVENLABS_TTS_MODEL", "eleven_multilingual_v2"),
+  elevenLabsSttModel: env("ELEVENLABS_STT_MODEL", "scribe_v2"),
+  /** "match" = answer voice memos with a voice memo; "always"; "off". */
+  voiceReplies: env("VOICE_REPLIES", "match") as "match" | "always" | "off",
 };
 
 export function loadConfig() {

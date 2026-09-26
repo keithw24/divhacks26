@@ -8,6 +8,9 @@ import { addressedText } from "./chat/gate.js";
 import { parseLatLng } from "./chat/location.js";
 import { config } from "./config.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
+import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
+
+const UNHEARD_VOICE_MEMO = "[sent a voice memo]";
 
 const transport = createTransportationServiceFromEnv({
   geminiApiKey: config.geminiApiKey,
@@ -56,12 +59,20 @@ async function readMessage(spaceId: string, who: string, message: Message): Prom
       }
       return `[sent ${content.mimeType || "a file"}]`;
     }
+    case "voice": {
+      // Transcribed with ElevenLabs when configured; otherwise just noted in the transcript.
+      const said = await transcribeVoiceMemo(content).catch((err) => {
+        console.error(`voice transcription failed: ${errorCategory(err)} ${err instanceof Error ? err.message : ""}`);
+        return null;
+      });
+      return said ?? UNHEARD_VOICE_MEMO;
+    }
     default:
       return null;
   }
 }
 
-async function reply(space: Space, message: Message, isGroup: boolean, who: string, question: string) {
+async function reply(space: Space, message: Message, isGroup: boolean, who: string, question: string, inboundWasVoice: boolean) {
   const location = lastLocation(space.id);
   await runConversationTurn(
     {
@@ -83,7 +94,15 @@ async function reply(space: Space, message: Message, isGroup: boolean, who: stri
       suggest: (input) => suggestNext(input),
       transcript: () => transcript(space.id),
       location,
-      recordAssistant: (text) => recordMessage(space.id, config.agentName, text),
+      recordAssistant: (text) => {
+        recordMessage(space.id, config.agentName, text);
+        // Runs once per delivered answer; the voice memo follows the text reply (which keeps the links).
+        if (wantsVoiceReply(config.voiceReplies, inboundWasVoice)) {
+          void sendVoiceReply(space, text).catch((err) => {
+            console.error(`voice reply failed: ${errorCategory(err)} ${err instanceof Error ? err.message : ""}`);
+          });
+        }
+      },
       noteCoordinates: () => {
         if (location) transport.noteCoordinates(space.id, location);
       },
@@ -110,6 +129,11 @@ console.log(`${config.agentName} is listening on ${config.chatProvider}`);
 if (!config.geminiApiKey) {
   console.info("GEMINI_API_KEY is not set; transportation and Maps-grounded suggestions will fall back.");
 }
+console.info(
+  voiceEnabled()
+    ? `ElevenLabs voice on (voice replies: ${config.voiceReplies}).`
+    : "ELEVENLABS_API_KEY is not set; voice memos won't be transcribed.",
+);
 if (config.googleMapsApiKey) {
   console.info("GOOGLE_MAPS_API_KEY is set; structured Routes/Places will supplement Gemini grounding.");
 }
@@ -144,8 +168,11 @@ for await (const [space, message] of app.messages) {
     });
   }
 
-  const question = message.content.type === "text" ? addressedText(text, isGroup) : null;
+  // Transcribed voice memos are answered like typed messages (in groups they still need the agent's name).
+  const isVoice = message.content.type === "voice";
+  const answerable = message.content.type === "text" || (isVoice && text !== UNHEARD_VOICE_MEMO);
+  const question = answerable ? addressedText(text, isGroup) : null;
   if (question === null || !config.autoReply) continue;
 
-  void reply(space, message, isGroup, who, question);
+  void reply(space, message, isGroup, who, question, isVoice);
 }
