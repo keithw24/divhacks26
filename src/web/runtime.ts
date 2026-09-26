@@ -9,6 +9,7 @@ import { createFileWebStore } from "./store.js";
 
 export interface WebRuntimeOptions {
   port: number;
+  host?: string;
   statePath: string;
   maxUsers: number;
   allowedOrigins: string[];
@@ -20,6 +21,10 @@ export interface WebRuntimeOptions {
   memory?: MemoryService;
   backboard?: BackboardClient;
   agentState: StateStore;
+  handleElevenLabsWebhook?(
+    rawBody: string,
+    signature: string | undefined,
+  ): Promise<{ status: number; body: unknown }>;
 }
 
 /** The website's API: sign-in codes over iMessage, the user cap, onboarding into Backboard memory. */
@@ -73,9 +78,10 @@ export function startWebRuntime(opts: WebRuntimeOptions) {
         if (profile) profile.recentMemoryTexts = [];
       });
     },
+    handleElevenLabsWebhook: opts.handleElevenLabsWebhook,
   });
 
-  server.listen(opts.port, () => {
+  server.listen(opts.port, opts.host ?? "0.0.0.0", () => {
     console.info(`Website API on :${opts.port} (${auth.stats().spotsTaken}/${opts.maxUsers} users, origins: ${opts.allowedOrigins.join(", ")})`);
   });
   server.on("error", (err) => console.error(`website API failed to start: ${err.name}`));

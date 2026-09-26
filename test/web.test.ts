@@ -169,7 +169,7 @@ describe("web API server", () => {
         headers: { "Content-Type": "application/json", Origin: "http://localhost:5174", ...(token && { Authorization: `Bearer ${token}` }) },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-    return { ctx, deps, call };
+    return { ctx, deps, call, base };
   }
 
   it("runs the full sign-in, onboarding and account flow over HTTP", async () => {
@@ -205,6 +205,24 @@ describe("web API server", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
     const other = await fetch(res.url.replace("/api/me", "/api/stats"), { headers: { Origin: "https://evil.example" } });
     expect(other.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("serves deployment probes and the ElevenLabs webhook on the API port", async () => {
+    const webhook = vi.fn(async () => ({ status: 202, body: { received: true } }));
+    const { base } = await start({ handleElevenLabsWebhook: webhook });
+
+    expect(await (await fetch(`${base}/healthz`)).json()).toMatchObject({ status: "ok" });
+    expect(await (await fetch(`${base}/readyz`)).json()).toEqual({ status: "ready" });
+
+    const body = JSON.stringify({ type: "post_call_transcription" });
+    const response = await fetch(`${base}/webhooks/elevenlabs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "ElevenLabs-Signature": "t=1,v0=test" },
+      body,
+    });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ received: true });
+    expect(webhook).toHaveBeenCalledWith(body, "t=1,v0=test");
   });
 
   it("maps errors to status codes", async () => {
