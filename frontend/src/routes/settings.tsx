@@ -85,7 +85,11 @@ function Settings() {
         </Link>
       }
     >
-      <PageTitle kicker="Settings" title="You, to @agent." sub={`Signed in as ${me.phone}.`} />
+      <PageTitle
+        kicker="Settings"
+        title="You, to @agent."
+        sub={`Signed in as ${me.email} · ${me.phone}.`}
+      />
 
       <form
         onSubmit={(e) => {

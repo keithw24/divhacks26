@@ -15,9 +15,17 @@ export interface WebPreferences {
 
 export interface WebUser {
   phone: string;
+  /** Verified at sign-up and on every sign-in (second factor). Lowercase. */
+  email: string;
   createdAt: string;
   onboardedAt?: string;
   preferences?: WebPreferences;
+}
+
+/** Proof that an email was verified, handed to the phone step. Keyed by SHA-256 of the token. */
+export interface EmailChallenge {
+  email: string;
+  expiresAt: number;
 }
 
 export interface PendingCode {
@@ -30,8 +38,10 @@ export interface PendingCode {
 
 export interface WebState {
   users: Record<string, WebUser>;
-  waitlist: { phone: string; name?: string; at: string }[];
+  waitlist: { email: string; phone?: string; name?: string; at: string }[];
+  /** Keyed by "email:<address>" or "phone:<+1...>". */
   codes: Record<string, PendingCode>;
+  challenges: Record<string, EmailChallenge>;
   /** Keyed by SHA-256 of the session token; the raw token is never stored. */
   sessions: Record<string, { phone: string; expiresAt: number }>;
 }
@@ -41,7 +51,7 @@ export interface WebStore {
   update<T>(mutate: (state: WebState) => T): T;
 }
 
-export const emptyWebState = (): WebState => ({ users: {}, waitlist: [], codes: {}, sessions: {} });
+export const emptyWebState = (): WebState => ({ users: {}, waitlist: [], codes: {}, challenges: {}, sessions: {} });
 
 export function createMemoryWebStore(initial?: WebState): WebStore {
   const state = initial ?? emptyWebState();

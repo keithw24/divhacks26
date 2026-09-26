@@ -17,6 +17,7 @@ import { createTransportationServiceFromEnv } from "./transport/factory.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
 import { createBackboardClient } from "./backboard/client.js";
 import { startWebRuntime } from "./web/runtime.js";
+import { createMailer } from "./web/email.js";
 
 const UNHEARD_VOICE_MEMO = "[sent a voice memo]";
 
@@ -197,7 +198,16 @@ const web =
         allowedOrigins: config.webAllowedOrigins,
         secret: config.webAuthSecret,
         agentName: config.agentName,
+        appName: config.appName,
         agentNumber: config.agentNumber,
+        mailer: createMailer({
+          host: config.smtpHost,
+          port: config.smtpPort,
+          user: config.smtpUser,
+          pass: config.smtpPass,
+          from: config.emailFrom,
+          devLog: config.chatProvider === "terminal",
+        }),
         async sendText(phone, text) {
           if (config.chatProvider !== "imessage") {
             // Local development without iMessage: print instead of sending (includes login codes).
