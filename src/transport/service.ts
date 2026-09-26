@@ -117,8 +117,9 @@ export class TransportationService {
       return this.handleNearby(spaceId, text, ctx.origin);
     }
 
+    const destinationQuery = intent.destinationQuery ?? (ctx.destination ? undefined : ctx.pendingDestination);
     const destination = await this.resolveRole(spaceId, {
-      query: intent.destinationQuery ?? (ctx.destination ? undefined : ctx.pendingDestination),
+      query: destinationQuery,
       useContext: intent.destinationFromThere || !intent.destinationQuery,
       contextual: ctx.destination,
     });
@@ -141,8 +142,8 @@ export class TransportationService {
       return this.done({
         handled: true,
         acknowledgement: "👀",
-        reply: intent.destinationQuery
-          ? `I couldn’t tell which ${intent.destinationQuery} you mean. Which address should I use?`
+        reply: destinationQuery
+          ? `I couldn’t tell which ${destinationQuery} you mean. Which address should I use?`
           : formatClarification("destination"),
       });
     }
