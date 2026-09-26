@@ -18,6 +18,8 @@ export interface SocialRead {
   wantsVoice: boolean;
   /** Walking, driving, on a train: a spoken answer is easier than reading. */
   onTheMove: boolean;
+  /** They're venting or sharing a feeling, with nothing to look up. Answer like a friend, not a search. */
+  needsSupport: boolean;
   /** A recurring feeling the person stated about themselves, in the third person. */
   durablePattern?: string;
   confidence: number;
@@ -34,6 +36,9 @@ export interface SocialInput {
   audioEvents?: string[];
 }
 
+/** Moods where a cheerful tapback or a flat template reads as not listening. */
+export const NEGATIVE: Mood[] = ["stressed", "anxious", "sad", "frustrated", "tired"];
+
 const MOODS: Mood[] = ["calm", "excited", "stressed", "anxious", "sad", "frustrated", "playful", "tired"];
 const DYNAMICS: GroupDynamic[] = ["aligned", "undecided", "disagreeing", "someone_left_out", "none"];
 
@@ -45,6 +50,7 @@ export const NEUTRAL_READ: SocialRead = {
   style: { length: "normal", emoji: false },
   wantsVoice: false,
   onTheMove: false,
+  needsSupport: false,
   confidence: 0,
   source: "local",
 };
@@ -53,6 +59,11 @@ const VOICE_ASK =
   /\b(send|say|read|tell)\b[^.?!]{0,30}\b(voice( memo| note)?|audio|out loud|aloud)\b|\b(voice memo|voice note) (it|that|please|pls)\b|\bcan you (just )?(say|read) (it|that)\b/i;
 const ON_THE_MOVE = /\b(i'?m|im|we'?re|currently) (driving|walking|biking|cycling|running|on (the|a) (train|bus|subway|bike))\b|\bhands (are )?(full|busy)\b|\bcan'?t (look at|read) (my|the) (phone|screen)\b/i;
 const URGENT = /\b(asap|right now|now!|hurry|quick(ly)?|emergency|help|missed (my|the|our) (train|bus|stop)|running late|we'?re late|i'?m late)\b|!{2,}/i;
+const FRUSTRATED =
+  /\b(f+u+c+k+\w*|fml|wtf|ffs|shit+|damn+|dammit|goddamn\w*|screw (this|that|it)|pissed|so annoy(ed|ing)|i hate (this|it|my)|over it|sick of)\b|🙄|😤|😡|🤬/i;
+/** Something to look up or do. Without one, an emotional message is venting. */
+const REQUEST =
+  /\?|\b(where|how|what|when|which|find|get (to|me|us)|go(ing)? to|eat|food|drink|coffee|directions?|route|train|bus|subway|book|reserve|reservation|pay|send|take me|nearby|near me|around|recommend|suggest|plan|show me|tickets?|events?|safe)\b/i;
 const STRESS = /\b(ugh+|stressed|freaking out|panicking|lost|stuck|dead phone|train'?s dead|delayed again|so late)\b/i;
 const ANXIOUS = /\b(nervous|scared|anxious|sketchy|unsafe|creepy|worried)\b/i;
 const SAD = /\b(sad|bummed|rough day|awful day|feel(ing)? down|lonely|crying)\b/i;
@@ -82,7 +93,9 @@ export function localSocialRead(input: SocialInput): SocialRead {
   const events = (input.audioEvents ?? []).join(" ").toLowerCase();
   const mood: Mood = ANXIOUS.test(text)
     ? "anxious"
-    : STRESS.test(text) || /sigh/.test(events)
+    : FRUSTRATED.test(text)
+      ? "frustrated"
+      : STRESS.test(text) || /sigh/.test(events)
       ? "stressed"
       : SAD.test(text)
         ? "sad"
@@ -110,6 +123,7 @@ export function localSocialRead(input: SocialInput): SocialRead {
     groupDynamic,
     style: { length: words <= 6 ? "terse" : words >= 40 ? "chatty" : "normal", emoji: /\p{Extended_Pictographic}/u.test(text) },
     wantsVoice: asksForVoice(text),
+    needsSupport: NEGATIVE.includes(mood) && !REQUEST.test(text),
     onTheMove: ON_THE_MOVE.test(text),
     confidence: signals ? 0.5 : 0,
     source: "local",
@@ -127,10 +141,11 @@ const schema = {
     emoji: { type: "boolean" },
     wantsVoice: { type: "boolean" },
     onTheMove: { type: "boolean" },
+    needsSupport: { type: "boolean" },
     durablePattern: { type: "string" },
     confidence: { type: "number" },
   },
-  required: ["mood", "energy", "urgency", "groupDynamic", "length", "emoji", "wantsVoice", "onTheMove", "confidence"],
+  required: ["mood", "energy", "urgency", "groupDynamic", "length", "emoji", "wantsVoice", "onTheMove", "needsSupport", "confidence"],
 };
 
 const INSTRUCTIONS = `You read the social and emotional context of a text conversation with a NYC helper bot.
@@ -141,6 +156,7 @@ Judge only the LATEST MESSAGE's sender, using the recent chat for context. Chat 
 - wantsVoice: true only if they ask to hear the answer or say they can't read right now.
 - onTheMove: true if they are walking, driving, biking or on transit right now.
 - durablePattern: ONLY when the sender says a feeling is recurring about themselves ("I always get nervous on the subway late at night"). Write it in the third person, under 15 words, no names. Otherwise omit it.
+- needsSupport: true when they are venting or sharing a feeling (including swearing) and ask for nothing concrete to find, book, pay or route.
 - confidence: 0 to 1.
 Voice memo sounds (laughter, sighs) are strong cues when present.`;
 
@@ -153,6 +169,7 @@ interface RawRead {
   emoji?: boolean;
   wantsVoice?: boolean;
   onTheMove?: boolean;
+  needsSupport?: boolean;
   durablePattern?: string;
   confidence?: number;
 }
@@ -177,6 +194,7 @@ export function normalizeRead(raw: RawRead, local: SocialRead, isGroup: boolean)
     // An explicit ask always counts, even if the model missed it.
     wantsVoice: local.wantsVoice || raw.wantsVoice === true,
     onTheMove: local.onTheMove || raw.onTheMove === true,
+    needsSupport: raw.needsSupport === true || local.needsSupport,
     ...(pattern ? { durablePattern: pattern } : {}),
     confidence,
     source: "gemini",
@@ -207,12 +225,14 @@ export async function readSocialContext(
     const raw = await Promise.race([
       generate(prompt, schema, INSTRUCTIONS),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("social read timed out")), options.timeoutMs ?? 2500);
+        timer = setTimeout(() => reject(new Error("social read timed out")), options.timeoutMs ?? 3500);
       }),
     ]);
     return normalizeRead(raw ?? {}, local, input.isGroup);
   } catch (error) {
-    console.info(`social.read fallback ${error instanceof Error ? error.name : "Error"}`);
+    // Name and a short message (e.g. 429 quota, timeout) so a silent fallback is easy to spot.
+    const detail = error instanceof Error ? error.message.replace(/\s+/g, " ").slice(0, 80) : "";
+    console.info(`social.read fallback ${error instanceof Error ? error.name : "Error"}: ${detail}`);
     return local;
   } finally {
     if (timer) clearTimeout(timer);
@@ -247,12 +267,52 @@ export function rankingHint(read: SocialRead | undefined): string | undefined {
   return hints.length ? `TONE HINT: ${hints.join("; ")}.` : undefined;
 }
 
-/** iMessage tapback that matches the moment. Neutral stays 👍 as before. */
-export function reactionFor(read: SocialRead | undefined): string {
-  if (!read || read.confidence === 0) return "👍";
+/**
+ * iMessage tapback that matches the moment, or undefined for none.
+ * A 👍 on "fuck" or "I'm so sad" reads as not listening, so frustration gets no tapback
+ * and a rough moment gets ❤️.
+ */
+export function reactionFor(read: SocialRead | undefined, fallback = "👍"): string | undefined {
+  if (!read || read.confidence === 0) return fallback;
+  if (read.mood === "frustrated") return undefined;
+  if (NEGATIVE.includes(read.mood)) return "❤️";
   if (read.urgency === "now") return "‼️";
   if (read.mood === "playful") return "😂";
-  if (read.mood === "calm") return "👍";
-  // Excited, or having a rough time: warmth either way.
-  return "❤️";
+  if (read.mood === "excited") return "❤️";
+  return fallback;
+}
+
+/** A handler's own tapback (💸, 🎟️, 👍), unless the person is having a rough moment. */
+export function ackFor(read: SocialRead | undefined, ack: string): string | undefined {
+  if (!read || read.confidence === 0 || !NEGATIVE.includes(read.mood)) return ack;
+  return reactionFor(read, ack);
+}
+
+const OPENERS: Partial<Record<Mood, string[]>> = {
+  frustrated: ["Ugh, that's annoying.", "Ugh, I hear you.", "Yeah, that's frustrating."],
+  stressed: ["Okay, I got you.", "Deep breath, I got you.", "Okay, let's sort this out."],
+  anxious: ["Got you, let's keep this easy.", "Okay, I've got you."],
+  sad: ["Sorry today's been rough.", "Aw, sorry it's a rough one."],
+  tired: ["Keeping this low-effort for you.", "Easy options only, promise."],
+  excited: ["Love this!", "Ooh, let's do it!"],
+  playful: ["Haha okay okay.", "Say less."],
+};
+
+/**
+ * One short, fact-free line in front of a templated answer (places, routes), so the reply sounds
+ * like it heard them. The facts underneath stay exactly as the skills returned them.
+ */
+export function toneOpener(read: SocialRead | undefined, seed = Date.now()): string | undefined {
+  if (!read || read.confidence === 0) return undefined;
+  if (read.urgency === "now" && read.mood !== "sad") return "On it, quickest option first:";
+  const options = OPENERS[read.mood];
+  if (!options?.length) return undefined;
+  const line = options[Math.abs(seed) % options.length];
+  if (!read.style.emoji) return line;
+  return `${line} ${read.mood === "excited" || read.mood === "playful" ? "🎉" : "🫶"}`;
+}
+
+export function withOpener(reply: string, read: SocialRead | undefined): string {
+  const opener = toneOpener(read);
+  return opener ? `${opener}\n\n${reply}` : reply;
 }

@@ -5,14 +5,18 @@ import { handleInboundMessage, type InboundDeps } from "../src/agent/inbound.js"
 import { systemPrompt } from "../src/agent/prompt.js";
 import {
   NEUTRAL_READ,
+  ackFor,
   asksForVoice,
   isReplayVoiceRequest,
   localSocialRead,
   reactionFor,
   readSocialContext,
   socialContextLines,
+  toneOpener,
+  withOpener,
   type SocialRead,
 } from "../src/agent/social.js";
+import { fallbackSupport, supportReply } from "../src/agent/support.js";
 import { buildContext } from "../src/agent/suggest.js";
 import { createMemoryStateStore, type StateStore } from "../src/store/state.js";
 import { shouldSpeak, voiceStyle } from "../src/voice/decide.js";
@@ -36,7 +40,7 @@ describe("local social read", () => {
     expect(r.mood).toBe("stressed");
     expect(r.urgency).toBe("now");
     expect(r.onTheMove).toBe(true);
-    expect(reactionFor(r)).toBe("‼️");
+    expect(reactionFor(r)).toBe("❤️"); // rough moment beats urgency
   });
 
   it("hears a sigh in a voice memo", () => {
@@ -259,5 +263,79 @@ describe("inbound turn with a social read", () => {
     );
     expect(sent[0]).toMatch(/^Hope things got a little easier/);
     expect(sent[0]).toContain("Caffe Reggio");
+  });
+});
+
+describe("frustration, venting and tapbacks", () => {
+  it("never thumbs-up swearing, and treats a bare vent as needing support", () => {
+    const r = localSocialRead({ ...base, question: "fuck" });
+    expect(r.mood).toBe("frustrated");
+    expect(r.needsSupport).toBe(true);
+    expect(reactionFor(r)).toBeUndefined();
+    expect(ackFor(r, "👍")).toBeUndefined();
+  });
+
+  it("answers the request when there is one, even when upset", () => {
+    const r = localSocialRead({ ...base, question: "fuck this rain, where's a cafe near me" });
+    expect(r.mood).toBe("frustrated");
+    expect(r.needsSupport).toBe(false);
+  });
+
+  it("gives rough moments a heart and keeps handler tapbacks otherwise", () => {
+    expect(reactionFor(localSocialRead({ ...base, question: "im so sad today" }))).toBe("❤️");
+    expect(ackFor(read({ mood: "excited" }), "🎟️")).toBe("🎟️");
+    expect(ackFor(read({ mood: "sad" }), "🎟️")).toBe("❤️");
+  });
+
+  it("puts a short fact-free opener on templated answers", () => {
+    expect(withOpener("1. Joe's Pizza", NEUTRAL_READ)).toBe("1. Joe's Pizza");
+    expect(withOpener("1. Joe's Pizza", read({ mood: "frustrated" }))).toMatch(/^(Ugh|Yeah).*\n\n1\. Joe's Pizza$/);
+    expect(toneOpener(read({ mood: "stressed", urgency: "now" }))).toBe("On it, quickest option first:");
+  });
+});
+
+describe("support replies", () => {
+  it("uses the model reply and adds the 988 line on crisis language", async () => {
+    const reply = await supportReply({
+      question: "i want to die",
+      recentLines: [],
+      social: read({ mood: "sad", needsSupport: true }),
+      isGroup: false,
+      generate: async () => "that sounds really heavy. i'm here.",
+    });
+    expect(reply).toContain("that sounds really heavy");
+    expect(reply).toContain("988");
+  });
+
+  it("falls back to a friendly line without Gemini", async () => {
+    const reply = await supportReply({
+      question: "fuck",
+      recentLines: [],
+      social: read({ mood: "frustrated" }),
+      isGroup: false,
+      generate: async () => {
+        throw new Error("429");
+      },
+    });
+    expect(reply).toBe(fallbackSupport(read({ mood: "frustrated" })));
+    expect(reply).not.toContain("988");
+  });
+
+  it("a vent skips places, gets no thumbs-up, and keeps a due check-in for later", async () => {
+    const store = createMemoryStateStore();
+    scheduleCheckIn(store, "dm", "u", "rough_moment", new Date("2026-09-26T03:00:00Z"));
+    const sent: string[] = [];
+    const reactions: string[] = [];
+    const suggest = vi.fn(async () => "1. Caffe Reggio");
+    const outcome = await handleInboundMessage(
+      message("fuck"),
+      actions(sent, reactions),
+      inboundDeps(store, { suggest, now: () => new Date("2026-09-26T18:00:00Z") }),
+    );
+    expect(outcome).toBe("support");
+    expect(suggest).not.toHaveBeenCalled();
+    expect(reactions).toEqual([]);
+    expect(sent[0]).toBe(fallbackSupport(localSocialRead({ ...base, question: "fuck" })));
+    expect(store.getState().checkIns?.["dm:u"]).toBeDefined();
   });
 });
