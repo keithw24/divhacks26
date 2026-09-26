@@ -9,6 +9,7 @@ import { createRippleTestProvider } from "./ripple.js";
 import { PaymentService } from "./service.js";
 import { PaymentStore } from "./state.js";
 import type { PaymentProvider } from "./types.js";
+import type { CustomerSettlementPort } from "./xrpl/settlement.js";
 
 export interface PaymentRuntimeEnv {
   mode: PaymentsMode;
@@ -21,6 +22,8 @@ export interface PaymentRuntimeEnv {
   geminiApiKey?: string;
   geminiModel?: string;
   stateStore?: StateStore;
+  /** ripple_test only. Person transfers settle between customer wallets instead of the shared seed. */
+  settlement?: CustomerSettlementPort;
   nessieApiKey?: string;
   nessieBaseUrl?: string;
   nessieCustomerId?: string;
@@ -40,6 +43,7 @@ export function createPaymentRuntime(env: PaymentRuntimeEnv) {
     maxUsd: env.maxUsd,
     timeoutMs: env.timeoutMs,
     interpreter,
+    settlement: env.mode === "ripple_test" ? env.settlement : undefined,
   });
   return { service, provider };
 }

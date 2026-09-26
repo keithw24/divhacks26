@@ -1,5 +1,6 @@
 import { parseClockToken } from "./collect.js";
 import { isTime, timeFits } from "./constraints.js";
+import type { ReservationPaymentType } from "./payment.js";
 import type { ReservationRequest, ReservationResult } from "./types.js";
 
 export interface TranscriptTurn {
@@ -112,6 +113,37 @@ function clocksIn(text: string): string[] {
   return found;
 }
 
+const PAYMENT_TYPES = new Set<ReservationPaymentType>(["DEPOSIT", "PREPAID", "RESERVATION_FEE", "CARD_HOLD"]);
+
+/**
+ * A deposit the restaurant stated on the call. The structured amount must also appear in the
+ * restaurant's own words, so the voice agent's summary alone cannot create a payment.
+ */
+function statedPayment(completion: NormalizedCompletion, staff: string): ReservationResult["paymentRequired"] {
+  const flag = (completion.collected.deposit_required ?? "").trim().toLowerCase();
+  if (flag !== "true" && flag !== "yes") return undefined;
+  const amount = Number((completion.collected.deposit_amount_usd ?? "").replace(/[$,\s]/g, ""));
+  if (!Number.isFinite(amount) || amount <= 0) return undefined;
+  if (!dollarAmountsIn(staff).some((spoken) => Math.round(spoken * 100) === Math.round(amount * 100))) return undefined;
+  const type = (completion.collected.deposit_type ?? "").trim().toUpperCase() as ReservationPaymentType;
+  const perPerson = Number((completion.collected.deposit_per_person_usd ?? "").replace(/[$,\s]/g, ""));
+  return {
+    paymentType: PAYMENT_TYPES.has(type) ? type : "DEPOSIT",
+    amountUsd: Math.round(amount * 100) / 100,
+    perPersonUsd: Number.isFinite(perPerson) && perPerson > 0 ? perPerson : undefined,
+  };
+}
+
+function dollarAmountsIn(text: string): number[] {
+  const found: number[] = [];
+  for (const match of text.matchAll(/\$\s?(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s?(?:dollars|usd)\b/gi)) {
+    const raw = (match[1] ?? match[2] ?? "").replace(/,/g, "");
+    const value = Number(raw);
+    if (Number.isFinite(value) && value > 0) found.push(value);
+  }
+  return found;
+}
+
 function offeredFromText(text: string): string | undefined {
   const match = text.match(/\b(?:have|only have|can do|we have|opening at|table at)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
   return match?.[1] ? parseClockToken(match[1]) : undefined;
@@ -136,6 +168,16 @@ export function interpretCompletion(reservation: ReservationRequest, completion:
   }
   if (/disconnect|failed|error/i.test(completion.terminationReason ?? "") && !BOOKED_EVIDENCE.test(staff)) {
     return { outcome: "CALL_FAILED", restaurantMessage: "The call disconnected." };
+  }
+  if (reservation.deposit?.status !== "PAID") {
+    const payment = statedPayment(completion, staff);
+    if (payment) {
+      return {
+        outcome: "NEEDS_USER_INPUT",
+        questionForUser: "They require a deposit before they can hold the table.",
+        paymentRequired: payment,
+      };
+    }
   }
 
   const confirmedTime = parseClockToken(completion.collected.confirmed_time ?? "") ?? offeredFromText(staff);

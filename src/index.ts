@@ -11,7 +11,15 @@ import { config } from "./config.js";
 import { createBackboardMemoryService } from "./memory/backboard.js";
 import { openAgentStateStore } from "./store/state.js";
 import { createPaymentRuntime } from "./payments/runtime.js";
+import { XrplDashboardBuilder } from "./payments/xrpl/dashboard.js";
+import { DASHBOARD_PATH, startXrplDashboardServer } from "./payments/xrpl/dashboard-server.js";
+import { xrplPayments } from "./payments/xrpl/payments.js";
+import { createLiveRippleGuard } from "./payments/xrpl/runtime.js";
+import { CustomerWalletSettlement, parseCustomerSenders } from "./payments/xrpl/settlement.js";
 import { createReservationRuntime } from "./reservations/runtime.js";
+import { geocodeNyc } from "./geocode.js";
+import { createMerchantDirectory } from "./payments/merchants.js";
+import { createTicketingRuntime } from "./ticketing/runtime.js";
 import { createMeetupRuntime } from "./meetup/runtime.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
@@ -29,6 +37,28 @@ const transport = createTransportationServiceFromEnv({
 });
 const spaceSenders = new Map<string, (text: string) => Promise<unknown>>();
 const agentState = openAgentStateStore(config.agentStatePath);
+const xrpl = config.paymentsMode === "ripple_test" ? createLiveRippleGuard() : undefined;
+const customerSenders = parseCustomerSenders(config.xrplCustomerSendersJson);
+// Merchant payees must be real Testnet addresses whenever the provider submits to XRPL.
+const merchantPaymentMode =
+  config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple" ? "ripple_test" : "mock";
+const payments = createPaymentRuntime({
+  settlement: xrpl ? new CustomerWalletSettlement(xrpl.guard.executor, customerSenders) : undefined,
+  mode: config.paymentsMode,
+  maxUsd: config.paymentsMaxUsd,
+  xrpPerUsd: config.paymentsXrpPerUsd,
+  timeoutMs: config.paymentsTimeoutMs,
+  serverUrl: config.xrplTestnetUrl,
+  seed: config.xrplTestnetSeed,
+  recipientsJson: config.paymentsRecipientsJson,
+  geminiApiKey: config.geminiApiKey,
+  geminiModel: config.geminiModel,
+  stateStore: agentState,
+  nessieApiKey: config.nessieApiKey,
+  nessieBaseUrl: config.nessieBaseUrl,
+  nessieCustomerId: config.nessieCustomerId,
+  nessieAccountId: config.nessieAccountId,
+});
 const meetup = createMeetupRuntime({
   googleMapsApiKey: config.googleMapsApiKey,
   timeZone: config.timezone,
@@ -48,6 +78,16 @@ const reservations = createReservationRuntime({
   timeZone: config.timezone,
   callTimeoutMs: config.reservationCallTimeoutMs,
   stateStore: agentState,
+  depositsJson: config.reservationDepositsJson,
+  merchantsJson: config.paymentsMerchantsJson,
+  paymentMode: merchantPaymentMode,
+  depositPayments: payments.service,
+  paymentsMaxUsd: config.paymentsMaxUsd,
+  paymentsDailyMaxUsd: config.paymentsDailyMaxUsd,
+  xrpPerUsd: config.paymentsXrpPerUsd,
+  xrplTestnetUrl: config.xrplTestnetUrl,
+  xrplDeposits: config.paymentsMode === "ripple_test" ? xrplPayments : undefined,
+  paymentAudit: xrpl?.guard.audit,
   notify: async (spaceId, text) => {
     recordMessage(spaceId, config.agentName, text);
     const send = spaceSenders.get(spaceId);
@@ -58,21 +98,37 @@ const reservations = createReservationRuntime({
     await send(text);
   },
 });
-const payments = createPaymentRuntime({
-  mode: config.paymentsMode,
-  maxUsd: config.paymentsMaxUsd,
-  xrpPerUsd: config.paymentsXrpPerUsd,
-  timeoutMs: config.paymentsTimeoutMs,
-  serverUrl: config.xrplTestnetUrl,
-  seed: config.xrplTestnetSeed,
-  recipientsJson: config.paymentsRecipientsJson,
-  geminiApiKey: config.geminiApiKey,
-  geminiModel: config.geminiModel,
-  stateStore: agentState,
-  nessieApiKey: config.nessieApiKey,
-  nessieBaseUrl: config.nessieBaseUrl,
-  nessieCustomerId: config.nessieCustomerId,
-  nessieAccountId: config.nessieAccountId,
+const ticketing = createTicketingRuntime({
+  provider: config.ticketingProvider,
+  purchaseMode: config.ticketingPurchaseMode,
+  ticketmasterApiKey: config.ticketmasterApiKey,
+  ticketmasterPartnerApiKey: config.ticketmasterPartnerApiKey,
+  timeZone: config.timezone,
+  defaultCity: config.ticketingDefaultCity,
+  resolvePlace: async (query) => {
+    const place = await geocodeNyc(query);
+    return place ? { latitude: place.latitude, longitude: place.longitude, label: place.label } : undefined;
+  },
+  onEventSelected: (spaceId, event) => {
+    if (!event.venue) return;
+    transport.noteDestination(spaceId, {
+      name: event.venue,
+      address: event.address,
+      latitude: event.latitude,
+      longitude: event.longitude,
+      source: "context",
+      confidence: 0.9,
+    });
+  },
+  payments: {
+    provider: payments.provider,
+    mode: merchantPaymentMode,
+    merchants: createMerchantDirectory({ mode: merchantPaymentMode, json: config.paymentsMerchantsJson }),
+    merchantName: config.ticketingMerchantName,
+    xrpPerUsd: config.paymentsXrpPerUsd,
+    maxUsd: config.paymentsMaxUsd,
+    timeoutMs: config.paymentsTimeoutMs,
+  },
 });
 const memory = config.backboardApiKey
   ? createBackboardMemoryService({
@@ -172,11 +228,47 @@ console.info(
     ? "Reservations: live ElevenLabs outbound calls are enabled."
     : "Reservations: mock mode (no real phone calls).",
 );
-if (config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple") {
+console.info(
+  `Ticketing: ${ticketing.provider.name} provider, ${ticketing.service.effectiveMode} checkout` +
+    (ticketing.service.effectiveMode === "link" ? " (official purchase links only; nothing is bought)." : "."),
+);
+if (xrpl) {
+  console.info("Payments: XRPL Testnet. Person payments are signed by each customer's own Testnet wallet. No real money moves.");
+  console.info(
+    `XRPL customer wallets: ${xrpl.guard.registry.listPublic().map((w) => `${w.customerName} ${w.xrplAddress}`).join(", ") || "none yet"}.`,
+  );
+  const linked = Object.keys(customerSenders).length;
+  if (linked === 0) {
+    console.warn("XRPL_CUSTOMER_SENDERS_JSON is empty. No Photon sender is linked to a customer wallet, so person payments will be refused.");
+  } else {
+    console.info(`${linked} Photon sender(s) linked to XRPL Testnet customer wallets.`);
+  }
+  const depositWallet = reservations.payments?.senderAddress;
+  if (depositWallet) {
+    console.info(`Reservation deposits: XRPL Testnet through the shared payment service, from test wallet ${depositWallet}.`);
+  } else {
+    console.warn("No XRPL test wallet is configured for the payment service. Reservation deposits will be refused (run npm run xrpl:status).");
+  }
+  const dashboard = new XrplDashboardBuilder({
+    registry: xrpl.guard.registry,
+    audit: xrpl.guard.audit,
+    ledger: xrpl.ledger,
+    secrets: () => xrpl.secrets.knownSecrets(),
+    operatorPayments: () => xrplPayments.listPublicTransactions({ limit: 20 }),
+  });
+  void startXrplDashboardServer(config.xrplDashboardPort, () => dashboard.build())
+    .then((server) => console.info(`XRPL Testnet dashboard: http://127.0.0.1:${server.port}${DASHBOARD_PATH}`))
+    .catch((error) => console.warn(`XRPL dashboard did not start: ${errorCategory(error)}`));
+} else if (config.paymentsMode === "nessie_ripple") {
   console.info("Payments: XRPL Testnet. Dollar amounts are converted to test XRP. No real money moves.");
   if (!config.xrplTestnetSeed) {
     console.warn("PAYMENTS_MODE includes ripple_test but XRPL_TESTNET_SEED is missing. Confirmed ledger payments will fail closed.");
   }
+}
+if (config.autonomousPaymentsEnabled) {
+  console.info(
+    `Autonomous XRPL Testnet payments are enabled up to $${config.autonomousMaxUsd}. Photon transfers still wait for a human yes.`,
+  );
 }
 if (config.paymentsMode === "nessie" || config.paymentsMode === "nessie_ripple") {
   console.info(
@@ -294,9 +386,11 @@ for await (const [space, message] of app.messages) {
         config.elevenLabsApiKey,
         config.elevenLabsWebhookSecret,
         config.xrplTestnetSeed,
+        ...(xrpl?.secrets.knownSecrets() ?? []),
       ].filter(Boolean),
       reservations: reservations.orchestrator,
       payments: payments.service,
+      ticketing: ticketing.service,
       meetup: meetup.service,
       liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,

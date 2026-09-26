@@ -489,7 +489,8 @@ iMessage
   → recipient directory for this process
   → pending payment stored on that Photon space
   → user confirms
-  → mock provider, or XRPL Testnet
+  → mock provider, or (ripple_test) sender and recipient customer wallets
+      → deterministic policy → sign with the sender's own wallet → validated XRPL Testnet result → audit
   → the same Photon space
 ```
 
@@ -503,6 +504,10 @@ Chat amounts are US dollars. XRPL Testnet does not settle bank dollars. In `ripp
 
 `mock` (the default) runs the same pending and confirmation flow and returns a fake transaction id. It does not open a socket.
 
+In `ripple_test`, a chat payment between people settles between customer wallets. The Photon sender must be mapped to a registered customer in `XRPL_CUSTOMER_SENDERS_JSON`. Display names are never trusted for this. The recipient must be a registered customer: Rohan, Keith, Ben, or Sarah. After the yes, `XrplPaymentExecutor` builds a frozen intent and runs the deterministic `PolicyEngine`. Only then does it sign with the sender's own Testnet wallet and wait for a validated ledger. The reply says "Sent" only when the result is `tesSUCCESS`, the transaction is validated, a hash exists, and the delivered amount matches. That reply links the hash on [testnet.xrpl.org](https://testnet.xrpl.org). Unmapped senders and unknown recipients are refused before confirmation, and no wallet is created for them.
+
+Reservation deposits (merchant payments) still use the `XRPL_TESTNET_SEED` provider described below.
+
 `nessie` records a completed **purchase** on Capital One's Nessie hackathon API (fake USD, fake merchants). That is not a real bank debit. `nessie_ripple` writes that Nessie purchase first, then submits the same dollar amount as test XRP on XRPL Testnet (peg `PAYMENTS_XRP_PER_USD`). The XRPL memo includes `nessie:<purchaseId>` so the two records match. Fund a Testnet sender with `npm run payments:fund-testnet`.
 
 ### Environment
@@ -515,13 +520,78 @@ Chat amounts are US dollars. XRPL Testnet does not settle bank dollars. In `ripp
 | `NESSIE_CUSTOMER_ID` | | Optional existing Nessie customer |
 | `NESSIE_ACCOUNT_ID` | | Optional existing Nessie checking account |
 | `PAYMENTS_MAX_USD` | `500` | Reject larger requests before confirmation |
+| `PAYMENTS_DAILY_MAX_USD` | `1000` | Deterministic daily cap for the autonomous policy engine |
+| `XRPL_AUTO_PROVISION_TESTNET` | `false` | Fund a registered customer from the Testnet faucet when they have no wallet. Unknown names are not provisioned |
+| `XRPL_CUSTOMER_SENDERS_JSON` | | Photon sender id (phone or email) to customer id, e.g. `{"+15551234567":"rohan"}`. Required for chat payments in `ripple_test` |
+| `XRPL_DASHBOARD_PORT` | `8790` | Read-only `GET /api/xrpl/dashboard` on 127.0.0.1 for the website's XRPL Testnet section |
+| `AUTONOMOUS_PAYMENTS_ENABLED` | `false` | Allow an agent payment with no human yes. Testnet only, and only under `AUTONOMOUS_MAX_USD` |
+| `AUTONOMOUS_MAX_USD` | `25` | Stricter cap for autonomous payments |
 | `PAYMENTS_XRP_PER_USD` | `1` | Demo peg used only in `ripple_test` |
 | `PAYMENTS_TIMEOUT_MS` | `20000` | Give up without claiming success |
 | `XRPL_TESTNET_URL` | `wss://s.altnet.rippletest.net:51233` | Official Testnet websocket. Other hosts are refused |
 | `XRPL_TESTNET_SEED` | | Testnet sender family seed. Never commit it |
 | `PAYMENTS_RECIPIENTS_JSON` | | Optional map of display name to classic address |
+| `PAYMENTS_MERCHANTS_JSON` | | Testnet classic addresses for restaurant deposits. Required in `ripple_test` |
+| `RESERVATION_DEPOSITS_JSON` | | Demo deposit fixtures. Not a live restaurant policy |
 
 There is no real-money mode. A missing seed in `ripple_test` fails the payment closed instead of pretending it succeeded.
+
+## Reservation deposits
+
+Some restaurants charge a deposit, prepayment, or reservation fee to hold a table. The agent books them in the same Photon conversation, but it never pays without an explicit yes, and it never takes the amount or destination from Gemini or the message.
+
+```
+iMessage → Photon → reservation intent/state (per space.id)
+  → restaurant integration: booking provider, demo catalog, or the ElevenLabs call
+  → grounded ReservationPaymentRequirement (amount, currency, recipient, type, expiry)
+  → "Want me to pay the $100 deposit and book it?"
+  → explicit yes from the same sender in the same space
+  → re-verify terms from their source → XRPL guardrail (PolicyEngine) ALLOW/DENY
+  → PaymentService.executeDeposit → XRPL Testnet (idempotent InvoiceID)
+  → provider confirm or ElevenLabs callback → reply in the same Photon space
+```
+
+```text
+@agent book Ripple Bistro for 4 tomorrow at 8
+Ripple Bistro has a 8:00 PM table for 4 tomorrow. They require a $100 deposit ($25/person). Want me to pay the $100 deposit and book it?
+Book it
+I won't pay the $100 deposit unless you say yes. Pay it and book?
+yes
+Booked Ripple Bistro for 4 tomorrow at 8:00 PM. The $100 deposit was paid successfully on XRPL Testnet (tx FC180461). Confirmation RB-17C5DC.
+```
+
+### Where amounts come from
+
+| Source | Used for |
+| --- | --- |
+| `provider` | A booking API (`src/reservations/providers.ts`). Ripple Bistro is the built-in mock: 5–10 PM on the half hour, $25/person deposit, 9:30 PM always full. |
+| `demo` | `RESERVATION_DEPOSITS_JSON` fixtures such as Carbone at $50. Not a claim about the real restaurant. |
+| `phone` | The restaurant states it on an ElevenLabs call. The agent is told never to agree to pay or give payment details; it collects `deposit_required`, `deposit_amount_usd`, optional `deposit_type`/`deposit_per_person_usd`, and returns `NEEDS_USER_INPUT`. The amount is accepted only if the restaurant said the same figure in the transcript. After payment the agent calls back with `deposit_paid_usd`/`deposit_reference`. |
+
+The destination is the provider-published wallet or `PAYMENTS_MERCHANTS_JSON` (`{"Ripple Bistro":"r..."}`); two different answers means no destination. Mock mode uses `mock:merchant:{name}` and submits nothing. Card holds cannot be settled on XRPL and are refused with a clear reply.
+
+### Authorization, idempotency, and failure
+
+- "Book X" or "Book it" is not authorization. Only a clear yes (`yes`, `pay it`, `confirm`, …) from the person who asked, in the same space, before the 15-minute expiry. A stale yes re-quotes; a changed party re-quotes and cancels the old pending payment.
+- Each obligation has a deterministic id (`resv-pay-…`, a hash of space, reservation, restaurant, recipient, type, amount, party, date, time). It is the PaymentService idempotency key and the ledger `InvoiceID`, so duplicate yeses, Photon redeliveries, and restarts find the existing payment instead of paying again.
+- States are kept separately on the reservation: `PAYMENT_REQUIRED → PAYMENT_AUTHORIZED → PAYMENT_SUBMITTED → PAYMENT_CONFIRMED → RESERVATION_CONFIRMED`, plus `PAYMENT_FAILED`, `PAYMENT_REJECTED`, `PAYMENT_UNCERTAIN`, `PAYMENT_EXPIRED`, and `RESERVATION_FAILED_AFTER_PAYMENT`. A failed or blocked payment never says booked. If the restaurant fails after payment, the reply says so and `try again` retries the booking without paying again.
+- Every deposit goes through `src/payments/reservation-deposits.ts`, which runs the XRPL guardrail `PolicyEngine` (limits, daily limit, duplicate, network, balance, intent-vs-payload) plus merchant checks, and writes to the same audit log as person payments.
+
+### Trace
+
+`GET http://127.0.0.1:$RESERVATION_WEBHOOK_PORT/reservations/payments?spaceId=…` and `/reservations/{id}/payment` return restaurant, time, party, deposit, sender and recipient wallets, tx hash, explorer link, ledger result, guardrail checks, and the state timeline. No seeds. Only direct local requests are served; anything arriving through a tunnel gets 404.
+
+On the website, the existing XRPL Testnet panel (`npm run xrpl:dashboard`) lists confirmed deposits as "Ripple Bistro (reservation deposit)" once the hash and balance changes are re-verified on the ledger, and lists guardrail DENYs under guardrails. Both come from the shared guardrail audit log.
+
+### Live Testnet demo
+
+```bash
+npm run test:reservation-deposit-live
+```
+
+Faucet-funds a sender (unless `XRPL_TESTNET_SEED` is set) and a Ripple Bistro wallet, runs the conversation above through the real guardrail and PaymentService, prints the trace and explorer link, and writes `data/reservation-deposit/last-run.json`. It sends 10 test XRP for the $100 deposit (`DEPOSIT_LIVE_XRP_PER_USD`, default 0.1). It never prints a seed.
+
+For the iMessage agent: `PAYMENTS_MODE=ripple_test`, `XRPL_TESTNET_SEED`, and `PAYMENTS_MERCHANTS_JSON='{"Ripple Bistro":"r..."}'`. A restaurant with no deposit still asks `Want me to call?` and never opens a payment.
 
 ### Recipients
 
@@ -550,6 +620,13 @@ npm run typecheck
 
 Payment tests mock the provider. `npm test` does not contact Ripple.
 
+Fund the registered Testnet wallets from the official faucet (`faucet.altnet.rippletest.net`) before paying between them. A new name gets a new account. A name that already has a wallet is topped up at the same address. Seeds stay in `data/ripple-demo/secrets.json` and are not printed. Unknown names are refused.
+
+```bash
+npm run faucet
+npm run faucet -- Rohan Keith
+```
+
 Opt-in Testnet check. It refuses any URL that is not XRPL Testnet, and it refuses a server whose network id is not Testnet (`1`). With no `XRPL_TESTNET_SEED` it funds temporary accounts from the official Testnet faucet and does not print secrets. It prints the payment id, destination address, requested USD, XRP amount and drops submitted, transaction hash, and final status.
 
 ```bash
@@ -557,3 +634,21 @@ npm run test:ripple-live
 ```
 
 Do not point `XRPL_TESTNET_URL` at mainnet. The script and the provider both refuse that.
+
+### Ripple guardrails
+
+Photon person payments still ask for a human yes. A separate Testnet path can pay without that yes when `AUTONOMOUS_PAYMENTS_ENABLED=true`. Gemini still does not decide ALLOW or DENY. `PolicyEngine` checks the sender, the recipient, the wallet, the amount, the daily total, duplicates, the balance, and that the signed proposal still matches the frozen intent.
+
+```bash
+npm run demo:ripple
+```
+
+The demo provisions Rohan and Keith from the official Testnet faucet, or reuses their existing wallets. It then sends a real 1 XRP payment from Rohan to Keith and prints the before and after balances, the hash, the ledger index, the engine result, and the explorer link. After that it runs three attacks against real balances, and each one must leave the ledger untouched:
+
+- a confirmed $500 intent whose payload was tampered to $5,000 (`INTENT_PAYLOAD_MISMATCH`)
+- `RandomFakeCustomer` (`UNKNOWN_RECIPIENT`, with no wallet created)
+- an autonomous $500 against the $25 cap (`SPENDING_LIMIT_EXCEEDED`)
+
+The demo exits non-zero if any step does not behave as expected. Seeds stay in `data/ripple-demo/secrets.json` (mode 0600, gitignored). Public wallet metadata (`wallets.json`) and the append-only audit log (`audit.jsonl`) are separate files, and the demo checks that neither contains a seed.
+
+The website's XRPL Testnet section reads `GET http://127.0.0.1:8790/api/xrpl/dashboard`. The agent serves it in `ripple_test`, and `npm run xrpl:dashboard` serves it on its own. It lists wallets with live validated balances, recent payments, and attempts that were denied before signing. A hash is linked to the explorer only after it has been re-verified on XRPL Testnet. Set `VITE_XRPL_DASHBOARD_URL` in the frontend to point it elsewhere.

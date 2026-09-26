@@ -35,6 +35,8 @@ export const config = {
   reservationAllowGazetteerDial: env("RESERVATION_ALLOW_GAZETTEER_DIAL") === "true",
   reservationWebhookPort: Number(env("RESERVATION_WEBHOOK_PORT", "8787")) || 8787,
   reservationCallTimeoutMs: parseCallTimeoutMs(process.env.RESERVATION_CALL_TIMEOUT_MS),
+  /** Demo fixture only. Example: {"Carbone":{"amountUsd":50,"extraPerPersonUsd":10,"basePartySize":4}} */
+  reservationDepositsJson: env("RESERVATION_DEPOSITS_JSON"),
   elevenLabsApiKey: env("ELEVENLABS_API_KEY"),
   elevenLabsAgentId: env("ELEVENLABS_AGENT_ID"),
   elevenLabsAgentPhoneNumberId: env("ELEVENLABS_AGENT_PHONE_NUMBER_ID") || env("ELEVENLABS_PHONE_NUMBER_ID"),
@@ -52,11 +54,33 @@ export const config = {
    */
   paymentsMode: paymentsMode(env("PAYMENTS_MODE", "mock")),
   paymentsMaxUsd: positiveNumber(env("PAYMENTS_MAX_USD", "500"), 500),
+  paymentsDailyMaxUsd: positiveNumber(env("PAYMENTS_DAILY_MAX_USD", "1000"), 1000),
   paymentsTimeoutMs: positiveNumber(env("PAYMENTS_TIMEOUT_MS", "20000"), 20_000),
   paymentsXrpPerUsd: positiveNumber(env("PAYMENTS_XRP_PER_USD", "1"), 1),
   xrplTestnetUrl: env("XRPL_TESTNET_URL", "wss://s.altnet.rippletest.net:51233"),
   xrplTestnetSeed: env("XRPL_TESTNET_SEED"),
+  /** Registered customers missing a wallet can be funded from the Testnet faucet. Never Mainnet. */
+  xrplAutoProvisionTestnet: env("XRPL_AUTO_PROVISION_TESTNET") === "true",
+  /** Autonomous agent payments. Still Testnet-only, and still under AUTONOMOUS_MAX_USD. */
+  autonomousPaymentsEnabled: env("AUTONOMOUS_PAYMENTS_ENABLED") === "true",
+  autonomousMaxUsd: positiveNumber(env("AUTONOMOUS_MAX_USD", "25"), 25),
+  /** Photon sender id → registered customer, e.g. {"+15551234567":"rohan"}. Unmapped senders cannot spend. */
+  xrplCustomerSendersJson: env("XRPL_CUSTOMER_SENDERS_JSON"),
+  /** Read-only JSON for the website's XRPL Testnet section. Bound to 127.0.0.1. */
+  xrplDashboardPort: positiveNumber(env("XRPL_DASHBOARD_PORT", "8790"), 8790),
   paymentsRecipientsJson: env("PAYMENTS_RECIPIENTS_JSON"),
+  /** Testnet merchant addresses. Example: {"Carbone":"r..."}. Never invent one. */
+  paymentsMerchantsJson: env("PAYMENTS_MERCHANTS_JSON"),
+  /** mock needs no credentials. ticketmaster uses the Discovery API with TICKETMASTER_API_KEY. */
+  ticketingProvider: (env("TICKETING_PROVIDER", "mock") === "ticketmaster" ? "ticketmaster" : "mock") as "mock" | "ticketmaster",
+  /** Unset: mock provider → demo checkout, ticketmaster → link only. provider needs Partner API access. */
+  ticketingPurchaseMode: ticketPurchaseMode(env("TICKETING_PURCHASE_MODE")),
+  ticketmasterApiKey: env("TICKETMASTER_API_KEY"),
+  /** Only with approved Ticketmaster Partner API access. Without it, purchases return the official link. */
+  ticketmasterPartnerApiKey: env("TICKETMASTER_PARTNER_API_KEY"),
+  ticketingDefaultCity: env("TICKETING_DEFAULT_CITY", "New York"),
+  /** Demo checkout payee, resolved through PAYMENTS_MERCHANTS_JSON like reservation deposits. */
+  ticketingMerchantName: env("TICKETING_MERCHANT_NAME", "Demo Box Office"),
   nessieApiKey: env("NESSIE_API_KEY"),
   nessieBaseUrl: env("NESSIE_BASE_URL", "http://api.nessieisreal.com"),
   nessieCustomerId: env("NESSIE_CUSTOMER_ID"),
@@ -80,6 +104,12 @@ export const config = {
   smtpPass: env("SMTP_PASS"),
   emailFrom: env("EMAIL_FROM"),
 };
+
+function ticketPurchaseMode(value: string): "mock" | "provider" | "link" | undefined {
+  if (value === "mock" || value === "provider" || value === "link") return value;
+  if (value) console.warn(`TICKETING_PURCHASE_MODE=${value} is not supported; using the safe default.`);
+  return undefined;
+}
 
 export type PaymentsMode = "mock" | "ripple_test" | "nessie" | "nessie_ripple";
 

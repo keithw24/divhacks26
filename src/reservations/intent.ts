@@ -74,6 +74,7 @@ function isBooking(text: string): boolean {
 const CONTINUING = new Set<ReservationStatus>([
   "COLLECTING_DETAILS",
   "READY_FOR_CONFIRMATION",
+  "AWAITING_DEPOSIT",
   "CONFIRMED_BY_USER",
   "NEEDS_USER_INPUT",
   "CALL_FAILED",
@@ -128,7 +129,14 @@ export function classifyReservationMessage(text: string, ctx: IntentContext): Re
 }
 
 function shouldContinue(text: string, pending?: PendingQuestion): boolean {
-  if (pending === "confirm" || pending === "offer" || pending === "name" || pending === "phone" || pending === "location") {
+  if (
+    pending === "confirm" ||
+    pending === "offer" ||
+    pending === "name" ||
+    pending === "phone" ||
+    pending === "location" ||
+    pending === "deposit"
+  ) {
     return true;
   }
   if (/try again|call again/i.test(text)) return true;

@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { AgentTag, ChatWindow, Incoming, Outgoing } from "@/components/site/chat";
 import { useHasSession } from "@/components/site/shell";
+import { XrplTestnetSection } from "@/components/site/xrpl-testnet";
 import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/")({
@@ -126,6 +127,9 @@ function Index() {
           </a>
           <a className="hover:text-primary" href="#safety">
             Safety
+          </a>
+          <a className="hover:text-primary" href="#xrpl">
+            XRPL Testnet
           </a>
           <a className="hover:text-primary" href="#integrations">
             Integrations
@@ -515,7 +519,7 @@ function Index() {
         <SectionTitle
           kicker="Conversational payments"
           title="Settle up without leaving the chat."
-          sub="Ripple is the transaction layer for actions that involve money. Nothing is sent until the person asking says yes."
+          sub="Every customer has their own XRPL Testnet wallet. Payments settle wallet to wallet on XRPL Testnet, and nothing is sent until the person asking says yes."
         />
         <div className="mt-6 grid md:grid-cols-2 gap-6 items-start">
           <ChatWindow title="Group · Uber">
@@ -535,8 +539,9 @@ function Index() {
                 ["iMessage request", "bg-foreground text-background"],
                 ["Gemini reads recipient + amount + reason", "bg-lime text-lime-foreground"],
                 ["Explicit confirmation from the sender", "bg-primary text-primary-foreground"],
-                ["Ripple test transaction", "bg-blue text-blue-foreground"],
-                ["Transaction result", "bg-sky text-sky-foreground"],
+                ["Deterministic policy check (no LLM)", "bg-card text-foreground"],
+                ["Signed from the sender's own Testnet wallet", "bg-blue text-blue-foreground"],
+                ["Validated ledger result + hash", "bg-sky text-sky-foreground"],
                 ["Reply in the same iMessage chat", "bg-foreground text-background"],
               ].map(([label, tone], i) => (
                 <li key={label} className="flex items-center gap-3">
@@ -550,10 +555,20 @@ function Index() {
               ))}
             </ol>
             <div className="text-xs text-muted-foreground mt-4 font-mono">
-              demo example · runs as a Ripple test transaction, not a real-money transfer
+              demo example · settles in test XRP on XRPL Testnet, not a real-money transfer
             </div>
           </div>
         </div>
+      </section>
+
+      {/* XRPL TESTNET */}
+      <section id="xrpl" className="px-5 py-12 max-w-4xl mx-auto">
+        <SectionTitle
+          kicker="Live settlement"
+          title="Real ledger, test money."
+          sub="Customer wallets, balances, and validated transactions read live from XRPL Testnet, plus payments the guardrails refused before anything was signed."
+        />
+        <XrplTestnetSection />
       </section>
 
       {/* CROSS-FEATURE */}
