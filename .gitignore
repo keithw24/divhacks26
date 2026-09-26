@@ -1,4 +1,5 @@
 .env
+.env.local
 .venv/
 venv/
 __pycache__/
@@ -6,3 +7,6 @@ __pycache__/
 .DS_Store
 credentials.txt
 *-credentials.txt
+node_modules/
+dist/
+*.log
