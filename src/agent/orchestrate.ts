@@ -8,6 +8,7 @@ import { getRoute } from "../skills/routeSkill.js";
 import { getSafety } from "../skills/safetySkill.js";
 import { renderResponse, rankRecommendations } from "./compose.js";
 import { parseIntent } from "./intent.js";
+import { summarizeSafety } from "./safetySummary.js";
 
 export interface OrchestratorInput {
   question: string;
@@ -142,5 +143,6 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   const wantedPicks = intent.needs.includes("food") || intent.needs.includes("events");
   const nothingVerified = !picks.length && !safety?.data && !route;
   if (input.fallback && !picks.length && (wantedPicks || nothingVerified)) return input.fallback();
-  return renderResponse({ picks, safety, route, warnings });
+  const safetyLine = safety?.data ? await summarizeSafety(safety.data) : undefined;
+  return renderResponse({ picks, safety, safetyLine, route, warnings });
 }

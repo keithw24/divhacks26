@@ -1,5 +1,4 @@
 import type { Recommendation, RouteResult, SkillResult } from "../domain/contracts.js";
-import { formatSafetyReply } from "../formatReport.js";
 import type { BlockSafetyReport } from "../safety.js";
 import { generateJson } from "./gemini.js";
 
@@ -62,6 +61,7 @@ const eventTime = (iso?: string) => iso
 export function renderResponse(input: {
   picks: Array<{ item: Recommendation; reason: string }>;
   safety?: SkillResult<BlockSafetyReport | null>;
+  safetyLine?: string;
   route?: SkillResult<RouteResult>;
   warnings: string[];
 }): string {
@@ -76,20 +76,7 @@ export function renderResponse(input: {
     if (item.url) lines.push(item.url);
   });
 
-  const report = input.safety?.data;
-  if (report) {
-    lines.push(
-      formatSafetyReply(
-        {
-          label: report.placeLabel || "this area",
-          latitude: report.latitude,
-          longitude: report.longitude,
-          locality: null,
-        },
-        report,
-      ),
-    );
-  }
+  if (input.safetyLine) lines.push(input.safetyLine);
   if (input.route) {
     lines.push(`Route: ${input.route.data.summary}`);
     lines.push(input.route.data.directionsUrl);
