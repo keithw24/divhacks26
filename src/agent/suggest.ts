@@ -86,25 +86,66 @@ async function citySketchFor(input: SuggestInput): Promise<string | undefined> {
   );
 }
 
-/** Ask Gemini what the person/group should do next, grounded in Google Maps. */
+const UNGROUNDED_NOTE =
+  "\n\nGoogle Maps is unavailable right now, so rely on your own knowledge: only suggest well-known, " +
+  "long-established places, and don't state exact hours — say \"usually open late\" or similar instead.";
+
+let warnedUngrounded = false;
+
+const status = (err: unknown) => (typeof err === "object" && err !== null ? (err as { status?: number }).status : undefined);
+const isQuotaError = (err: unknown) => status(err) === 429;
+
+/** Retry temporary Gemini failures (overloaded / server errors) with a short backoff. */
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  const delaysMs = [1000, 3000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const code = status(err) ?? 0;
+      if (code < 500 || attempt >= delaysMs.length) throw err;
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+    }
+  }
+}
+
+/** Ask Gemini what the person/group should do next, grounded in Google Maps when the key allows it. */
 export async function suggestNext(input: SuggestInput): Promise<string> {
   const citySketch = await citySketchFor(input).catch((err) => {
     console.error(`tiger sketch failed: ${err instanceof Error ? err.name : "Error"}`);
     return undefined;
   });
-  const response = await gemini().models.generateContent({
+  const request = {
     model: config.geminiModel,
     contents: [{ role: "user", parts: [{ text: buildContext({ ...input, citySketch }) }] }],
-    config: {
-      systemInstruction: systemPrompt(input.isGroup),
-      tools: [{ googleMaps: {} }],
-      ...(input.location && {
-        toolConfig: {
-          retrievalConfig: { latLng: { latitude: input.location.latitude, longitude: input.location.longitude } },
-        },
-      }),
-    },
-  });
+  };
+
+  let response: GenerateContentResponse;
+  try {
+    response = await withRetry(() => gemini().models.generateContent({
+      ...request,
+      config: {
+        systemInstruction: systemPrompt(input.isGroup),
+        tools: [{ googleMaps: {} }],
+        ...(input.location && {
+          toolConfig: {
+            retrievalConfig: { latLng: { latitude: input.location.latitude, longitude: input.location.longitude } },
+          },
+        }),
+      },
+    }));
+  } catch (err) {
+    // Maps grounding has its own quota (none on free-tier keys). Fall back to an ungrounded answer.
+    if (!isQuotaError(err)) throw err;
+    if (!warnedUngrounded) {
+      console.warn("Google Maps grounding hit a quota limit (429); answering without it. Use a billed Gemini key to enable it.");
+      warnedUngrounded = true;
+    }
+    response = await withRetry(() => gemini().models.generateContent({
+      ...request,
+      config: { systemInstruction: systemPrompt(input.isGroup) + UNGROUNDED_NOTE },
+    }));
+  }
 
   const reply = response.text?.trim();
   if (!reply) return "Hmm, I couldn't come up with anything. Where are you right now?";
