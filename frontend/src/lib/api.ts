@@ -124,7 +124,8 @@ export const api = {
   me: () => call<Me>("GET", "/api/me"),
   savePreferences: (prefs: Preferences) => call<{ ok: true }>("PUT", "/api/me/preferences", prefs),
   startChat: () => call<{ ok: true }>("POST", "/api/me/start-chat"),
-  createWallet: () => call<{ ok: true; xrplAddress: string }>("POST", "/api/me/wallet", { wantWallet: true }),
+  createWallet: () =>
+    call<{ ok: true; xrplAddress: string }>("POST", "/api/me/wallet", { wantWallet: true }),
   /** Emails the agent's number; the number itself is never sent to the browser. */
   sendNumber: () => call<{ ok: true }>("POST", "/api/me/send-number"),
   memories: () => call<{ memories: Memory[] }>("GET", "/api/me/memories"),

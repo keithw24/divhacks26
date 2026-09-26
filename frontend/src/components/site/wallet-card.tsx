@@ -34,7 +34,11 @@ export function WalletChoice({
         Needed to send or receive in iMessage. Test XRP only — not real money. The agent holds the
         signing key; you never paste a seed.
       </p>
-      {option(true, "Yes, I want a wallet", "Create an XRPL Testnet wallet for this iMessage number.")}
+      {option(
+        true,
+        "Yes, I want a wallet",
+        "Create an XRPL Testnet wallet for this iMessage number.",
+      )}
       {option(false, "Not now", "You can still chat. Payments stay off until you opt in.")}
     </fieldset>
   );

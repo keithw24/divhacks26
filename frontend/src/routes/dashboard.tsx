@@ -173,10 +173,14 @@ function Dashboard() {
           busy={wallet.busy}
           message={wallet.message}
           onCreate={() =>
-            void send(async () => {
-              await api.createWallet();
-              await queryClient.invalidateQueries({ queryKey: ["me"] });
-            }, setWallet, "Wallet created. You can pay in iMessage after a yes.")
+            void send(
+              async () => {
+                await api.createWallet();
+                await queryClient.invalidateQueries({ queryKey: ["me"] });
+              },
+              setWallet,
+              "Wallet created. You can pay in iMessage after a yes.",
+            )
           }
         />
       </section>
