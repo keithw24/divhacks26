@@ -78,6 +78,14 @@ services:
     profiles: ["tools"]
     env_file: .env
 
+  ingest-hourly:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    profiles: ["tools"]
+    env_file: .env
+    command: ["./deploy/run-ingest-hourly.sh"]
+
 volumes:
   agent_data:
   caddy_data:

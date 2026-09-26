@@ -3,7 +3,7 @@ import type { Location, Recommendation, UserIntent } from "../domain/contracts.j
 import { prefersSaferSlowerRoute } from "../formatReport.js";
 import { geocodeNyc } from "../geocode.js";
 import { applyNavHazards } from "../navigation/guide.js";
-import { lookupNavHazards, nightHourEt } from "../navigation/hazards.js";
+import { lookupNavHazards, nightHourEt, recentOpsNote } from "../navigation/hazards.js";
 import { asksDirectionsHome, wantsSafetySketch } from "../safetyIntent.js";
 import { findEvents } from "../skills/eventsSkill.js";
 import { findFood } from "../skills/foodSkill.js";
@@ -136,24 +136,30 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     Boolean(intent.needs.includes("route") && destination) && prefersSaferSlowerRoute(safety?.data);
   let travelMode = tradeTimeForSafety && intent.travelMode === "WALK" ? "TRANSIT" : intent.travelMode;
   let navNote: string | undefined;
-  if (intent.needs.includes("route") && destination && config.databaseUrl) {
+  let opsNote: string | undefined;
+  const shouldScanOps =
+    Boolean(config.databaseUrl) && (intent.needs.includes("route") || wantsSafety);
+  if (shouldScanOps) {
     try {
       const hazards = await lookupNavHazards({
-        points: [origin, destination],
+        points: destination && intent.needs.includes("route") ? [origin, destination] : [origin],
         databaseUrl: config.databaseUrl,
         when: input.question,
         now,
       });
-      const guided = applyNavHazards(
-        [
-          { mode: "WALK", steps: [], summary: `${origin.label} ${destination.label}` },
-          { mode: "TRANSIT", steps: [], summary: "transit" },
-        ],
-        hazards,
-        { hourEt: nightHourEt(input.question, now) },
-      );
-      if (guided.preferTransit && travelMode === "WALK") travelMode = "TRANSIT";
-      navNote = guided.note;
+      opsNote = recentOpsNote(hazards);
+      if (intent.needs.includes("route") && destination) {
+        const guided = applyNavHazards(
+          [
+            { mode: "WALK", steps: [], summary: `${origin.label} ${destination.label}` },
+            { mode: "TRANSIT", steps: [], summary: "transit" },
+          ],
+          hazards,
+          { hourEt: nightHourEt(input.question, now) },
+        );
+        if (guided.preferTransit && travelMode === "WALK") travelMode = "TRANSIT";
+        navNote = guided.note;
+      }
     } catch (error) {
       console.warn("tiger: nav hazards unavailable:", error);
     }
@@ -186,7 +192,9 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   const wantedPicks = intent.needs.includes("food") || intent.needs.includes("events");
   const nothingVerified = !picks.length && !safety?.data && !route;
   if (!picks.length && ranked.groupText && wantedPicks && candidates.length) {
-    const safetyLine = safety?.data ? await summarizeSafety(safety.data) : undefined;
+    const safetyLine = [safety?.data ? await summarizeSafety(safety.data) : undefined, opsNote]
+      .filter(Boolean)
+      .join(" ") || undefined;
     return renderResponse({
       picks: [],
       safety,
@@ -200,7 +208,9 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     const askedEvents = intent.needs.includes("events");
     const foodEmpty = !intent.needs.includes("food") || (food?.data.length ?? 0) === 0;
     if (askedEvents && (events?.data.length ?? 0) === 0 && foodEmpty) {
-      const safetyLine = safety?.data ? await summarizeSafety(safety.data) : undefined;
+      const safetyLine = [safety?.data ? await summarizeSafety(safety.data) : undefined, opsNote]
+      .filter(Boolean)
+      .join(" ") || undefined;
       return renderResponse({
         picks: [],
         safety,
@@ -218,7 +228,9 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     }
     return input.fallback();
   }
-  const safetyLine = safety?.data ? await summarizeSafety(safety.data) : undefined;
+  const safetyLine = [safety?.data ? await summarizeSafety(safety.data) : undefined, opsNote]
+    .filter(Boolean)
+    .join(" ") || undefined;
   return renderResponse({
     picks,
     safety,

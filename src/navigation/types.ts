@@ -1,4 +1,4 @@
-export type NavHazardKind = "streetlight" | "signal" | "street_closed" | "film_shoot";
+export type NavHazardKind = "streetlight" | "signal" | "street_closed" | "film_shoot" | "crash";
 
 export interface NavHazard {
   kind: NavHazardKind;
