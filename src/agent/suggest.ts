@@ -280,6 +280,12 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
       return suggestWithGemini(input);
     },
     memoryContext: [untrustedMemory(input), rankingHint(input.social)].filter(Boolean).join("\n") || undefined,
+    privateConstraintLines: [
+      ...(input.userMemories ?? []).map((text) => ({ who: input.currentUser?.displayName || input.asker, text })),
+      ...(input.participantMemories ?? []).flatMap((person) =>
+        person.memories.map((text) => ({ who: person.displayName || person.userId, text })),
+      ),
+    ],
     onSafetyReport: input.onSafetyReport,
   });
   return modelWrote ? answer : withOpener(answer, input.social);

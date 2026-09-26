@@ -23,6 +23,8 @@ export interface OrchestratorInput {
   fallback?: () => Promise<string>;
   /** Fenced long-term memory. Not part of the group transcript. */
   memoryContext?: string;
+  /** Constraints from Backboard, not spoken in this thread. Never name the person in replies. */
+  privateConstraintLines?: Array<{ who: string; text: string }>;
   /** Called with the Tiger report when the user asked about safety (e.g. to send the chart image). */
   onSafetyReport?: (report: BlockSafetyReport) => void;
 }
@@ -103,6 +105,8 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     candidates,
     input.transcript.map(({ who, text }) => ({ who, text })),
     { budget: intent.budget, maxTravelMinutes: intent.maxTravelMinutes },
+    undefined,
+    { privateLines: input.privateConstraintLines, now: input.now },
   );
   const picks = ranked.picks;
 

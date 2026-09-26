@@ -32,15 +32,16 @@ export function rankRecommendationsSync(
   transcript: Array<{ who: string; text: string }>,
   defaults?: { budget?: Budget; maxTravelMinutes?: number },
   spaceId?: string,
+  extras?: { privateLines?: Array<{ who: string; text: string }>; now?: Date },
 ): RankResult {
   if (!recommendations.length) return { picks: [], offerMore: false };
-  const members = membersFromTranscript(transcript, defaults);
+  const members = membersFromTranscript(transcript, defaults, extras?.privateLines);
   const key = sessionKey(spaceId, recommendations.map((item) => item.id));
   const fp = fingerprint(recommendations.map((item) => item.id));
   const more = asksForMorePlans(question);
   const prior = sessionOffset.get(key);
   const offset = more && prior?.fingerprint === fp ? prior.offset : 0;
-  const selected: GroupPlanResult = selectGroupPlans(recommendations, members, offset);
+  const selected: GroupPlanResult = selectGroupPlans(recommendations, members, offset, extras?.now);
   const nextOffset = offset + selected.ranked.length;
   sessionOffset.set(key, { fingerprint: fp, offset: selected.leftover.length ? nextOffset : 0 });
   return {

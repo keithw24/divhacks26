@@ -22,6 +22,9 @@ export function formatGroupPlans(result: GroupPlanResult): string {
     return `${index + 1}. ${plan.item.name} — ${facts.join(", ")}. ${plan.reason}${plan.item.url ? `\n${plan.item.url}` : ""}`;
   });
 
+  if (result.because) lines.push(result.because);
+  for (const line of result.counterfactuals) lines.push(`- ${line}`);
+
   if (result.leftover.length) lines.push(MORE_LINE);
   return lines.join("\n").slice(0, 1900);
 }

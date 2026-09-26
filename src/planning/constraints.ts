@@ -72,7 +72,18 @@ function mergeMember(base: MemberConstraints, patch: Partial<MemberConstraints>)
     cuisine: [...new Set([...(base.cuisine ?? []), ...(patch.cuisine ?? [])])],
     avoid: [...new Set([...(base.avoid ?? []), ...(patch.avoid ?? [])])],
     dietary: [...new Set([...(base.dietary ?? []), ...(patch.dietary ?? [])])],
+    discloseConstraints: base.discloseConstraints || Boolean(patch.discloseConstraints),
   };
+}
+
+function patchHasHard(patch: Partial<MemberConstraints>): boolean {
+  return Boolean(
+    patch.maxBudget ||
+      patch.needsAccessible ||
+      patch.maxTravelMinutes != null ||
+      patch.dietary?.length ||
+      patch.avoid?.length,
+  );
 }
 
 const NAME_CLAIM =
@@ -81,6 +92,7 @@ const NAME_CLAIM =
 export function membersFromTranscript(
   transcript: Array<{ who: string; text: string }>,
   defaults?: { budget?: Budget; maxTravelMinutes?: number },
+  privateLines?: Array<{ who: string; text: string }>,
 ): MemberConstraints[] {
   const byId = new Map<string, MemberConstraints>();
 
@@ -91,6 +103,7 @@ export function membersFromTranscript(
       id,
       name,
       needsAccessible: false,
+      discloseConstraints: false,
       maxBudget: defaults?.budget,
       maxTravelMinutes: defaults?.maxTravelMinutes,
     };
@@ -111,14 +124,23 @@ export function membersFromTranscript(
     const id = line.who.trim() || "you";
     const name = id;
     const claimed = line.text.match(NAME_CLAIM);
+    const extracted = extractConstraints(line.text);
+    const patch = { ...extracted, discloseConstraints: patchHasHard(extracted) };
     if (claimed?.[1] && claimed[1].toLowerCase() !== id.toLowerCase()) {
       const otherName = claimed[1];
       const otherId = otherName;
-      byId.set(otherId, mergeMember(ensure(otherId, otherName), extractConstraints(line.text)));
+      byId.set(otherId, mergeMember(ensure(otherId, otherName), patch));
       ensure(id, name);
     } else {
-      byId.set(id, mergeMember(ensure(id, name), extractConstraints(line.text)));
+      byId.set(id, mergeMember(ensure(id, name), patch));
     }
+  }
+
+  for (const line of privateLines ?? []) {
+    const id = line.who.trim() || "you";
+    const patch = extractConstraints(line.text);
+    if (!patchHasHard(patch) && !patch.cuisine?.length) continue;
+    byId.set(id, mergeMember(ensure(id, id), { ...patch, discloseConstraints: false }));
   }
 
   return [...byId.values()].map((member) => ({
