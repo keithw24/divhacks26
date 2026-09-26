@@ -16,30 +16,26 @@ function windowLabel(hour: number): string {
 
 export function formatSafetyReply(place: GeocodedPlace, report: BlockSafetyReport): string {
   const offenses = report.topOffenses
-    .slice(0, 5)
-    .map((row) => `${row.offense} (${row.lawCategory.toLowerCase()}, ${row.n})`)
+    .slice(0, 4)
+    .map((row) => `${row.offense} (${row.n})`)
     .join("; ");
   const precinct = report.precincts[0];
-  const precinctLine = precinct
-    ? `Most reports sit in precinct ${precinct.precinct ?? "?"} / ${precinct.borough ?? "NYC"}.`
-    : "";
   const peak =
     report.peakHour == null
-      ? "Not enough nearby points to name a peak hour."
-      : `In this sample, nearby volume peaked around ${hourLabel(report.peakHour)} (${report.peakHourCount} reports).`;
+      ? "no complaint peak in this extract"
+      : `complaint volume peaked ~${hourLabel(report.peakHour)}`;
+  const hour = hourLabel(report.hourEt);
 
   return [
     `Area: ${place.label}`,
-    `Clock: ${report.asOfEt} (${windowLabel(report.hourEt)}).`,
-    "",
-    `Block (~${report.blockMeters}m, midpoint/intersection points): ${report.blockCount} complaints in the loaded sample; ${report.hourBlockCount} in the ${hourLabel(report.hourEt)} hour.`,
-    `Neighborhood (~${report.neighborhoodMeters}m): ${report.neighborhoodCount} complaints; ${report.hourNeighborhoodCount} at ${hourLabel(report.hourEt)}.`,
-    peak,
-    precinctLine,
-    offenses ? `Common nearby types: ${offenses}.` : "No offense mix in this radius.",
-    "",
-    "This is NYPD public complaints, geocoded to the block midpoint or intersection — not a building address, and not a personal-risk score. Sample window is mid-to-late June 2026 YTD extract. Treat it as a pattern sketch, not a guarantee.",
+    `Asked hour: ${hour} ET (${windowLabel(report.hourEt)}).`,
+    `NYPD complaints within ~${report.neighborhoodMeters}m: ${report.neighborhoodCount} in the loaded sample (${report.hourNeighborhoodCount} at ${hour}). ${peak}. ${precinct ? `Mostly precinct ${precinct.precinct} / ${precinct.borough}.` : ""} ${offenses ? `Common: ${offenses}.` : ""}`,
+    `Shootings within ~${report.neighborhoodMeters}m: ${report.shootings.neighborhoodCount} (${report.shootings.hourNeighborhoodCount} at ${hour}).`,
+    `Crashes within ~${report.neighborhoodMeters}m: ${report.collisions.neighborhoodCount} (${report.collisions.hourNeighborhoodCount} at ${hour}); pedestrian/cyclist injuries in that sample: ${report.collisions.pedCycHurt}.`,
+    `311 street lights/signals within ~${report.neighborhoodMeters}m: ${report.lights.neighborhoodCount} (${report.lights.openNeighborhood} still marked open).`,
+    "All of this is public Open Data snapped to a block midpoint or intersection — not live 911 and not a personal-risk score.",
   ]
-    .filter((line) => line !== "")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
     .join("\n");
 }

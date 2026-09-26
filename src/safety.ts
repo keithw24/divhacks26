@@ -12,6 +12,13 @@ export interface OffenseCount {
   n: number;
 }
 
+export interface LayerCounts {
+  blockCount: number;
+  neighborhoodCount: number;
+  hourBlockCount: number;
+  hourNeighborhoodCount: number;
+}
+
 export interface BlockSafetyReport {
   latitude: number;
   longitude: number;
@@ -28,6 +35,9 @@ export interface BlockSafetyReport {
   neighborhoodByHour: HourBucket[];
   topOffenses: OffenseCount[];
   precincts: Array<{ precinct: number | null; borough: string | null; n: number }>;
+  shootings: LayerCounts;
+  collisions: LayerCounts & { pedCycHurt: number };
+  lights: LayerCounts & { openNeighborhood: number };
 }
 
 const BLOCK_METERS = 250;
@@ -43,74 +53,78 @@ WITH pt AS (
     c.precinct,
     c.borough,
     extract(hour from c.occurred_at AT TIME ZONE 'America/New_York')::int AS hour_et,
-    6371000 * 2 * asin(sqrt(
-      power(sin(radians(c.latitude - pt.lat) / 2), 2)
-      + cos(radians(pt.lat)) * cos(radians(c.latitude))
-        * power(sin(radians(c.longitude - pt.lon) / 2), 2)
-    )) AS meters
+    nyc_meters(pt.lat, pt.lon, c.latitude, c.longitude) AS meters
   FROM nypd_complaints c
   CROSS JOIN pt
   WHERE c.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
     AND c.longitude BETWEEN pt.lon - 0.012 AND pt.lon + 0.012
+), shoot AS (
+  SELECT
+    extract(hour from s.occurred_at AT TIME ZONE 'America/New_York')::int AS hour_et,
+    nyc_meters(pt.lat, pt.lon, s.latitude, s.longitude) AS meters
+  FROM nypd_shootings s CROSS JOIN pt
+  WHERE s.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
+    AND s.longitude BETWEEN pt.lon - 0.012 AND pt.lon + 0.012
+), crash AS (
+  SELECT
+    extract(hour from x.occurred_at AT TIME ZONE 'America/New_York')::int AS hour_et,
+    nyc_meters(pt.lat, pt.lon, x.latitude, x.longitude) AS meters,
+    x.ped_injured, x.cyc_injured
+  FROM nyc_collisions x CROSS JOIN pt
+  WHERE x.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
+    AND x.longitude BETWEEN pt.lon - 0.012 AND pt.lon + 0.012
+), lamp AS (
+  SELECT
+    extract(hour from L.occurred_at AT TIME ZONE 'America/New_York')::int AS hour_et,
+    nyc_meters(pt.lat, pt.lon, L.latitude, L.longitude) AS meters,
+    L.status
+  FROM nyc_311_lights L CROSS JOIN pt
+  WHERE L.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
+    AND L.longitude BETWEEN pt.lon - 0.012 AND pt.lon + 0.012
 )
 SELECT jsonb_build_object(
   'blockCount', (SELECT count(*) FROM nearby WHERE meters < $4),
   'neighborhoodCount', (SELECT count(*) FROM nearby WHERE meters < $5),
-  'hourBlockCount', (
-    SELECT count(*) FROM nearby, pt
-    WHERE meters < $4 AND nearby.hour_et = pt.hour_et
-  ),
-  'hourNeighborhoodCount', (
-    SELECT count(*) FROM nearby, pt
-    WHERE meters < $5 AND nearby.hour_et = pt.hour_et
-  ),
+  'hourBlockCount', (SELECT count(*) FROM nearby, pt WHERE meters < $4 AND nearby.hour_et = pt.hour_et),
+  'hourNeighborhoodCount', (SELECT count(*) FROM nearby, pt WHERE meters < $5 AND nearby.hour_et = pt.hour_et),
   'byHour', COALESCE((
-    SELECT jsonb_agg(jsonb_build_object(
-      'hourEt', hour_et,
-      'complaints', n,
-      'felonies', felonies
-    ) ORDER BY hour_et)
+    SELECT jsonb_agg(jsonb_build_object('hourEt', hour_et, 'complaints', n, 'felonies', felonies) ORDER BY hour_et)
     FROM (
-      SELECT hour_et,
-             count(*)::int AS n,
+      SELECT hour_et, count(*)::int AS n,
              count(*) FILTER (WHERE law_category = 'FELONY')::int AS felonies
-      FROM nearby
-      WHERE meters < $5
-      GROUP BY hour_et
+      FROM nearby WHERE meters < $5 GROUP BY hour_et
     ) h
   ), '[]'::jsonb),
   'topOffenses', COALESCE((
-    SELECT jsonb_agg(jsonb_build_object(
-      'offense', offense,
-      'lawCategory', law_category,
-      'n', n
-    ) ORDER BY n DESC)
+    SELECT jsonb_agg(jsonb_build_object('offense', offense, 'lawCategory', law_category, 'n', n) ORDER BY n DESC)
     FROM (
       SELECT COALESCE(offense, '(unspecified)') AS offense,
              COALESCE(law_category, '(none)') AS law_category,
              count(*)::int AS n
-      FROM nearby
-      WHERE meters < $5
-      GROUP BY 1, 2
-      ORDER BY n DESC
-      LIMIT 8
+      FROM nearby WHERE meters < $5 GROUP BY 1, 2 ORDER BY n DESC LIMIT 8
     ) o
   ), '[]'::jsonb),
   'precincts', COALESCE((
-    SELECT jsonb_agg(jsonb_build_object(
-      'precinct', precinct,
-      'borough', borough,
-      'n', n
-    ) ORDER BY n DESC)
+    SELECT jsonb_agg(jsonb_build_object('precinct', precinct, 'borough', borough, 'n', n) ORDER BY n DESC)
     FROM (
       SELECT precinct, borough, count(*)::int AS n
-      FROM nearby
-      WHERE meters < $5
-      GROUP BY 1, 2
-      ORDER BY n DESC
-      LIMIT 4
+      FROM nearby WHERE meters < $5 GROUP BY 1, 2 ORDER BY n DESC LIMIT 4
     ) p
-  ), '[]'::jsonb)
+  ), '[]'::jsonb),
+  'shootings', jsonb_build_object(
+    'neighborhoodCount', (SELECT count(*) FROM shoot WHERE meters < $5),
+    'hourNeighborhoodCount', (SELECT count(*) FROM shoot, pt WHERE meters < $5 AND shoot.hour_et = pt.hour_et)
+  ),
+  'collisions', jsonb_build_object(
+    'neighborhoodCount', (SELECT count(*) FROM crash WHERE meters < $5),
+    'hourNeighborhoodCount', (SELECT count(*) FROM crash, pt WHERE meters < $5 AND crash.hour_et = pt.hour_et),
+    'pedCycHurt', (SELECT coalesce(sum(ped_injured + cyc_injured), 0) FROM crash WHERE meters < $5)
+  ),
+  'lights', jsonb_build_object(
+    'neighborhoodCount', (SELECT count(*) FROM lamp WHERE meters < $5),
+    'hourNeighborhoodCount', (SELECT count(*) FROM lamp, pt WHERE meters < $5 AND lamp.hour_et = pt.hour_et),
+    'openNeighborhood', (SELECT count(*) FROM lamp WHERE meters < $5 AND status ILIKE 'open%')
+  )
 ) AS report
 `;
 
@@ -189,6 +203,15 @@ export async function lookupBlockSafety(
       peakHour = bucket.hourEt;
     }
   }
+  const emptyLayer = (): LayerCounts => ({
+    blockCount: 0,
+    neighborhoodCount: 0,
+    hourBlockCount: 0,
+    hourNeighborhoodCount: 0,
+  });
+  const shoot = payload.shootings ?? {};
+  const crash = payload.collisions ?? {};
+  const lamp = payload.lights ?? {};
 
   return {
     latitude,
@@ -206,5 +229,22 @@ export async function lookupBlockSafety(
     neighborhoodByHour: byHour,
     topOffenses: (payload.topOffenses ?? []) as OffenseCount[],
     precincts: payload.precincts ?? [],
+    shootings: {
+      ...emptyLayer(),
+      neighborhoodCount: Number(shoot.neighborhoodCount ?? 0),
+      hourNeighborhoodCount: Number(shoot.hourNeighborhoodCount ?? 0),
+    },
+    collisions: {
+      ...emptyLayer(),
+      neighborhoodCount: Number(crash.neighborhoodCount ?? 0),
+      hourNeighborhoodCount: Number(crash.hourNeighborhoodCount ?? 0),
+      pedCycHurt: Number(crash.pedCycHurt ?? 0),
+    },
+    lights: {
+      ...emptyLayer(),
+      neighborhoodCount: Number(lamp.neighborhoodCount ?? 0),
+      hourNeighborhoodCount: Number(lamp.hourNeighborhoodCount ?? 0),
+      openNeighborhood: Number(lamp.openNeighborhood ?? 0),
+    },
   };
 }

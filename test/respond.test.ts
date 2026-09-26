@@ -69,10 +69,26 @@ describe("formatSafetyReply", () => {
           { offense: "HARRASSMENT 2", lawCategory: "VIOLATION", n: 13 },
         ],
         precincts: [{ precinct: 26, borough: "MANHATTAN", n: 40 }],
+        shootings: { blockCount: 0, neighborhoodCount: 1, hourBlockCount: 0, hourNeighborhoodCount: 0 },
+        collisions: {
+          blockCount: 0,
+          neighborhoodCount: 12,
+          hourBlockCount: 0,
+          hourNeighborhoodCount: 1,
+          pedCycHurt: 3,
+        },
+        lights: {
+          blockCount: 0,
+          neighborhoodCount: 8,
+          hourBlockCount: 0,
+          hourNeighborhoodCount: 0,
+          openNeighborhood: 2,
+        },
       },
     );
     expect(text).toContain("Columbia University");
     expect(text).toContain("block midpoint");
     expect(text).toContain("2pm");
+    expect(text).toContain("Shootings");
   });
 });
