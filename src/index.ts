@@ -1,4 +1,4 @@
-import { Spectrum, type Message } from "spectrum-ts";
+import { attachment, Spectrum, type Message } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { terminal } from "spectrum-ts/providers/terminal";
 import { handleInboundMessage } from "./agent/inbound.js";
@@ -8,6 +8,7 @@ import { lastLocation, locationsForSpace, recordLocation, recordMessage, transcr
 import { senderDisplayName } from "./chat/invoke.js";
 import { parseLatLng } from "./chat/location.js";
 import { config } from "./config.js";
+import { safetyChartImage } from "./safetyChart.js";
 import { liveDemoProblems } from "./integrations/live-demo.js";
 import { logIntegration } from "./integrations/log.js";
 import { createBackboardMemoryService } from "./memory/backboard.js";
@@ -457,7 +458,21 @@ for await (const [space, message] of app.messages) {
       orchestration,
       liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
-      suggest: (input) => suggestNext(input),
+      suggest: (input) =>
+        suggestNext({
+          ...input,
+          // The chart follows the text card; it is dropped if Gemini's restyle fails the read-back check.
+          onSafetyReport: (report) => {
+            if (config.chatProvider !== "imessage") return;
+            void safetyChartImage(report)
+              .then((image) =>
+                image
+                  ? space.send(attachment(image.data, { mimeType: image.mimeType, name: "reports-by-hour.png" }))
+                  : undefined,
+              )
+              .catch((err) => console.warn(`safety.chart send failed: ${errorCategory(err)}`));
+          },
+        }),
       transcript: () => transcript(space.id),
       location,
       recordChatMessage: recordMessage,

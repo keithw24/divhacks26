@@ -8,6 +8,7 @@ import { asksDirectionsHome, wantsSafetySketch } from "../safetyIntent.js";
 import { findEvents } from "../skills/eventsSkill.js";
 import { findFood } from "../skills/foodSkill.js";
 import { getRoute } from "../skills/routeSkill.js";
+import type { BlockSafetyReport } from "../safety.js";
 import { getSafety } from "../skills/safetySkill.js";
 import { renderResponse, rankRecommendationsSync } from "./compose.js";
 import { parseIntent } from "./intent.js";
@@ -22,6 +23,8 @@ export interface OrchestratorInput {
   fallback?: () => Promise<string>;
   /** Fenced long-term memory. Not part of the group transcript. */
   memoryContext?: string;
+  /** Called with the Tiger report when the user asked about safety (e.g. to send the chart image). */
+  onSafetyReport?: (report: BlockSafetyReport) => void;
 }
 
 function sharedLocation(input: OrchestratorInput): Location | undefined {
@@ -132,6 +135,8 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
         now,
       })
     : undefined;
+  const askedSafety = wantsSafetySketch(input.question) || intent.needs.includes("safety");
+  if (askedSafety && safety?.data) input.onSafetyReport?.(safety.data);
   const tradeTimeForSafety =
     Boolean(intent.needs.includes("route") && destination) && prefersSaferSlowerRoute(safety?.data);
   let travelMode = tradeTimeForSafety && intent.travelMode === "WALK" ? "TRANSIT" : intent.travelMode;

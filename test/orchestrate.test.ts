@@ -61,6 +61,20 @@ describe("skill dispatcher", () => {
     expect(getRoute).not.toHaveBeenCalled();
   });
 
+  it("hands the Tiger report to onSafetyReport only when safety was asked for", async () => {
+    const report = { hourEt: 22 } as never;
+    vi.mocked(getSafety).mockResolvedValue({ status: "ok", data: report, sources: [], warnings: [] });
+    const onSafetyReport = vi.fn();
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["safety"] });
+    await orchestrate({ question: "Is it safe here?", transcript: [], location, onSafetyReport });
+    expect(onSafetyReport).toHaveBeenCalledWith(report);
+
+    onSafetyReport.mockClear();
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["route"] });
+    await orchestrate({ question: "directions home", transcript: [], location, onSafetyReport });
+    expect(onSafetyReport).not.toHaveBeenCalled();
+  });
+
   it("still queries Tiger when Gemini omits the safety skill", async () => {
     vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["food"] });
     await orchestrate({ question: "how safe is Columbia at 1pm", transcript: [], location });

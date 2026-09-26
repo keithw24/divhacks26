@@ -5,7 +5,7 @@ import { getGeminiClient } from "../gemini/client.js";
 import { formatSafetyReply } from "../formatReport.js";
 import { geocodeNyc } from "../geocode.js";
 import { quoteMemoryLine } from "../memory/present.js";
-import { currentHourEt, lookupBlockSafety, parseRequestedHour } from "../safety.js";
+import { currentHourEt, lookupBlockSafety, parseRequestedHour, type BlockSafetyReport } from "../safety.js";
 import { wantsSafetySketch } from "../safetyIntent.js";
 import { orchestrate } from "./orchestrate.js";
 import { systemPrompt } from "./prompt.js";
@@ -33,6 +33,8 @@ export interface SuggestInput {
   groupLines?: { senderId: string; senderName?: string; text: string }[];
   /** How the sender and group are feeling and texting right now. */
   social?: SocialRead;
+  /** Receives the Tiger report when the user asked about safety. */
+  onSafetyReport?: (report: BlockSafetyReport) => void;
 }
 
 const clock = (d: Date) =>
@@ -278,6 +280,7 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
       return suggestWithGemini(input);
     },
     memoryContext: [untrustedMemory(input), rankingHint(input.social)].filter(Boolean).join("\n") || undefined,
+    onSafetyReport: input.onSafetyReport,
   });
   return modelWrote ? answer : withOpener(answer, input.social);
 }
