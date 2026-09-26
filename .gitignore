@@ -10,3 +10,6 @@ credentials.txt
 node_modules/
 dist/
 *.log
+
+# Node / TypeScript agent
+node_modules/
