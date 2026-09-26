@@ -117,6 +117,14 @@ export interface InboundDeps {
     handleTurn(input: MeetupTurnInput): Promise<MeetupTurnResult>;
   };
   liveLocations?: (spaceId: string) => MeetupTurnInput["liveLocations"];
+  /** Opt-in area alerts (permitted street events + MTA subway alerts). */
+  alerts?: {
+    handleTurn(input: {
+      spaceId: string;
+      text: string;
+      location?: { latitude: number; longitude: number };
+    }): Promise<ReservationHandlerResult>;
+  };
   /** Cross-domain handoffs: one agent's grounded output becomes the next agent's input. */
   orchestration?: {
     handleTurn(input: OrchestratorTurnInput): Promise<OrchestratorTurnResult>;
@@ -327,6 +335,16 @@ export async function handleInboundMessage(
                   loc.displayName ||
                   group.participants.find((person) => person.id === loc.senderId)?.displayName,
               })),
+            })
+        : undefined,
+      handleAlerts: deps.alerts
+        ? (request) =>
+            deps.alerts!.handleTurn({
+              spaceId: request.spaceId,
+              text: request.text,
+              location: deps.location
+                ? { latitude: deps.location.latitude, longitude: deps.location.longitude }
+                : undefined,
             })
         : undefined,
       handleOrchestration: deps.orchestration

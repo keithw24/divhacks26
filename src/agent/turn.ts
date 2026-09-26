@@ -63,6 +63,8 @@ export interface TurnDeps {
     messageId?: string;
     phase: "priority" | "fallback";
   }): Promise<ReservationHandlerResult>;
+  /** Area alerts: "watch my area", "anything going on near me?", "stop alerts". */
+  handleAlerts?(input: { spaceId: string; text: string }): Promise<ReservationHandlerResult>;
   /** Friend-style reply for venting with nothing to look up. */
   support?(): Promise<string>;
   handleMeetup?(input: {
@@ -107,6 +109,7 @@ export type TurnOutcome =
   | "support"
   | "transport"
   | "orchestration"
+  | "alerts"
   | "gemini"
   | "failed";
 
@@ -183,6 +186,17 @@ export async function runConversationTurn(
           await deliverOnce(actions, answer);
           delivered = true;
           if (orchestrated.afterReply) await orchestrated.afterReply();
+          return;
+        }
+      }
+      if (deps.handleAlerts) {
+        const alerts = await deps.handleAlerts({ spaceId: input.spaceId, text: question });
+        if (alerts.handled && alerts.reply) {
+          outcome = "alerts";
+          answer = alerts.reply;
+          await reactTo(actions, ackFor(input.social, alerts.acknowledgement ?? "👍"));
+          await deliverOnce(actions, answer);
+          delivered = true;
           return;
         }
       }

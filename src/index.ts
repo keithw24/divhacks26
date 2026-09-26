@@ -9,6 +9,7 @@ import { senderDisplayName } from "./chat/invoke.js";
 import { parseLatLng } from "./chat/location.js";
 import { config } from "./config.js";
 import { safetyChartImage } from "./safetyChart.js";
+import { createAlertService, startAreaAlertWatcher } from "./alerts/service.js";
 import { liveDemoProblems } from "./integrations/live-demo.js";
 import { logIntegration } from "./integrations/log.js";
 import { createBackboardMemoryService } from "./memory/backboard.js";
@@ -119,6 +120,20 @@ const reservations = createReservationRuntime({
       console.info(JSON.stringify({ event: "reservation_result_undelivered", spaceId }));
       return;
     }
+    await send(text);
+  },
+});
+const alerts = createAlertService({ store: agentState, geocode: geocodeNyc });
+// Unprompted area alerts only reach chats that opted in with "watch …"; "stop alerts" ends them.
+startAreaAlertWatcher({
+  store: agentState,
+  send: async (spaceId, text) => {
+    const send = spaceSenders.get(spaceId);
+    if (!send) {
+      console.info(JSON.stringify({ event: "area_alert_undelivered", spaceId }));
+      return;
+    }
+    recordMessage(spaceId, config.agentName, text);
     await send(text);
   },
 });
@@ -455,6 +470,7 @@ for await (const [space, message] of app.messages) {
       payments: payments.service,
       ticketing: ticketing.service,
       meetup: meetup.service,
+      alerts,
       orchestration,
       liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
