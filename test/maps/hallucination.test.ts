@@ -59,4 +59,21 @@ describe("anti-hallucination", () => {
     expect(gemini.calls[0]?.routes).toEqual([]);
     expect(unsupportedRouteClaims(result.reply ?? "", factsFromRoutes([]))).toEqual([]);
   });
+
+  it("does not invent an itinerary for a different trip when no route payload exists", async () => {
+    const invented =
+      "Take the A train from High St to 34 St-Penn Station. Fare is $2.90. Walk 0.2 miles. About 15 min.";
+    const gemini = scriptedGemini(invented, true);
+    const service = createTransportationService({ gemini });
+    const result = await service.handle({
+      spaceId: "gemini-without-routes-penn",
+      text: "How should I get from Katz's Delicatessen to Penn Station?",
+    });
+
+    expect(gemini.calls.length).toBeGreaterThan(0);
+    expect(gemini.calls[0]?.routes).toEqual([]);
+    expect(unsupportedRouteClaims(result.reply ?? "", factsFromRoutes([]))).toEqual([]);
+    expect(result.reply).not.toMatch(/\bA train\b|High St|\$2\.90|15 min|Penn Station/);
+    expect(result.reply).toMatch(/couldn|reliable|try again/i);
+  });
 });

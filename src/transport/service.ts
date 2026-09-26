@@ -257,6 +257,13 @@ export class TransportationService {
       durationSource === "gemini_estimate" && estimate
         ? minutesBetween(estimate.lowMinutes, estimate.highMinutes)
         : [];
+    // A place-name sentence is not a route. Gemini may describe an itinerary only
+    // from verified Routes data, or phrase an approximate estimate when one exists.
+    const verifiedRoute = routes.length > 0 || durationSource === "gemini_estimate";
+
+    if (!verifiedRoute && collected.failed) {
+      return this.done({ handled: true, acknowledgement: "👀", reply: USER_FALLBACK });
+    }
 
     if (this.gemini) {
       try {
@@ -298,7 +305,7 @@ export class TransportationService {
             composed,
           );
         }
-        if (routes.length > 0 || durationSource === "gemini_estimate") {
+        if (verifiedRoute) {
           return this.done({
             handled: true,
             acknowledgement: "👍",
@@ -312,16 +319,16 @@ export class TransportationService {
         }
         return this.done({
           handled: true,
-          acknowledgement: "👍",
-          reply: formatGroundedDirections(composed, [...(destination.sources ?? []), ...grounded.sources]),
+          acknowledgement: "👀",
+          reply: formatGroundedDirections(USER_FALLBACK, [...(destination.sources ?? []), ...grounded.sources]),
           usedGemini: true,
         });
       } catch (error) {
         logTransportError("gemini.phraseDirections", error);
         return this.done({
           handled: true,
-          acknowledgement: "👍",
-          reply: composed,
+          acknowledgement: verifiedRoute ? "👍" : "👀",
+          reply: verifiedRoute ? composed : USER_FALLBACK,
           usedGemini: true,
         });
       }
@@ -329,8 +336,8 @@ export class TransportationService {
 
     return this.done({
       handled: true,
-      acknowledgement: "👍",
-      reply: composed,
+      acknowledgement: verifiedRoute ? "👍" : "👀",
+      reply: verifiedRoute ? composed : USER_FALLBACK,
     });
   }
 
