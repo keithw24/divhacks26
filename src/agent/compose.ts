@@ -58,9 +58,17 @@ ${memoryContext ? `${memoryContext}\n` : ""}CANDIDATES: ${JSON.stringify(recomme
 }
 
 const miles = (meters: number) => meters < 1200 ? `${Math.max(1, Math.round(meters / 80))} min walk` : `${(meters / 1609.344).toFixed(1)} mi away`;
-const eventTime = (iso?: string) => iso
-  ? new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })
-  : undefined;
+const eventWhen = (iso?: string) =>
+  iso
+    ? new Date(iso).toLocaleString("en-US", {
+        timeZone: "America/New_York",
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : undefined;
 
 export function renderResponse(input: {
   picks: Array<{ item: Recommendation; reason: string }>;
@@ -72,7 +80,10 @@ export function renderResponse(input: {
   const lines: string[] = [];
   input.picks.forEach(({ item, reason }, index) => {
     const facts = [miles(item.distanceMeters)];
-    if (item.startsAt) facts.push(`starts ${eventTime(item.startsAt)}`);
+    if (item.startsAt) facts.push(`starts ${eventWhen(item.startsAt)}`);
+    if (item.kind === "event" && item.location.label && item.location.label !== item.name) {
+      facts.push(`at ${item.location.label}`);
+    }
     if (item.openNow === true) facts.push("open now");
     if (item.rating) facts.push(`${item.rating.toFixed(1)}★`);
     if (item.priceLevel) facts.push(item.priceLevel.replace("PRICE_LEVEL_", "").toLowerCase());

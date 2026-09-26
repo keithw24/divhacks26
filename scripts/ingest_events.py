@@ -7,7 +7,9 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
@@ -46,12 +48,21 @@ ON CONFLICT (source, source_id) DO UPDATE SET
 """
 
 
-def fetch(dataset: str, page_size: int = 5000, max_rows: int = 50000) -> list[dict]:
+def soda_now() -> str:
+    return (datetime.now(timezone.utc) - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def fetch(dataset: str, extra: dict[str, str], page_size: int = 2000, max_rows: int = 8000) -> list[dict]:
     records: list[dict] = []
     while len(records) < max_rows:
-        query = urlencode({"$limit": str(page_size), "$offset": str(len(records))})
-        with urlopen(f"{SODA_BASE}/{dataset}.json?{query}", timeout=60) as response:
-            page = json.loads(response.read().decode("utf-8"))
+        params = {"$limit": str(page_size), "$offset": str(len(records)), **extra}
+        try:
+            with urlopen(f"{SODA_BASE}/{dataset}.json?{urlencode(params)}", timeout=90) as response:
+                page = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError) as exc:
+            raise SystemExit(f"NYC Open Data {dataset} failed: {exc}") from exc
+        if not isinstance(page, list):
+            raise SystemExit(f"NYC Open Data {dataset} returned a non-list payload")
         records.extend(page)
         if len(page) < page_size:
             break
@@ -78,6 +89,17 @@ def url_value(value: object) -> str | None:
 
 
 def coordinates(value: object) -> tuple[float | None, float | None]:
+    if isinstance(value, dict):
+        lat = value.get("latitude") or value.get("lat")
+        lon = value.get("longitude") or value.get("lng") or value.get("lon")
+        if lat is not None and lon is not None:
+            try:
+                latitude, longitude = float(lat), float(lon)
+            except (TypeError, ValueError):
+                return None, None
+            if 40.4 < latitude < 41.0 and -74.4 < longitude < -73.6:
+                return latitude, longitude
+            return None, None
     match = COORDINATES.search(str(value or ""))
     if not match:
         return None, None
@@ -92,7 +114,11 @@ def parks(record: dict) -> dict | None:
     title = str(record.get("title") or "").strip()
     if not start or not title or title.upper().startswith(("CANCELED:", "CANCELLED:")):
         return None
+    if start < datetime.now(timezone.utc) - timedelta(hours=6):
+        return None
     latitude, longitude = coordinates(record.get("coordinates"))
+    if latitude is None or longitude is None:
+        return None
     return {
         "source": "NYC Parks",
         "source_id": str(record.get("guid") or record.get(":id") or f"{title}:{start.isoformat()}"),
@@ -116,7 +142,13 @@ def permitted(record: dict) -> dict | None:
     title = str(record.get("event_name") or "").strip()
     if not start or not title:
         return None
+    if start < datetime.now(timezone.utc) - timedelta(hours=6):
+        return None
     latitude, longitude = coordinates(record.get("event_location"))
+    if latitude is None or longitude is None:
+        latitude, longitude = coordinates(record.get("latitude") or record.get("long"))
+    if latitude is None or longitude is None:
+        return None
     return {
         "source": "NYC Permitted Events",
         "source_id": str(record.get("event_id") or f"{title}:{start.isoformat()}"),
@@ -135,24 +167,45 @@ def permitted(record: dict) -> dict | None:
     }
 
 
+def apply_schema(connection) -> None:
+    root = Path(__file__).resolve().parents[1]
+    schema = (root / "sql" / "004_city_events.sql").read_text(encoding="utf-8")
+    for stmt in schema.split(";"):
+        piece = stmt.strip()
+        if piece:
+            connection.execute(piece)
+    connection.commit()
+
+
 def main() -> None:
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         sys.exit("Set DATABASE_URL in .env first.")
+    since = soda_now()
     datasets = [
-        (os.environ.get("PARKS_EVENTS_DATASET", "w3wp-dpdi"), parks),
-        (os.environ.get("PERMITTED_EVENTS_DATASET", "tvpp-9vvx"), permitted),
+        (
+            os.environ.get("PARKS_EVENTS_DATASET", "w3wp-dpdi"),
+            parks,
+            {"$order": "starttime ASC", "$where": f"starttime >= '{since}'"},
+        ),
+        (
+            os.environ.get("PERMITTED_EVENTS_DATASET", "tvpp-9vvx"),
+            permitted,
+            {"$order": "start_date_time ASC", "$where": f"start_date_time >= '{since}'"},
+        ),
     ]
     written = 0
     with psycopg.connect(database_url) as connection:
+        apply_schema(connection)
+        print("schema applied")
         with connection.cursor() as cursor:
-            for dataset, mapper in datasets:
-                records = fetch(dataset)
+            for dataset, mapper, extra in datasets:
+                records = fetch(dataset, extra)
                 rows = [row for record in records if (row := mapper(record)) is not None]
                 if rows:
                     cursor.executemany(UPSERT, rows)
                     written += len(rows)
-                print(f"{dataset}: fetched={len(records):,} normalized={len(rows):,}")
+                print(f"{dataset}: fetched={len(records):,} inserted={len(rows):,} skipped={len(records) - len(rows):,}")
         connection.commit()
     print(f"done. upserted={written:,}")
 

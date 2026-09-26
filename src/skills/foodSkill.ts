@@ -25,6 +25,7 @@ interface PlacesResponse {
     rating?: number;
     currentOpeningHours?: { openNow?: boolean };
     googleMapsUri?: string;
+    websiteUri?: string;
     primaryTypeDisplayName?: { text?: string };
   }>;
 }
@@ -71,6 +72,7 @@ export async function findFood(input: FoodInput): Promise<SkillResult<FoodRecomm
           "places.rating",
           "places.currentOpeningHours.openNow",
           "places.googleMapsUri",
+          "places.websiteUri",
           "places.primaryTypeDisplayName",
         ].join(","),
       },
@@ -100,8 +102,8 @@ export async function findFood(input: FoodInput): Promise<SkillResult<FoodRecomm
         rating: place.rating,
         openNow: place.currentOpeningHours?.openNow,
         categories: [place.primaryTypeDisplayName?.text ?? "restaurant"],
-        url: place.googleMapsUri,
-        source: { name: "Google Places", url: place.googleMapsUri },
+        url: place.websiteUri || place.googleMapsUri,
+        source: { name: "Google Places", url: place.websiteUri || place.googleMapsUri },
       }];
     });
     data.sort((a, b) => (Number(b.openNow) - Number(a.openNow)) || ((b.rating ?? 0) - (a.rating ?? 0)) || (a.distanceMeters - b.distanceMeters));

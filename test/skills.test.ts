@@ -85,11 +85,14 @@ describe("food skill", () => {
         rating: 4.5,
         currentOpeningHours: { openNow: true },
         googleMapsUri: "https://maps.google.com/?cid=1",
+        websiteUri: "https://jinramen.example",
       }],
     }), { status: 200 })) as typeof fetch;
     const result = await findFood({ origin, apiKey: "test", fetcher });
     expect(result.data[0]?.placeId).toBe("place-1");
     expect(result.data[0]?.location.latitude).toBe(40.81);
+    expect(result.data[0]?.url).toBe("https://jinramen.example");
+    expect(result.data[0]?.openNow).toBe(true);
   });
 });
 
@@ -160,6 +163,8 @@ describe("response renderer", () => {
     });
     expect(text).toContain("Outdoor Movie");
     expect(text).toContain("https://example.test/event");
+    expect(text).toContain("Riverside Park");
+    expect(text).toMatch(/Sep 26/);
     expect(text).not.toContain("restaurant");
   });
 
@@ -171,5 +176,14 @@ describe("response renderer", () => {
     });
     expect(text).toContain("everyday awareness");
     expect(text).not.toMatch(/reports at this hour/i);
+  });
+
+  it("does not invent listings when official events are empty", () => {
+    const text = renderResponse({
+      picks: [],
+      warnings: ["No official NYC Parks or permitted events matched this time window."],
+    });
+    expect(text).toMatch(/couldn't find a verified match|No official NYC Parks/i);
+    expect(text).not.toMatch(/resy|opentable/i);
   });
 });

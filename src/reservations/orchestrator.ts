@@ -416,6 +416,8 @@ export class ReservationOrchestrator {
         name: looked.restaurant.name,
         address: looked.restaurant.address,
         placeId: looked.restaurant.placeId,
+        websiteUrl: looked.restaurant.websiteUrl,
+        openNow: looked.restaurant.openNow,
       };
     }
   }

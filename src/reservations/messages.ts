@@ -48,11 +48,18 @@ export function confirmationText(reservation: ReservationRequest): string {
   const party = reservation.partySize ?? "a";
   const ideal = reservation.requestedTime ? formatClockTime(reservation.requestedTime) : "the time you wanted";
   const flexibility = reservation.flexibility;
+  let summary: string;
   if (flexibility?.alternativeTimesAllowed && flexibility.earliestTime && flexibility.latestTime) {
     const range = formatTimeRange(flexibility.earliestTime, flexibility.latestTime);
-    return `I have ${reservation.restaurant.name} for ${party} people ${day}, ideally ${ideal}, with ${range} okay. Want me to call?`;
+    summary = `I have ${reservation.restaurant.name} for ${party} people ${day}, ideally ${ideal}, with ${range} okay.`;
+  } else {
+    summary = `I have ${reservation.restaurant.name} for ${party} people ${day} at ${ideal}.`;
   }
-  return `I have ${reservation.restaurant.name} for ${party} people ${day} at ${ideal}. Want me to call?`;
+  if (reservation.restaurant.openNow === true) summary += " They're listed as open now.";
+  if (reservation.restaurant.websiteUrl) {
+    return `${summary} Their site: ${reservation.restaurant.websiteUrl}. I can't see live OpenTable/Resy inventory. Want me to call?`;
+  }
+  return `${summary} Want me to call?`;
 }
 
 export function callingText(name: string): string {

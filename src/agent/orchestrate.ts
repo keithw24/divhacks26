@@ -182,7 +182,28 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   // A request for things to do or eat needs picks; a lone safety or route line doesn't answer it.
   const wantedPicks = intent.needs.includes("food") || intent.needs.includes("events");
   const nothingVerified = !picks.length && !safety?.data && !route;
-  if (input.fallback && !picks.length && (wantedPicks || nothingVerified)) return input.fallback();
+  if (input.fallback && !picks.length && (wantedPicks || nothingVerified)) {
+    const askedEvents = intent.needs.includes("events");
+    const foodEmpty = !intent.needs.includes("food") || (food?.data.length ?? 0) === 0;
+    if (askedEvents && (events?.data.length ?? 0) === 0 && foodEmpty) {
+      const safetyLine = safety?.data ? await summarizeSafety(safety.data) : undefined;
+      return renderResponse({
+        picks: [],
+        safety,
+        safetyLine,
+        route,
+        warnings: [
+          ...(events?.warnings?.length
+            ? events.warnings
+            : ["No official NYC Parks or permitted events matched this time window."]),
+          ...(food && food.status !== "ok" ? food.warnings : []),
+          ...(safety && safety.status !== "ok" ? safety.warnings : []),
+          ...(route && route.status !== "ok" ? route.warnings : []),
+        ],
+      });
+    }
+    return input.fallback();
+  }
   const safetyLine = safety?.data ? await summarizeSafety(safety.data) : undefined;
   return renderResponse({ picks, safety, safetyLine, route, warnings });
 }

@@ -32,6 +32,7 @@ interface EventRow {
   latitude: number;
   longitude: number;
   source_url: string | null;
+  registration_url?: string | null;
   updated_at: Date | string;
   distance_meters: number;
 }
@@ -81,10 +82,10 @@ export function normalizeEvent(row: EventRow): EventRecommendation {
     startsAt: new Date(row.starts_at).toISOString(),
     endsAt: row.ends_at ? new Date(row.ends_at).toISOString() : undefined,
     categories: row.category ? [row.category] : [],
-    url: row.source_url ?? undefined,
+    url: row.registration_url || row.source_url || undefined,
     source: {
       name: row.source,
-      url: row.source_url ?? undefined,
+      url: row.registration_url || row.source_url || undefined,
       updatedAt: new Date(row.updated_at).toISOString(),
     },
   };
@@ -155,7 +156,7 @@ export async function findEvents(input: EventsInput): Promise<SkillResult<EventR
       status: events.length ? "ok" : "partial",
       data: events,
       sources: [...officialSources, ...enrichment],
-      warnings: events.length ? [] : ["No nearby official events matched this time window."],
+      warnings: events.length ? [] : ["No official NYC Parks or permitted events matched this time window."],
     };
   } catch (error) {
     console.error("events skill failed:", error);

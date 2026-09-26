@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createLiveOutboundCaller } from "../../src/elevenlabs/client.js";
 import { ElevenLabsCallError } from "../../src/elevenlabs/types.js";
 import { sanitizeExtraction } from "../../src/reservations/collect.js";
+import { confirmationText } from "../../src/reservations/messages.js";
 import { assertDialable, createMemoryDirectory, createPlacesDirectory, DEMO_RESTAURANTS, restaurantQuery } from "../../src/reservations/restaurant.js";
 import { harness } from "./support.js";
 
@@ -57,6 +58,8 @@ describe("restaurant lookup", () => {
               displayName: { text: "L'Artusi" },
               formattedAddress: "228 W 10th St, New York, NY",
               internationalPhoneNumber: "+1 212-255-5757",
+              websiteUri: "https://www.lartusi.com",
+              currentOpeningHours: { openNow: true },
             },
           ],
         }),
@@ -69,6 +72,28 @@ describe("restaurant lookup", () => {
     expect(result.restaurant?.phone).toBe("+12122555757");
     expect(result.restaurant?.phoneSource).toBe("places");
     expect(result.restaurant?.placeId).toBe("place-1");
+    expect(result.restaurant?.websiteUrl).toBe("https://www.lartusi.com");
+    expect(result.restaurant?.openNow).toBe(true);
+  });
+
+  it("links the restaurant website without claiming OpenTable inventory", () => {
+    const reservation = {
+      restaurant: {
+        name: "Carbone",
+        websiteUrl: "https://carbonenewyork.com",
+        openNow: true,
+      },
+      partySize: 4,
+      requestedDate: "2026-09-28",
+      requestedTime: "20:00",
+      flexibilityKnown: true,
+    };
+    const text = confirmationText(reservation as never);
+    expect(text).toContain("Their site: https://carbonenewyork.com");
+    expect(text).toMatch(/can't see live OpenTable\/Resy inventory/i);
+    expect(text).toMatch(/Want me to call/);
+    expect(text).toMatch(/open now/i);
+    expect(text).not.toMatch(/table is (free|available)/i);
   });
 
   it("reports an ambiguous Places result and a place with no phone", async () => {

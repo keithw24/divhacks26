@@ -18,6 +18,8 @@ export interface DirectoryEntry {
   phone?: string;
   placeId?: string;
   phoneSource: TrustedPhoneSource;
+  websiteUrl?: string;
+  openNow?: boolean;
 }
 
 /**
@@ -157,6 +159,8 @@ function toIdentity(entry: DirectoryEntry): RestaurantIdentity {
     phone: entry.phone ? toE164(entry.phone) : undefined,
     placeId: entry.placeId,
     phoneSource: entry.phone ? entry.phoneSource : undefined,
+    websiteUrl: entry.websiteUrl,
+    openNow: entry.openNow,
   };
 }
 
@@ -167,6 +171,8 @@ interface PlacesResponse {
     formattedAddress?: string;
     nationalPhoneNumber?: string;
     internationalPhoneNumber?: string;
+    websiteUri?: string;
+    currentOpeningHours?: { openNow?: boolean };
   }>;
   error?: { message?: string };
 }
@@ -189,7 +195,7 @@ export function createPlacesDirectory(
           "Content-Type": "application/json",
           "X-Goog-Api-Key": apiKey,
           "X-Goog-FieldMask":
-            "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.internationalPhoneNumber",
+            "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.currentOpeningHours.openNow",
         },
         body: JSON.stringify({
           textQuery: `${cleaned} restaurant New York`,
@@ -212,6 +218,8 @@ export function createPlacesDirectory(
             phone,
             placeId: place.id,
             phoneSource: "places" as const,
+            websiteUrl: place.websiteUri,
+            openNow: place.currentOpeningHours?.openNow,
           };
         });
       for (const entry of entries) discovered.push(entry.name);

@@ -33,6 +33,8 @@ export interface RestaurantIdentity {
   placeId?: string;
   /** Set only after a trusted lookup. Never "model" or "user". */
   phoneSource?: TrustedPhoneSource;
+  websiteUrl?: string;
+  openNow?: boolean;
 }
 
 export interface ReservationFlexibility {
