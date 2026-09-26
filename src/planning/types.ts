@@ -12,6 +12,8 @@ export interface MemberConstraints {
   cuisine?: string[];
   avoid?: string[];
   dietary?: Array<"vegan" | "vegetarian" | "gluten-free" | "peanut-free">;
+  /** True when this person stated the constraint in the current group thread. */
+  discloseConstraints: boolean;
 }
 
 export interface PersonScore {
@@ -47,4 +49,6 @@ export interface GroupPlanResult {
   ranked: RankedPlan[];
   leftover: RankedPlan[];
   infeasible: PlanScore[];
+  because?: string;
+  counterfactuals: string[];
 }

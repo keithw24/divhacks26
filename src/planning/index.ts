@@ -2,4 +2,5 @@ export { membersFromTranscript, asksForMorePlans, extractConstraints } from "./c
 export { selectGroupPlans, paretoFrontier } from "./select.js";
 export { scorePlan, scorePerson } from "./score.js";
 export { formatGroupPlans, GROUP_MORE_LINE } from "./format.js";
+export { selectionBecause, counterfactualLines } from "./counterfactuals.js";
 export type { MemberConstraints, RankedPlan, GroupPlanResult } from "./types.js";

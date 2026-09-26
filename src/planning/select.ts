@@ -1,3 +1,4 @@
+import { counterfactualLines, selectionBecause } from "./counterfactuals.js";
 import { scorePlan, walkMinutes } from "./score.js";
 import type { MemberConstraints, PlanScore, RankedPlan, Strategy } from "./types.js";
 import type { Recommendation } from "../domain/contracts.js";
@@ -50,6 +51,7 @@ export function selectGroupPlans(
   recommendations: Recommendation[],
   members: MemberConstraints[],
   offset = 0,
+  now = new Date(),
 ): GroupPlanResult {
   const scored = recommendations.map((item) => scorePlan(item, members));
   const infeasible = scored.filter((plan) => !plan.feasible);
@@ -100,10 +102,13 @@ export function selectGroupPlans(
       })),
   ];
 
+  const ranked = all.slice(offset, offset + 3);
   return {
     members,
-    ranked: all.slice(offset, offset + 3),
+    ranked,
     leftover: all.slice(offset + 3),
     infeasible,
+    because: ranked[0] ? selectionBecause(ranked[0].item, members, now) : undefined,
+    counterfactuals: counterfactualLines({ items: recommendations, members, ranked, now }),
   };
 }

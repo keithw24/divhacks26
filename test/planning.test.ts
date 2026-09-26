@@ -4,6 +4,7 @@ import { asksForMorePlans, extractConstraints, membersFromTranscript } from "../
 import { formatGroupPlans } from "../src/planning/format.js";
 import { scorePlan } from "../src/planning/score.js";
 import { paretoFrontier, selectGroupPlans } from "../src/planning/select.js";
+import { counterfactualLines } from "../src/planning/counterfactuals.js";
 import { rankRecommendationsSync } from "../src/agent/compose.js";
 
 function rec(partial: Partial<Recommendation> & Pick<Recommendation, "id" | "name">): Recommendation {
@@ -147,6 +148,7 @@ describe("hard constraints and group ranking", () => {
     expect(text).toMatch(/least misery|Nash welfare|average satisfaction/i);
     expect(text).toMatch(/show more/i);
     expect(result.leftover.length).toBeGreaterThan(0);
+    expect(text).toMatch(/This was selected because/i);
   });
 
   it("advances to the next feasible slice on show more", () => {
@@ -164,5 +166,74 @@ describe("hard constraints and group ranking", () => {
     );
     expect(second.picks.length).toBeGreaterThan(0);
     expect(second.picks[0]?.item.id).not.toBe(first.picks[0]?.item.id);
+  });
+});
+
+describe("counterfactual explanations", () => {
+  const italian = rec({
+    id: "italian",
+    name: "Nice Italian",
+    distanceMeters: 200,
+    priceLevel: "PRICE_LEVEL_MODERATE",
+    categories: ["italian"],
+  });
+  const italian2 = rec({
+    id: "italian2",
+    name: "Other Italian",
+    distanceMeters: 280,
+    priceLevel: "PRICE_LEVEL_MODERATE",
+    categories: ["italian"],
+  });
+
+  function asRanked(items: Recommendation[], members: ReturnType<typeof membersFromTranscript>) {
+    return items.map((item, index) => ({
+      item,
+      strategy: "leastMisery" as const,
+      onPareto: true,
+      score: scorePlan(item, members),
+      reason: "test",
+    }));
+  }
+
+  it("says why the pick was selected and names closer restaurants if budget rose to $35", () => {
+    const members = membersFromTranscript(group);
+    const result = selectGroupPlans([steak, ramen, pizza, italian, italian2], members);
+    expect(result.because).toMatch(/This was selected because/i);
+    expect(result.counterfactuals.join(" ")).toMatch(/budget increases to \$35/i);
+    expect(result.counterfactuals.join(" ")).toMatch(/closer restaurant/i);
+    expect(formatGroupPlans(result)).toMatch(/^- /m);
+  });
+
+  it("limits walking to 10 minutes down to a single remaining plan", () => {
+    const members = membersFromTranscript([{ who: "Alex", text: "max 25 min walk" }]);
+    const far = rec({ id: "far", name: "Far Free Event", kind: "event", distanceMeters: 1600, categories: ["music"], description: "free" });
+    const near = rec({ id: "near", name: "Near Park", kind: "event", distanceMeters: 400, categories: ["park"], description: "free" });
+    const mid = rec({ id: "mid", name: "Mid Park", kind: "event", distanceMeters: 2000, categories: ["park"], description: "free" });
+    const ranked = asRanked([far, near, mid], members);
+    const lines = counterfactualLines({ items: [far, near, mid], members, ranked, now: new Date() });
+    expect(lines.join(" ")).toMatch(/walking is limited to 10 minutes/i);
+    expect(lines.join(" ")).toMatch(/Plan B/i);
+  });
+
+  it("names a person only when they stated the constraint in chat", () => {
+    const chat = membersFromTranscript([{ who: "Maya", text: "I can only spend $20 and I'm vegan" }]);
+    const ranked = asRanked([ramen, steak], chat);
+    const named = counterfactualLines({ items: [ramen, pizza, steak], members: chat, ranked, now: new Date() });
+    expect(named.some((line) => /Without Maya's private constraint/i.test(line))).toBe(true);
+
+    const hidden = membersFromTranscript(
+      [{ who: "Jordan", text: "I love steak" }],
+      undefined,
+      [{ who: "Sarah", text: "I'm vegan and I can only spend $20" }],
+    );
+    const hiddenRanked = asRanked([ramen, pizza], hidden);
+    const unnamed = counterfactualLines({
+      items: [ramen, pizza, steak],
+      members: hidden,
+      ranked: hiddenRanked,
+      now: new Date(),
+    });
+    expect(unnamed.join(" ")).toMatch(/private group constraint/i);
+    expect(unnamed.join(" ")).not.toMatch(/Sarah/i);
   });
 });
