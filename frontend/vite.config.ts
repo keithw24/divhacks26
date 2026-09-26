@@ -6,10 +6,21 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
+/**
+ * GitHub Pages build (see .github/workflows/pages.yml): PAGES_BASE=/divhacks26/ produces a
+ * static single-page app served from that subfolder. Unset for local dev and the Docker/SSR build.
+ */
+const pagesBase = process.env["PAGES_BASE"];
+
 export default defineConfig({
+  ...(pagesBase && { vite: { base: pagesBase } }),
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+    ...(pagesBase && {
+      spa: { enabled: true },
+      router: { basepath: pagesBase.replace(/\/$/, "") },
+    }),
   },
 });
