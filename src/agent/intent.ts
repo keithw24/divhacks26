@@ -5,6 +5,7 @@ import type {
   TravelMode,
   UserIntent,
 } from "../domain/contracts.js";
+import { asksDirectionsHome } from "../safetyIntent.js";
 import { generateJson } from "./gemini.js";
 
 interface IntentJson {
@@ -48,8 +49,9 @@ export function heuristicIntent(question: string, origin?: Location): UserIntent
   const needs = new Set<SkillName>();
   const broad = /plan|night out|what should (?:i|we) do|what now|date night/.test(text);
   const focusedRoute = /how (?:do|can) (?:i|we) get|directions? to|route to|take me to/.test(text);
-  if (focusedRoute) needs.add("route");
-  if (/safe|safety|crime|danger|sketch/.test(text)) needs.add("safety");
+  const homeTrip = asksDirectionsHome(question);
+  if (focusedRoute || homeTrip) needs.add("route");
+  if (/safe|safety|crime|danger|sketch/.test(text) || homeTrip) needs.add("safety");
   if (/food|eat|dinner|lunch|breakfast|restaurant|cuisine|hungry/.test(text)) needs.add("food");
   if (!focusedRoute && /event|activity|activities|fun|concert|movie|festival|show|park/.test(text)) needs.add("events");
   if (/route|direction|take me|travel/.test(text)) needs.add("route");
@@ -74,11 +76,12 @@ export function heuristicIntent(question: string, origin?: Location): UserIntent
         ? "BICYCLE"
         : "WALK";
   const destinationMatch = question.match(/(?:to|get to|directions? to)\s+(.+)$/i);
+  const destinationQuery = homeTrip ? "home" : destinationMatch?.[1]?.trim();
   return {
     needs: [...needs],
     ...(origin && { origin }),
     ...(!origin && { locationQuery: question }),
-    ...(destinationMatch?.[1] && { destinationQuery: destinationMatch[1].trim() }),
+    ...(destinationQuery && { destinationQuery }),
     when: /tonight/.test(text) ? "tonight" : /tomorrow/.test(text) ? "tomorrow" : "now",
     ...(budget && { budget }),
     categories: [],

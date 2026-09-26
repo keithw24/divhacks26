@@ -31,6 +31,7 @@ export async function processPhotonTextMessage(
     recordAssistant?: (text: string) => void;
     handleReservation?: Parameters<typeof runConversationTurn>[2]["handleReservation"];
     handlePayment?: Parameters<typeof runConversationTurn>[2]["handlePayment"];
+    handleMeetup?: Parameters<typeof runConversationTurn>[2]["handleMeetup"];
   },
 ): Promise<TurnOutcome> {
   return runConversationTurn(
@@ -57,6 +58,7 @@ export async function processPhotonTextMessage(
       recordAssistant: options.recordAssistant ?? (() => undefined),
       handleReservation: options.handleReservation,
       handlePayment: options.handlePayment,
+      handleMeetup: options.handleMeetup,
     },
   );
 }

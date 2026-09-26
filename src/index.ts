@@ -4,7 +4,7 @@ import { terminal } from "spectrum-ts/providers/terminal";
 import { handleInboundMessage } from "./agent/inbound.js";
 import { suggestNext } from "./agent/suggest.js";
 import { errorCategory } from "./agent/turn.js";
-import { lastLocation, recordLocation, recordMessage, transcript } from "./chat/context.js";
+import { lastLocation, locationsForSpace, recordLocation, recordMessage, transcript } from "./chat/context.js";
 import { senderDisplayName } from "./chat/invoke.js";
 import { parseLatLng } from "./chat/location.js";
 import { config } from "./config.js";
@@ -12,6 +12,7 @@ import { createBackboardMemoryService } from "./memory/backboard.js";
 import { openAgentStateStore } from "./store/state.js";
 import { createPaymentRuntime } from "./payments/runtime.js";
 import { createReservationRuntime } from "./reservations/runtime.js";
+import { createMeetupRuntime } from "./meetup/runtime.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
 import { createBackboardClient } from "./backboard/client.js";
@@ -23,9 +24,15 @@ const transport = createTransportationServiceFromEnv({
   geminiApiKey: config.geminiApiKey,
   geminiModel: config.geminiModel,
   googleMapsApiKey: config.googleMapsApiKey,
+  databaseUrl: config.databaseUrl,
 });
 const spaceSenders = new Map<string, (text: string) => Promise<unknown>>();
 const agentState = openAgentStateStore(config.agentStatePath);
+const meetup = createMeetupRuntime({
+  googleMapsApiKey: config.googleMapsApiKey,
+  timeZone: config.timezone,
+  stateStore: agentState,
+});
 const reservations = createReservationRuntime({
   callMode: config.reservationCallMode,
   mockScenario: config.reservationMockScenario,
@@ -61,6 +68,10 @@ const payments = createPaymentRuntime({
   geminiApiKey: config.geminiApiKey,
   geminiModel: config.geminiModel,
   stateStore: agentState,
+  nessieApiKey: config.nessieApiKey,
+  nessieBaseUrl: config.nessieBaseUrl,
+  nessieCustomerId: config.nessieCustomerId,
+  nessieAccountId: config.nessieAccountId,
 });
 const memory = config.backboardApiKey
   ? createBackboardMemoryService({
@@ -160,13 +171,21 @@ console.info(
     ? "Reservations: live ElevenLabs outbound calls are enabled."
     : "Reservations: mock mode (no real phone calls).",
 );
-if (config.paymentsMode === "ripple_test") {
+if (config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple") {
   console.info("Payments: XRPL Testnet. Dollar amounts are converted to test XRP. No real money moves.");
   if (!config.xrplTestnetSeed) {
-    console.warn("PAYMENTS_MODE=ripple_test but XRPL_TESTNET_SEED is missing. Confirmed payments will fail closed.");
+    console.warn("PAYMENTS_MODE includes ripple_test but XRPL_TESTNET_SEED is missing. Confirmed ledger payments will fail closed.");
   }
-} else {
-  console.info("Payments: mock mode (no Ripple transaction is submitted).");
+}
+if (config.paymentsMode === "nessie" || config.paymentsMode === "nessie_ripple") {
+  console.info(
+    config.nessieApiKey
+      ? "Payments: Nessie mock bank (Capital One hackathon API). No real money moves."
+      : "PAYMENTS_MODE includes Nessie but NESSIE_API_KEY is missing. Confirmed Nessie payments will fail closed.",
+  );
+}
+if (config.paymentsMode === "mock") {
+  console.info("Payments: mock mode (no Nessie or Ripple transaction is submitted).");
 }
 const web =
   config.webApiPort === "off"
@@ -264,6 +283,8 @@ for await (const [space, message] of app.messages) {
       ].filter(Boolean),
       reservations: reservations.orchestrator,
       payments: payments.service,
+      meetup: meetup.service,
+      liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
       suggest: (input) => suggestNext(input),
       transcript: () => transcript(space.id),
