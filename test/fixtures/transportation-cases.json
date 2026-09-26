@@ -1,0 +1,298 @@
+{
+  "description": "Review fixtures for the Photon + Gemini Maps transportation flow. Not imported by Vitest. Do not hard-code live travel times; quote durationText only when the mock provides it.",
+  "baseline": "2f2e008",
+  "cases": [
+    {
+      "id": 1,
+      "name": "both-endpoints-named",
+      "input": "How do I get from Columbia University to Times Square?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": null,
+      "mocks": {
+        "places": ["Columbia University, New York, NY", "Times Square, New York, NY"],
+        "routeMode": "transit"
+      },
+      "expected": "Resolve both places, request a transit route, reply with only provider-returned steps and duration, attribute Google Maps, and store origin, destination, and mode on space-dm-1.",
+      "mustNot": "State a subway line or minute value the mock did not return. Write this trip onto any other spaceId."
+    },
+    {
+      "id": 2,
+      "name": "destination-only-origin-known",
+      "input": "How do I get to Washington Square Park?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": {
+        "origin": "Columbia University, New York, NY",
+        "destination": null,
+        "mode": null
+      },
+      "mocks": {
+        "places": ["Washington Square Park, New York, NY"],
+        "routeMode": "transit"
+      },
+      "expected": "Reuse the stored origin, resolve the park, and route origin to park.",
+      "mustNot": "Ask for an origin. Replace the stored origin. Invent Columbia coordinates that were not already stored."
+    },
+    {
+      "id": 3,
+      "name": "change-mode-to-walk",
+      "input": "Can I walk instead?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": {
+        "origin": "Columbia University, New York, NY",
+        "destination": "Washington Square Park, New York, NY",
+        "mode": "transit"
+      },
+      "mocks": {
+        "routeMode": "walk"
+      },
+      "expected": "Keep both places, set mode to walk, and call the routing provider once with WALK.",
+      "mustNot": "Swap the destination for a different place. Answer with the previous transit duration."
+    },
+    {
+      "id": 4,
+      "name": "anaphora-there",
+      "input": "How do we get there?",
+      "spaceId": "space-group-a",
+      "spaceType": "group",
+      "senderId": "user-a",
+      "prior": {
+        "origin": "Columbia University, New York, NY",
+        "destination": "Washington Square Park, New York, NY",
+        "mode": "transit"
+      },
+      "expected": "Resolve 'there' to the destination stored on space-group-a and route again.",
+      "mustNot": "Ask where they mean when a destination is stored. Read a destination from another space."
+    },
+    {
+      "id": 5,
+      "name": "group-shared-context",
+      "input": "How do we get there?",
+      "spaceId": "space-group-a",
+      "spaceType": "group",
+      "senderId": "user-b",
+      "prior": {
+        "origin": "Columbia University, New York, NY",
+        "destination": "Times Square, New York, NY",
+        "mode": "transit",
+        "setBy": "user-a"
+      },
+      "expected": "Use the group trip even though user-b did not create it. Distinguish the chat as a group.",
+      "mustNot": "Give user-b an empty trip because state was keyed by sender. Include participants' phone numbers in the reply."
+    },
+    {
+      "id": 6,
+      "name": "two-groups-isolated",
+      "input": "How do we get there?",
+      "spaceId": "space-group-b",
+      "spaceType": "group",
+      "senderId": "user-a",
+      "prior": {
+        "origin": "Washington Square Park, New York, NY",
+        "destination": "Penn Station, New York, NY",
+        "mode": "transit"
+      },
+      "otherSpaces": {
+        "space-group-a": {
+          "destination": "Times Square, New York, NY"
+        }
+      },
+      "expected": "Answer using Penn Station from space-group-b only.",
+      "mustNot": "Mention Times Square or include space-group-a in the model context."
+    },
+    {
+      "id": 7,
+      "name": "ambiguous-place",
+      "input": "How do I get to Washington Square?",
+      "spaceId": "space-dm-2",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": null,
+      "mocks": {
+        "places": [
+          "Washington Square Park, New York, NY",
+          "Washington Square Hotel, New York, NY"
+        ]
+      },
+      "expected": "Ask which place they mean and store no destination until they choose.",
+      "mustNot": "Silently pick the first citation."
+    },
+    {
+      "id": 8,
+      "name": "missing-origin",
+      "input": "How do I get to Washington Square Park?",
+      "spaceId": "space-dm-3",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": null,
+      "expected": "Ask where they are starting.",
+      "mustNot": "Call the routing provider. Send a default latitude/longitude. Reuse an origin from another space."
+    },
+    {
+      "id": 9,
+      "name": "missing-destination",
+      "input": "How do I get from Columbia University?",
+      "spaceId": "space-dm-3",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": null,
+      "expected": "Ask for a destination.",
+      "mustNot": "Invent Times Square or any other endpoint."
+    },
+    {
+      "id": 10,
+      "name": "invalid-destination",
+      "input": "How do I get to Narnia?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": {
+        "origin": "Columbia University, New York, NY",
+        "destination": null,
+        "mode": null
+      },
+      "mocks": {
+        "places": []
+      },
+      "expected": "Say the place could not be resolved and leave destination unset.",
+      "mustNot": "Produce a route. Label uncited prose as a Google Maps result."
+    },
+    {
+      "id": 11,
+      "name": "gemini-failure",
+      "input": "How do I get from Columbia University to Times Square?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": null,
+      "mocks": {
+        "gemini": "throw"
+      },
+      "expected": "Reply that the lookup failed and keep the listener running.",
+      "mustNot": "Send a memorized NYC itinerary. Retry in a loop. Let the exception escape the message loop."
+    },
+    {
+      "id": 12,
+      "name": "maps-or-routes-failure",
+      "input": "How do I get from Columbia University to Times Square?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": null,
+      "mocks": {
+        "places": ["Columbia University, New York, NY", "Times Square, New York, NY"],
+        "route": "throw"
+      },
+      "expected": "Say directions are unavailable. Keep the resolved places for a later retry.",
+      "mustNot": "Fill in steps or a duration from model prose."
+    },
+    {
+      "id": 13,
+      "name": "photon-reply-failure",
+      "input": "How do I get from Columbia University to Times Square?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": null,
+      "mocks": {
+        "places": ["Columbia University, New York, NY", "Times Square, New York, NY"],
+        "routeMode": "transit",
+        "messageReply": "undefined-then-space-send"
+      },
+      "expected": "When message.reply returns undefined or throws, send the same text once with space.send. If that also throws, log an error type and continue.",
+      "mustNot": "Resend in a loop. Log the message body, phone number, or coordinates."
+    },
+    {
+      "id": 14,
+      "name": "outside-nyc",
+      "input": "How do I get from Columbia University to Boston Common?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": null,
+      "mocks": {
+        "places": ["Columbia University, New York, NY", "Boston Common, Boston, MA"]
+      },
+      "expected": "Recognize the destination as outside NYC and say city directions do not cover it.",
+      "mustNot": "Give MTA lines or a subway itinerary to Boston."
+    },
+    {
+      "id": 15,
+      "name": "follow-up-mode-only",
+      "input": "Can I walk instead?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": {
+        "origin": "Columbia University, New York, NY",
+        "destination": "Times Square, New York, NY",
+        "mode": "transit"
+      },
+      "mocks": {
+        "routeMode": "walk"
+      },
+      "expected": "Change only mode. One WALK route call. Place ids unchanged.",
+      "mustNot": "Re-resolve the places and bind a different Columbia."
+    },
+    {
+      "id": 16,
+      "name": "follow-up-destination-only",
+      "input": "Actually, take me to Penn Station",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": {
+        "origin": "Columbia University, New York, NY",
+        "destination": "Times Square, New York, NY",
+        "mode": "walk"
+      },
+      "mocks": {
+        "places": ["Penn Station, New York, NY"],
+        "routeMode": "walk"
+      },
+      "expected": "Replace the destination, keep origin and walk mode, and route again.",
+      "mustNot": "Keep Times Square as the destination. Reset mode to transit without being asked."
+    },
+    {
+      "id": 17,
+      "name": "closest-subway",
+      "input": "What's the closest subway station to Washington Square Park?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": {
+        "origin": null,
+        "destination": "Washington Square Park, New York, NY",
+        "mode": null
+      },
+      "mocks": {
+        "places": ["West 4th Street station", "Astor Place station"]
+      },
+      "expected": "Return cited station names. Call a routing provider before ranking by walking time. If no duration came back, describe the reply as a place search.",
+      "mustNot": "Name one station as closest and attach a walking time the mock did not return."
+    },
+    {
+      "id": 18,
+      "name": "walk-versus-transit",
+      "input": "Is walking or the subway faster?",
+      "spaceId": "space-dm-1",
+      "spaceType": "dm",
+      "senderId": "user-a",
+      "prior": {
+        "origin": "Columbia University, New York, NY",
+        "destination": "Times Square, New York, NY",
+        "mode": "transit"
+      },
+      "mocks": {
+        "routes": ["walk", "transit"]
+      },
+      "expected": "Request WALK and TRANSIT. Compare durations only when both responses include them. If one call fails, say so and do not name a winner.",
+      "mustNot": "Let one Gemini sentence pick the winner. Treat missing durations as a tie."
+    }
+  ]
+}

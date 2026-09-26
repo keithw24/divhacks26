@@ -1,15 +1,15 @@
-import { GoogleGenAI, type GenerateContentResponse } from "@google/genai";
+import type { GenerateContentResponse } from "@google/genai";
 import { config } from "../config.js";
 import type { LatLng } from "../chat/location.js";
+import { getGeminiClient } from "../gemini/client.js";
 import { formatSafetyReply } from "../formatReport.js";
 import { geocodeNyc } from "../geocode.js";
 import { currentHourEt, lookupBlockSafety, parseRequestedHour } from "../safety.js";
 import { systemPrompt } from "./prompt.js";
 
-let client: GoogleGenAI | undefined;
-function gemini(): GoogleGenAI {
+function gemini() {
   if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is not set (see .env.example)");
-  return (client ??= new GoogleGenAI({ apiKey: config.geminiApiKey }));
+  return getGeminiClient(config.geminiApiKey);
 }
 
 export interface SuggestInput {
@@ -89,7 +89,7 @@ async function citySketchFor(input: SuggestInput): Promise<string | undefined> {
 /** Ask Gemini what the person/group should do next, grounded in Google Maps. */
 export async function suggestNext(input: SuggestInput): Promise<string> {
   const citySketch = await citySketchFor(input).catch((err) => {
-    console.error("tiger sketch failed:", err);
+    console.error(`tiger sketch failed: ${err instanceof Error ? err.name : "Error"}`);
     return undefined;
   });
   const response = await gemini().models.generateContent({
