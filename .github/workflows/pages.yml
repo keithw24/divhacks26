@@ -1,0 +1,83 @@
+# Publishes the website (frontend/) to GitHub Pages: https://<owner>.github.io/<repo>/
+#
+# One-time setup (repo admin):
+#   1. Settings → Pages → Build and deployment → Source: "GitHub Actions".
+#   2. Settings → Secrets and variables → Actions → Variables → New repository variable:
+#      AGENT_API_URL = the agent's public HTTPS address (e.g. a Cloudflare tunnel URL).
+#   The agent must allow this site's origin: WEB_ALLOWED_ORIGINS=https://<owner>.github.io
+#
+# When the API address changes, update AGENT_API_URL and re-run this workflow (Actions → Run workflow).
+name: Deploy website to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the API address is configured
+        env:
+          AGENT_API_URL: ${{ vars.AGENT_API_URL }}
+        run: |
+          if [ -z "$AGENT_API_URL" ]; then
+            echo "::error::Set the AGENT_API_URL repository variable (Settings → Secrets and variables → Actions → Variables)."
+            exit 1
+          fi
+          case "$AGENT_API_URL" in https://*) ;; *) echo "::error::AGENT_API_URL must start with https:// (GitHub Pages is HTTPS)."; exit 1 ;; esac
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Build static site
+        env:
+          # Served from https://<owner>.github.io/<repo>/, so every URL gets the repo name as a prefix.
+          PAGES_BASE: /${{ github.event.repository.name }}/
+          VITE_AGENT_API_URL: ${{ vars.AGENT_API_URL }}
+        run: bun run build
+
+      - name: Prepare Pages output
+        run: |
+          cd .output/public
+          # Single-page app: the shell serves every route. 404.html lets deep links like /signin load.
+          cp _shell.html index.html
+          cp _shell.html 404.html
+          touch .nojekyll
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: frontend/.output/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
