@@ -72,8 +72,30 @@ async function reply(space: Space, isGroup: boolean, who: string, question: stri
   }
 }
 
+/** `npm start -- --text +14155551234` opens a 1:1 iMessage chat with that number and says hi. */
+async function startChatWith(app: Awaited<ReturnType<typeof connect>>, rawNumber: string) {
+  if (config.chatProvider !== "imessage") throw new Error("--text needs CHAT_PROVIDER=imessage");
+  const digits = rawNumber.replace(/[^\d+]/g, "");
+  const number = digits.startsWith("+") ? digits : `+1${digits}`;
+  const space = await imessage(app as any).space.create(number);
+  const intro =
+    `Hey! I'm ${config.agentName}, your NYC sidekick. Tell me where you are and ask ` +
+    `"what should we do?" and I'll suggest a few things nearby. Add me to a group chat and mention me by name too.`;
+  await space.send(intro);
+  recordMessage(space.id, config.agentName, intro);
+  console.log(`Started a chat with ${number}`);
+}
+
 const app = await connect();
 console.log(`${config.agentName} is listening on ${config.chatProvider}`);
+
+const textFlag = process.argv.indexOf("--text");
+if (textFlag !== -1) {
+  const number = process.argv[textFlag + 1];
+  if (!number) throw new Error("Usage: npm start -- --text +14155551234");
+  // A failed intro (e.g. a bad number) shouldn't stop the agent from answering everyone else.
+  await startChatWith(app, number).catch((err) => console.error(`Could not text ${number}:`, err.details ?? err.message));
+}
 
 for await (const [space, message] of app.messages) {
   if (message.direction !== "inbound" || message.sender?.kind === "agent") continue;

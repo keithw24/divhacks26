@@ -11,6 +11,8 @@ export const config = {
   terminalAsGroup: env("TERMINAL_AS_GROUP") === "1",
   geminiApiKey: env("GEMINI_API_KEY"),
   geminiModel: env("GEMINI_MODEL", "gemini-3.8-flash"),
+  // Used when the main model is overloaded or unavailable. Set equal to GEMINI_MODEL to disable.
+  geminiFallbackModel: env("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite"),
   timezone: env("TIMEZONE", "America/New_York"),
   databaseUrl: env("DATABASE_URL"),
 };

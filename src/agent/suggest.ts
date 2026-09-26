@@ -96,8 +96,7 @@ const status = (err: unknown) => (typeof err === "object" && err !== null ? (err
 const isQuotaError = (err: unknown) => status(err) === 429;
 
 /** Retry temporary Gemini failures (overloaded / server errors) with a short backoff. */
-async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
-  const delaysMs = [1000, 3000];
+async function withRetry<T>(fn: () => Promise<T>, delaysMs: number[]): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn();
@@ -109,6 +108,35 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+type GenerateParams = Omit<Parameters<GoogleGenAI["models"]["generateContent"]>[0], "model">;
+
+// When the main model is overloaded, skip straight to the fallback for a while instead of waiting on it every message.
+const PRIMARY_COOLDOWN_MS = 60_000;
+let primaryDownUntil = 0;
+
+/**
+ * Call Gemini on the configured model; if it's overloaded or unavailable (5xx, or 404 for a
+ * retired model), use the fallback model instead. Quota errors (429) are passed through.
+ */
+async function generate(params: GenerateParams): Promise<GenerateContentResponse> {
+  const { geminiModel: primary, geminiFallbackModel: fallback } = config;
+  const call = (model: string) => () => gemini().models.generateContent({ ...params, model });
+
+  if (!fallback || fallback === primary) return withRetry(call(primary), [1000, 3000]);
+
+  if (Date.now() >= primaryDownUntil) {
+    try {
+      return await withRetry(call(primary), [1000]);
+    } catch (err) {
+      const code = status(err) ?? 0;
+      if (code < 500 && code !== 404) throw err;
+      primaryDownUntil = Date.now() + PRIMARY_COOLDOWN_MS;
+      console.warn(`${primary} unavailable (${code}); using ${fallback} for the next minute.`);
+    }
+  }
+  return withRetry(call(fallback), [1000, 3000]);
+}
+
 /** Ask Gemini what the person/group should do next, grounded in Google Maps when the key allows it. */
 export async function suggestNext(input: SuggestInput): Promise<string> {
   const citySketch = await citySketchFor(input).catch((err) => {
@@ -116,13 +144,12 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
     return undefined;
   });
   const request = {
-    model: config.geminiModel,
     contents: [{ role: "user", parts: [{ text: buildContext({ ...input, citySketch }) }] }],
   };
 
   let response: GenerateContentResponse;
   try {
-    response = await withRetry(() => gemini().models.generateContent({
+    response = await generate({
       ...request,
       config: {
         systemInstruction: systemPrompt(input.isGroup),
@@ -133,7 +160,7 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
           },
         }),
       },
-    }));
+    });
   } catch (err) {
     // Maps grounding has its own quota (none on free-tier keys). Fall back to an ungrounded answer.
     if (!isQuotaError(err)) throw err;
@@ -141,10 +168,10 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
       console.warn("Google Maps grounding hit a quota limit (429); answering without it. Use a billed Gemini key to enable it.");
       warnedUngrounded = true;
     }
-    response = await withRetry(() => gemini().models.generateContent({
+    response = await generate({
       ...request,
       config: { systemInstruction: systemPrompt(input.isGroup) + UNGROUNDED_NOTE },
-    }));
+    });
   }
 
   const reply = response.text?.trim();
