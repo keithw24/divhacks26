@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type { MeetupPersistence, MeetupPlan, PersonLocation } from "../meetup/types.js";
 import { emptyPhoneCallBook, type PhoneCallBook, type PhoneCallRecord } from "../phone/types.js";
 import type { CheckIn } from "../agent/checkin.js";
+import type { AreaWatch } from "../alerts/service.js";
 
 export interface Participant {
   id: string;
@@ -60,6 +61,8 @@ export interface AgentState {
   phoneCalls?: PhoneCallBook;
   /** Gentle follow-ups keyed `${spaceId}:${senderId}` (1:1 chats only). */
   checkIns?: Record<string, CheckIn>;
+  /** Opt-in area alerts keyed by Photon space id (coordinates rounded to ~100 m). */
+  areaWatches?: Record<string, AreaWatch[]>;
 }
 
 /** Enough to match a webhook back to a Photon space after restart. */
