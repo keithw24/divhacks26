@@ -1,3 +1,5 @@
+import type { EvidencePlan } from "../../../src/domain/evidence";
+export type { EvidencePlan, Evidence, EvidenceNode } from "../../../src/domain/evidence";
 /** Client for the agent's website API (src/web/server.ts in the agent repo root). */
 
 export const API_URL =
@@ -101,6 +103,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export const api = {
+  evidence: () => call<{ plans: EvidencePlan[] }>("GET", "/api/me/evidence"),
   stats: () => call<{ spotsTaken: number; spotsTotal: number }>("GET", "/api/stats"),
   // Two-factor sign-in: email code first, then an iMessage code.
   startEmail: (email: string) => call<{ ok: true }>("POST", "/api/auth/email/start", { email }),

@@ -1,3 +1,4 @@
+import type { EvidencePlan } from "../domain/evidence.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readPublicIntegrations } from "../integrations/report.js";
 import type { StoredMemory } from "../backboard/client.js";
@@ -6,6 +7,7 @@ import type { WebUser } from "./store.js";
 
 /** What the website server needs from the agent (Photon + Backboard). */
 export interface WebApiDeps {
+  listEvidence?(phone: string): EvidencePlan[];
   auth: Auth;
   allowedOrigins: string[];
   /** Send the "say hi" iMessage that opens the chat with the agent. */
@@ -135,6 +137,7 @@ export function createWebApiServer(deps: WebApiDeps): Server {
       return { ok: true };
     }
     if (method === "GET" && path === "/api/me") return publicUser(user, await userWalletAddress(user));
+    if (method === "GET" && path === "/api/me/evidence") return { plans: deps.listEvidence?.(user.phone) ?? [] };
 
     if (method === "PUT" && path === "/api/me/preferences") {
       const prefs = deps.auth.savePreferences(user.phone, await readJson(req));

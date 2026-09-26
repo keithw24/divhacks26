@@ -107,12 +107,12 @@ describe("skill dispatcher", () => {
     expect(getRoute).toHaveBeenCalledWith(expect.objectContaining({ destination: event.location }));
   });
 
-  it("uses the fallback when no skill returns anything verified", async () => {
+  it("fails closed when no skill returns anything verified", async () => {
     vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["food"] });
     const fallback = vi.fn(async () => "gemini fallback");
-    await expect(orchestrate({ question: "what now?", transcript: [], location, fallback })).resolves.toBe("gemini fallback");
-    expect(fallback).toHaveBeenCalledOnce();
-    expect(renderResponse).not.toHaveBeenCalled();
+    await expect(orchestrate({ question: "what now?", transcript: [], location, fallback })).resolves.toBe("rendered response");
+    expect(fallback).not.toHaveBeenCalled();
+    expect(renderResponse).toHaveBeenCalled();
   });
 
   it("keeps the skill answer when any skill returns data", async () => {
@@ -123,10 +123,11 @@ describe("skill dispatcher", () => {
     expect(fallback).not.toHaveBeenCalled();
   });
 
-  it("hands off to the fallback when no location can be resolved", async () => {
+  it("asks for location without a generative fallback", async () => {
     vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, origin: undefined, needs: ["food"] });
     const fallback = vi.fn(async () => "where are you?");
-    await expect(orchestrate({ question: "what now?", transcript: [], fallback })).resolves.toBe("where are you?");
+    await expect(orchestrate({ question: "what now?", transcript: [], fallback })).resolves.toBe("Where in NYC are you? Share a location or name a neighborhood.");
+    expect(fallback).not.toHaveBeenCalled();
     expect(findFood).not.toHaveBeenCalled();
   });
 

@@ -86,6 +86,7 @@ function deps(
 
 function inbound(partial: Partial<InboundMessage> & Pick<InboundMessage, "spaceId" | "text">): InboundMessage {
   return {
+    messageIds: partial.messageIds,
     messageId: partial.messageId ?? `m-${partial.spaceId}-${partial.text.length}-${partial.senderId ?? "rohan"}`,
     senderId: partial.senderId ?? "rohan-id",
     senderName: partial.senderName ?? "Rohan",
@@ -729,4 +730,23 @@ describe("place context after restart", () => {
     expect(sink[0]).toMatch(/20 min/);
     expect(sink[0]).not.toMatch(/Where are you starting from/);
   });
+});
+
+it("claims inbound message IDs before async work and retains them across store reloads", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "inbound-dedup-"));
+  const statePath = join(dir, "state.json");
+  const store = createFileStateStore(statePath);
+  const sink: string[] = [];
+  let calls = 0;
+  const dependencies = deps(store, undefined, async () => { calls++; return "One answer"; });
+  const message = inbound({ spaceId: "dedup", messageId: "original", messageIds: ["original", "correction"], text: "@agent coffee\n*tea" });
+  await Promise.all([
+    handleInboundMessage(message, actions(sink), dependencies),
+    handleInboundMessage(message, actions(sink), dependencies),
+  ]);
+  const reloaded = createFileStateStore(statePath);
+  await handleInboundMessage({ ...message, messageIds: undefined, messageId: "correction" }, actions(sink), { ...dependencies, store: reloaded });
+  rmSync(dir, { recursive: true, force: true });
+  expect(calls).toBe(1);
+  expect(sink).toHaveLength(1);
 });

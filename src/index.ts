@@ -1,6 +1,8 @@
-import { attachment, Spectrum, type Message } from "spectrum-ts";
+import { attachment, Spectrum, type Message, type Space } from "spectrum-ts";
+import { saveEvidencePlan } from "./evidence/history.js";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { terminal } from "spectrum-ts/providers/terminal";
+import { ConversationInbox } from "./chat/inbox.js";
 import { handleInboundMessage } from "./agent/inbound.js";
 import { suggestNext } from "./agent/suggest.js";
 import { errorCategory } from "./agent/turn.js";
@@ -417,13 +419,8 @@ const claims = createMessageClaimer({
 });
 console.info(`agent instance ${INSTANCE_ID} (message claims: ${config.chatProvider === "imessage" && config.databaseUrl && config.messageClaims ? "database" : "this process only"})`);
 
-for await (const [space, message] of app.messages) {
-  if (message.direction !== "inbound" || message.sender?.kind === "agent") continue;
-  if (!(await claims.claim(message.id))) {
-    console.info(`inbound.skipped ${JSON.stringify({ reason: "already_claimed", instance: INSTANCE_ID })}`);
-    continue;
-  }
-  console.info(`inbound.claimed ${JSON.stringify({ instance: INSTANCE_ID })}`);
+async function processMessages(items: { space: Space; message: Message }[]) {
+  const { space, message } = items[items.length - 1]!;
 
   const isGroup =
     config.chatProvider === "terminal"
@@ -431,11 +428,16 @@ for await (const [space, message] of app.messages) {
       : (space as { type?: string }).type === "group";
   const who = message.sender?.id ?? "someone";
 
-  const text = await readMessage(space.id, who, message).catch((err) => {
-    console.error(`could not read message: ${errorCategory(err)}`);
-    return null;
-  });
-  if (text === null) continue;
+  const texts: string[] = [];
+  for (const item of items) {
+    const part = await readMessage(space.id, who, item.message).catch((err) => {
+      console.error(`could not read message: ${errorCategory(err)}`);
+      return null;
+    });
+    if (part !== null) texts.push(part);
+  }
+  if (!texts.length) return;
+  const text = texts.join("\n");
 
   const isVoice = message.content.type === "voice";
   if (message.content.type !== "text") {
@@ -452,6 +454,7 @@ for await (const [space, message] of app.messages) {
     {
       spaceId: space.id,
       messageId: message.id,
+      messageIds: items.map((item) => item.message.id),
       senderId: who,
       senderName: senderDisplayName(message.sender),
       text,
@@ -464,7 +467,7 @@ for await (const [space, message] of app.messages) {
       audioEvents,
     },
     {
-      reply: (replyText) => message.reply(replyText),
+      reply: (replyText) => space.send(replyText),
       send: (replyText) => space.send(replyText),
       react: (emoji) => message.react(emoji),
       responding: (fn) => space.responding(fn),
@@ -496,6 +499,7 @@ for await (const [space, message] of app.messages) {
       suggest: (input) =>
         suggestNext({
           ...input,
+          onEvidence: (plan) => saveEvidencePlan(agentState, who, plan),
           // The chart follows the text card; it is dropped if Gemini's restyle fails the read-back check.
           onSafetyReport: (report) => {
             if (config.chatProvider !== "imessage") return;
@@ -556,4 +560,28 @@ for await (const [space, message] of app.messages) {
   ).catch((err) => {
     console.error(`reply failed: ${errorCategory(err)}`);
   });
+}
+
+// Keep consuming arrivals while a turn is running so corrections can be collected.
+const inbox = new ConversationInbox<{ space: Space; message: Message }>({
+  delayMs: config.messageBatchDelayMs,
+  identify: ({ space, message }) => ({
+    spaceId: space.id,
+    messageId: message.id,
+    senderId: message.sender?.id ?? "someone",
+    mergeable: message.content.type === "text",
+  }),
+  process: processMessages,
+  onError: (error) => console.error(`inbound failed: ${errorCategory(error)}`),
+});
+for await (const [space, message] of app.messages) {
+  if (message.direction !== "inbound" || message.sender?.kind === "agent") continue;
+  if (!(await claims.claim(message.id))) {
+    console.info(`inbound.skipped ${JSON.stringify({ reason: "already_claimed", instance: INSTANCE_ID })}`);
+    continue;
+  }
+  console.info(`inbound.claimed ${JSON.stringify({ instance: INSTANCE_ID })}`);
+  const key = JSON.stringify([space.id, message.id]);
+  if (agentState.getState().handledMessageIds?.includes(key)) continue;
+  inbox.push({ space, message });
 }

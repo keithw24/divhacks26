@@ -85,8 +85,9 @@ export function normalizeEvent(row: EventRow): EventRecommendation {
     url: row.registration_url || row.source_url || undefined,
     source: {
       name: row.source,
-      url: row.registration_url || row.source_url || undefined,
+      url: row.source_url || undefined,
       updatedAt: new Date(row.updated_at).toISOString(),
+      updatedAtKind: "ingested",
     },
   };
 }

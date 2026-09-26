@@ -1,3 +1,4 @@
+import { listEvidencePlans, deleteEvidencePlans } from "../evidence/history.js";
 import { randomBytes } from "node:crypto";
 import type { BackboardClient } from "../backboard/client.js";
 import type { MemoryService } from "../memory/service.js";
@@ -68,6 +69,7 @@ export function startWebRuntime(opts: WebRuntimeOptions) {
 
   const server = createWebApiServer({
     auth,
+    listEvidence: (phone) => listEvidencePlans(opts.agentState, phone),
     allowedOrigins: opts.allowedOrigins,
     async startChat(phone, name) {
       const hi = name ? `Hey ${name}!` : "Hey!";
@@ -128,6 +130,7 @@ export function startWebRuntime(opts: WebRuntimeOptions) {
     async deleteAllMemories(phone) {
       const assistantId = assistantFor(phone);
       if (assistantId && opts.backboard?.resetMemories) await opts.backboard.resetMemories(assistantId);
+      deleteEvidencePlans(opts.agentState, phone);
       opts.agentState.update((state) => {
         const profile = state.users[phone];
         if (profile) profile.recentMemoryTexts = [];

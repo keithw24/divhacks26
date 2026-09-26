@@ -6,9 +6,9 @@ import type { TransportationRequest, TransportationResult } from "../transport/s
 export const FRIENDLY_FAILURE = "Sorry, something went wrong on my end. Try again in a sec?";
 
 export interface TurnActions {
-  /** Threaded Photon reply. Undefined means the provider skipped it. */
+  /** The adapter chooses one supported delivery method for this reply. */
   reply(text: string): Promise<unknown>;
-  /** Used only when reply does not produce a message and the adapter provides it. */
+  /** Optional delivery method for reporting a failure before any answer was attempted. */
   send?(text: string): Promise<unknown>;
   react?(emoji: string): Promise<unknown>;
   responding<T>(fn: () => Promise<T>): Promise<T>;
@@ -122,10 +122,9 @@ async function reactTo(actions: Pick<TurnActions, "react">, emoji: string | unde
   if (emoji && actions.react) await actions.react(emoji).catch(() => undefined);
 }
 
-/** Send once. A skipped threaded reply falls back to a normal space send. */
+/** An empty provider result is not a safe reason to send the text again. */
 export async function deliverOnce(actions: Pick<TurnActions, "reply" | "send">, text: string): Promise<void> {
-  const sent = await actions.reply(text);
-  if (sent == null && actions.send) await actions.send(text);
+  await actions.reply(text);
 }
 
 /**
@@ -144,6 +143,13 @@ export async function runConversationTurn(
   if (!input.question) return "unaddressed";
   if (!deps.autoReply) return "silent";
 
+  let deliveryAttempted = false;
+  const deliveryActions = {
+    reply: async (text: string) => {
+      deliveryAttempted = true;
+      return actions.reply(text);
+    },
+  };
   let delivered = false;
   let outcome: TurnOutcome = "gemini";
   try {
@@ -163,7 +169,7 @@ export async function runConversationTurn(
           outcome = "payment";
           answer = payment.reply;
           await reactTo(actions, ackFor(input.social, payment.acknowledgement ?? "👍"));
-          await deliverOnce(actions, answer);
+          await deliverOnce(deliveryActions, answer);
           delivered = true;
           if (payment.afterReply) await payment.afterReply();
           return;
@@ -183,7 +189,7 @@ export async function runConversationTurn(
           outcome = orchestrated.outcome ?? "orchestration";
           answer = orchestrated.reply;
           if (actions.react) await actions.react(orchestrated.acknowledgement ?? "👍").catch(() => undefined);
-          await deliverOnce(actions, answer);
+          await deliverOnce(deliveryActions, answer);
           delivered = true;
           if (orchestrated.afterReply) await orchestrated.afterReply();
           return;
@@ -214,7 +220,7 @@ export async function runConversationTurn(
         outcome = "ticketing";
         answer = result.reply;
         await reactTo(actions, ackFor(input.social, result.acknowledgement ?? "👍"));
-        await deliverOnce(actions, answer);
+        await deliverOnce(deliveryActions, answer);
         delivered = true;
         if (result.afterReply) await result.afterReply();
         return true;
@@ -233,7 +239,7 @@ export async function runConversationTurn(
           outcome = "reservation";
           answer = reservation.reply;
           await reactTo(actions, ackFor(input.social, reservation.acknowledgement ?? "👍"));
-          await deliverOnce(actions, answer);
+          await deliverOnce(deliveryActions, answer);
           delivered = true;
           if (reservation.afterReply) await reservation.afterReply();
           return;
@@ -252,7 +258,7 @@ export async function runConversationTurn(
           outcome = "meetup";
           answer = meetup.reply;
           await reactTo(actions, ackFor(input.social, meetup.acknowledgement ?? "👍"));
-          await deliverOnce(actions, answer);
+          await deliverOnce(deliveryActions, answer);
           delivered = true;
           return;
         }
@@ -269,7 +275,7 @@ export async function runConversationTurn(
           outcome = "payment";
           answer = payment.reply;
           await reactTo(actions, ackFor(input.social, payment.acknowledgement ?? "👍"));
-          await deliverOnce(actions, answer);
+          await deliverOnce(deliveryActions, answer);
           delivered = true;
           if (payment.afterReply) await payment.afterReply();
           return;
@@ -281,7 +287,7 @@ export async function runConversationTurn(
         outcome = "support";
         answer = await deps.support();
         await reactTo(actions, reactionFor(input.social));
-        await deliverOnce(actions, answer);
+        await deliverOnce(deliveryActions, answer);
         delivered = true;
         return;
       }
@@ -309,14 +315,14 @@ export async function runConversationTurn(
         await reactTo(actions, reactionFor(input.social));
       }
 
-      await deliverOnce(actions, answer);
+      await deliverOnce(deliveryActions, answer);
       delivered = true;
     });
     if (delivered) deps.recordAssistant(answer, outcome);
     return outcome;
   } catch (error) {
     console.error(`reply failed: ${errorCategory(error)}`);
-    if (!delivered) {
+    if (!deliveryAttempted) {
       const notify = actions.send ?? actions.reply;
       await notify(FRIENDLY_FAILURE).catch(() => undefined);
     }

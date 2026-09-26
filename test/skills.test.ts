@@ -180,13 +180,13 @@ describe("response renderer", () => {
     expect(text).not.toContain("restaurant");
   });
 
-  it("summarizes safety vs NYC instead of listing report counts", () => {
+  it("ignores unsupported free-form safety summaries", () => {
     const text = renderResponse({
       picks: [],
       safetyLine: "Looks safer than typical NYC — everyday awareness is enough.",
       warnings: [],
     });
-    expect(text).toContain("everyday awareness");
+    expect(text).not.toContain("everyday awareness");
     expect(text).not.toMatch(/reports at this hour/i);
   });
 

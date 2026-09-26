@@ -1,3 +1,4 @@
+import type { EvidencePlan } from "../domain/evidence.js";
 import type { GenerateContentResponse } from "@google/genai";
 import { config } from "../config.js";
 import type { LatLng } from "../chat/location.js";
@@ -17,6 +18,7 @@ function gemini() {
 }
 
 export interface SuggestInput {
+  onEvidence?: (plan: EvidencePlan) => void;
   isGroup: boolean;
   asker: string;
   question: string;
@@ -43,7 +45,10 @@ const clock = (d: Date) =>
 /** Everything Gemini needs to know about the moment, as one message. */
 export function buildContext(input: SuggestInput): string {
   const now = input.now ?? new Date();
-  const lines = [`It is ${clock(now)} in New York.`];
+  const lines = [
+    `It is ${clock(now)} in New York.`,
+    "Read the entire request together with the recent conversation. Consecutive texts may be combined in order; later typo corrections or clarifications replace the earlier wording. Give one coherent answer to the corrected request.",
+  ];
 
   if (input.location) {
     lines.push(`${input.location.who} shared their location: ${input.location.latitude}, ${input.location.longitude}.`);
@@ -260,7 +265,7 @@ export async function suggestWithGemini(input: SuggestInput): Promise<string> {
 
 /**
  * Route one chat turn through the shared intent parser and factual skills (safety, food, events, route).
- * If no skill returns anything usable, fall back to the single-prompt Gemini suggestion.
+ * Missing evidence is disclosed without a free-form factual fallback.
  */
 export async function suggestNext(input: SuggestInput): Promise<string> {
   const fromGroup = (input.groupLines ?? []).map((line) => ({
@@ -268,17 +273,13 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
     who: line.senderName || line.senderId,
     text: line.text,
   }));
-  // The Gemini fallback already writes in the right tone; templated skill answers get a short opener.
-  let modelWrote = false;
+  // Factual suggestions are rendered only from the evidence graph.
   const answer = await orchestrate({
     question: input.question,
     transcript: fromGroup.length ? fromGroup : input.transcript,
     location: input.location,
     now: input.now,
-    fallback: () => {
-      modelWrote = true;
-      return suggestWithGemini(input);
-    },
+    onEvidence: input.onEvidence,
     memoryContext: [untrustedMemory(input), rankingHint(input.social)].filter(Boolean).join("\n") || undefined,
     privateConstraintLines: [
       ...(input.userMemories ?? []).map((text) => ({ who: input.currentUser?.displayName || input.asker, text })),
@@ -288,5 +289,5 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
     ],
     onSafetyReport: input.onSafetyReport,
   });
-  return modelWrote ? answer : withOpener(answer, input.social);
+  return answer;
 }

@@ -49,7 +49,7 @@ export async function getSafety(input: SafetyInput): Promise<SkillResult<BlockSa
         {
           name: "NYPD Complaint Data via Tiger Data",
           url: "https://data.cityofnewyork.us/d/5uac-w243",
-          updatedAt: report.asOfEt,
+          // asOfEt is the query clock, not the dataset update time.
         },
       ],
       warnings: ["Historical public context is not a live safety score."],

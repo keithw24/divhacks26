@@ -1,3 +1,4 @@
+import { EvidenceHistory } from "@/components/site/evidence-history";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -127,6 +128,8 @@ function Dashboard() {
           )}
         </div>
       </Card>
+
+      <EvidenceHistory />
 
       <section className="mt-8">
         <h2 className="font-bold text-xl">Add it to a group chat</h2>
