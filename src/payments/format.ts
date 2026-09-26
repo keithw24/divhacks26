@@ -44,8 +44,17 @@ export function alreadySentText(input: { recipientName: string; amountUsd: numbe
   return `Already sent ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)}.`;
 }
 
+/** User-visible line when a send is blocked or the provider fails closed. */
+export function rejectedText(reason: string): string {
+  const detail = reason
+    .trim()
+    .replace(/^transaction rejected\.?\s*/i, "")
+    .replace(/\.+$/, "");
+  return `Transaction rejected. ${detail}.`;
+}
+
 export function failureText(amountUsd: number): string {
-  return `I couldn't send the ${formatUsd(amountUsd)} payment. Nothing was charged.`;
+  return rejectedText(`I couldn't send the ${formatUsd(amountUsd)} payment. Nothing was charged`);
 }
 
 export function overMaxText(maxUsd: number): string {

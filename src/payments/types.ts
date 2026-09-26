@@ -41,6 +41,8 @@ export interface PaymentSendInput {
   memo?: string;
   idempotencyKey: string;
   recipientName?: string;
+  /** Effective cap for this submit. Must not exceed the process default. */
+  maxUsd?: number;
 }
 
 export interface PaymentResult {

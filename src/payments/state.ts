@@ -21,6 +21,7 @@ export class PaymentStore {
   private readonly peopleBySpace = new Map<string, string[]>();
   private readonly replies = new Map<string, string>();
   private readonly inflight = new Set<string>();
+  private readonly maxUsdByUser = new Map<string, number>();
 
   constructor(private readonly persist?: () => void) {}
 
@@ -127,6 +128,21 @@ export class PaymentStore {
     return [...(this.peopleBySpace.get(spaceId) ?? [])];
   }
 
+  maxUsdFor(userId: string, fallback: number): number {
+    const stored = this.maxUsdByUser.get(userId);
+    if (stored == null) return fallback;
+    return Math.min(stored, fallback);
+  }
+
+  hasCustomMax(userId: string): boolean {
+    return this.maxUsdByUser.has(userId);
+  }
+
+  setMaxUsd(userId: string, amountUsd: number): void {
+    this.maxUsdByUser.set(userId, amountUsd);
+    this.touch();
+  }
+
   replyFor(spaceId: string, messageId: string): string | undefined {
     return this.replies.get(messageKey(spaceId, messageId));
   }
@@ -167,6 +183,7 @@ export class PaymentStore {
       recentPeople,
       messageReplies: Object.fromEntries(this.replies),
       inflightMessages: [...this.inflight],
+      maxUsdByUser: Object.fromEntries(this.maxUsdByUser),
     };
   }
 
@@ -176,6 +193,7 @@ export class PaymentStore {
     this.peopleBySpace.clear();
     this.replies.clear();
     this.inflight.clear();
+    this.maxUsdByUser.clear();
     if (!book) return;
     for (const [id, value] of Object.entries(book.records ?? {})) {
       if (!isPayment(value) || value.id !== id) continue;
@@ -196,6 +214,11 @@ export class PaymentStore {
       if (typeof reply === "string") this.replies.set(key, reply);
     }
     for (const key of book.inflightMessages ?? []) this.inflight.add(key);
+    for (const [userId, amount] of Object.entries(book.maxUsdByUser ?? {})) {
+      if (typeof amount === "number" && Number.isFinite(amount) && amount > 0) {
+        this.maxUsdByUser.set(userId, amount);
+      }
+    }
   }
 
   private touch(): void {

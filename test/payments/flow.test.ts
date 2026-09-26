@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runConversationTurn } from "../../src/agent/turn.js";
-import { classifyPaymentMessage } from "../../src/payments/intent.js";
+import { classifyPaymentMessage, paymentInterrupts } from "../../src/payments/intent.js";
 import { MockPaymentProvider } from "../../src/payments/mock.js";
 import { DEFAULT_TEST_RECIPIENTS, loadRecipientDirectory } from "../../src/payments/recipients.js";
 import { sanitizeExtraction } from "../../src/payments/gemini.js";
@@ -83,6 +83,28 @@ describe("payment intent", () => {
     expect(classifyPaymentMessage("Book Carbone").kind).toBe("none");
     expect(classifyPaymentMessage("Send Keith a message").kind).toBe("none");
   });
+
+  it("parses personal payment max commands", () => {
+    expect(classifyPaymentMessage("Set my payment max to $10")).toMatchObject({
+      kind: "set_max",
+      amount: { ok: true, value: 10 },
+    });
+    expect(classifyPaymentMessage("Don't let me send more than $25")).toMatchObject({
+      kind: "set_max",
+      amount: { ok: true, value: 25 },
+    });
+    expect(classifyPaymentMessage("Set my max to $10")).toMatchObject({
+      kind: "set_max",
+      amount: { ok: true, value: 10 },
+    });
+    expect(classifyPaymentMessage("Cap my payments at $30")).toMatchObject({
+      kind: "set_max",
+      amount: { ok: true, value: 30 },
+    });
+    expect(classifyPaymentMessage("What's my payment max?")).toMatchObject({ kind: "query_max" });
+    expect(paymentInterrupts("Set my payment max to $10")).toBe(true);
+    expect(classifyPaymentMessage("Send Keith $20").kind).toBe("request");
+  });
 });
 
 describe("confirmation flow", () => {
@@ -113,7 +135,7 @@ describe("confirmation flow", () => {
     const { say, provider, service } = setup();
     await say("space", "Send Keith $20 for the Uber.");
     const sent = await say("space", "Yes");
-    expect(sent.reply).toMatch(/^Sent \$20 to Keith for the Uber\. Test tx: [A-F0-9]{8}\.$/);
+    expect(sent.reply).toMatch(/^Sent \$20 to Keith for the Uber\. XRPL Testnet: [A-F0-9]{8}\. https:\/\/testnet\.xrpl\.org\/transactions\/[A-F0-9]+$/);
     expect(provider.calls).toHaveLength(1);
     expect(provider.calls[0]?.amountUsd).toBe(20);
     expect(provider.calls[0]?.destination).toBe(DEFAULT_TEST_RECIPIENTS.Keith?.rippleDestination);
@@ -178,6 +200,29 @@ describe("confirmation flow", () => {
     expect(service.payments.active("space")).toBeUndefined();
   });
 
+  it("lets each sender set a personal max below the process cap", async () => {
+    const { say, provider, service } = setup();
+    expect((await say("space", "What's my payment max?")).reply).toBe("Your payment max is $500 (the default).");
+    expect((await say("space", "Set my payment max to $10")).reply).toBe("Got it. I won't send more than $10 for you.");
+    expect((await say("space", "What's my payment max?")).reply).toBe("Your payment max is $10.");
+    const blocked = await say("space", "Send Keith $20");
+    expect(blocked.reply).toBe("Transaction rejected. I can only send up to $10 at a time — that's your payment max.");
+    expect(provider.calls).toHaveLength(0);
+    expect(service.payments.active("space")).toBeUndefined();
+    const other = await say("space-b", "Send Keith $20", { senderId: "ben-id", senderName: "Ben" });
+    expect(other.reply).toBe("Send Keith $20?");
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("cancels a pending send that exceeds a newly lowered max", async () => {
+    const { say, provider, service } = setup();
+    await say("space", "Send Keith $20");
+    const lowered = await say("space", "Set my payment max to $10");
+    expect(lowered.reply).toMatch(/^Got it\. I won't send more than \$10 for you\. Transaction rejected\./);
+    expect(service.payments.active("space")).toBeUndefined();
+    expect(provider.calls).toHaveLength(0);
+  });
+
   it("does not execute a second time when yes is repeated", async () => {
     const { say, provider } = setup();
     await say("space", "Send Keith $20", { messageId: "req" });
@@ -205,10 +250,10 @@ describe("confirmation flow", () => {
     const { say } = setup({ provider, timeoutMs: 20 });
     await say("space", "Send Keith $20");
     const failed = await say("space", "yes", { messageId: "yes-1" });
-    expect(failed.reply).toBe("I couldn't send the $20 payment. Nothing was charged.");
+    expect(failed.reply).toBe("Transaction rejected. I couldn't send the $20 payment. Nothing was charged.");
     expect(provider.calls).toHaveLength(1);
     const again = await say("space", "yes", { messageId: "yes-2" });
-    expect(again.reply).toBe("I couldn't send the $20 payment. Nothing was charged.");
+    expect(again.reply).toBe("Transaction rejected. I couldn't send the $20 payment. Nothing was charged.");
     expect(provider.calls).toHaveLength(1);
   });
 
@@ -218,7 +263,7 @@ describe("confirmation flow", () => {
     const { say, service } = setup({ provider });
     await say("space", "Send Keith $20 for Uber");
     const failed = await say("space", "yes");
-    expect(failed.reply).toBe("I couldn't send the $20 payment. Nothing was charged.");
+    expect(failed.reply).toBe("Transaction rejected. I couldn't send the $20 payment. Nothing was charged.");
     expect(service.payments.active("space")?.status).toBe("FAILED");
     expect(provider.calls).toHaveLength(1);
   });
@@ -227,7 +272,7 @@ describe("confirmation flow", () => {
     const { say, provider, service } = setup();
     await say("space", "Send Keith $20");
     const sent = await say("space", "confirm");
-    expect(sent.reply).toMatch(/Test tx:/);
+    expect(sent.reply).toMatch(/XRPL Testnet:/);
     expect(provider.calls).toHaveLength(1);
     expect(service.payments.active("space")?.providerStatus).toBe("tesSUCCESS");
     expect(service.payments.active("space")?.submittedAsset).toBe("XRP");
@@ -322,6 +367,48 @@ describe("context, isolation, and groups", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("reloads a personal payment max from the agent state file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "photon-pay-max-"));
+    try {
+      const file = join(dir, "agent-state.json");
+      const first = new PaymentService({
+        provider: new MockPaymentProvider(),
+        directory: loadRecipientDirectory(),
+        store: PaymentStore.open(createFileStateStore(file)),
+      });
+      await first.handleTurn({
+        spaceId: "space",
+        senderId: "rohan-id",
+        text: "Set my payment max to $10",
+        messageId: "set",
+      });
+
+      const provider = new MockPaymentProvider();
+      const second = new PaymentService({
+        provider,
+        directory: loadRecipientDirectory(),
+        store: PaymentStore.open(createFileStateStore(file)),
+      });
+      const lookup = await second.handleTurn({
+        spaceId: "space",
+        senderId: "rohan-id",
+        text: "What's my payment max?",
+        messageId: "ask",
+      });
+      expect(lookup.reply).toBe("Your payment max is $10.");
+      const blocked = await second.handleTurn({
+        spaceId: "space",
+        senderId: "rohan-id",
+        text: "Send Keith $20",
+        messageId: "pay",
+      });
+      expect(blocked.reply).toMatch(/^Transaction rejected\./);
+      expect(provider.calls).toHaveLength(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("model extraction cannot send", () => {
@@ -341,6 +428,27 @@ describe("model extraction cannot send", () => {
     const sent = await say("space", "yes");
     expect(provider.calls).toHaveLength(1);
     expect(provider.calls[0]?.destination).toBe(DEFAULT_TEST_RECIPIENTS.Keith?.rippleDestination);
+  });
+
+  it("rejects a model amount that does not match the message", async () => {
+    const interpreter: PaymentInterpreter = {
+      async extract() {
+        return { intent: "SEND_PAYMENT", recipientName: "Keith", amountUsd: 200, memo: "Uber" };
+      },
+    };
+    const { say, provider, service } = setup({ interpreter });
+    const reply = await say("space", "Could you possibly transfer twenty bucks to Keith for the ride?");
+    expect(reply.reply).toBe("Transaction rejected. That amount doesn't match what you wrote. Nothing was sent.");
+    expect(provider.calls).toHaveLength(0);
+    expect(service.payments.active("space")).toBeUndefined();
+  });
+
+  it("does not open a payment when the message has two dollar amounts", async () => {
+    const { say, provider, service } = setup();
+    const reply = await say("space", "Send Keith $20 for the $15 Uber");
+    expect(reply.reply).toBe("Transaction rejected. I see more than one amount. Tell me exactly how much to send.");
+    expect(provider.calls).toHaveLength(0);
+    expect(service.payments.active("space")).toBeUndefined();
   });
 
   it("rejects a negative amount from the model", async () => {
@@ -395,6 +503,14 @@ describe("dispatcher precedence", () => {
     const result = await turn("Send Keith $20 for Uber");
     expect(result.outcome).toBe("payment");
     expect(result.reply).toBe("Send Keith $20 for Uber?");
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("sets a personal payment max without Gemini", async () => {
+    const { turn, provider } = world();
+    const result = await turn("Set my payment max to $15");
+    expect(result.outcome).toBe("payment");
+    expect(result.reply).toBe("Got it. I won't send more than $15 for you.");
     expect(provider.calls).toHaveLength(0);
   });
 
