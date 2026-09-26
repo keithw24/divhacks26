@@ -1,4 +1,5 @@
 import type { SuggestInput } from "./suggest.js";
+import { reactionFor, type SocialRead } from "./social.js";
 import { paymentInterrupts } from "../payments/intent.js";
 import type { TransportationRequest, TransportationResult } from "../transport/service.js";
 
@@ -23,6 +24,8 @@ export interface TurnInput {
   /** Text the agent should answer. Null when a group message was not addressed to the agent. */
   question: string | null;
   messageId?: string;
+  /** Inferred mood and group dynamic for this turn. Shapes the tapback. */
+  social?: SocialRead;
 }
 
 export interface TurnDeps {
@@ -31,7 +34,7 @@ export interface TurnDeps {
   suggest(input: SuggestInput): Promise<string>;
   transcript(): SuggestInput["transcript"];
   location?: SuggestInput["location"];
-  recordAssistant(text: string): void;
+  recordAssistant(text: string, outcome?: TurnOutcome): void;
   noteCoordinates?(): void;
   handleReservation?(input: {
     spaceId: string;
@@ -81,6 +84,7 @@ export type TurnOutcome =
   | "ignored"
   | "unaddressed"
   | "silent"
+  | "voice"
   | "payment"
   | "reservation"
   | "ticketing"
@@ -237,13 +241,13 @@ export async function runConversationTurn(
           transcript: deps.transcript(),
           location: deps.location,
         });
-        if (actions.react) await actions.react("👍").catch(() => undefined);
+        if (actions.react) await actions.react(reactionFor(input.social)).catch(() => undefined);
       }
 
       await deliverOnce(actions, answer);
       delivered = true;
     });
-    if (delivered) deps.recordAssistant(answer);
+    if (delivered) deps.recordAssistant(answer, outcome);
     return outcome;
   } catch (error) {
     console.error(`reply failed: ${errorCategory(error)}`);
