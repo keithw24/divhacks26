@@ -20,6 +20,7 @@ import { DASHBOARD_PATH, startXrplDashboardServer } from "./payments/xrpl/dashbo
 import { xrplPayments } from "./payments/xrpl/payments.js";
 import { createLiveRippleGuard } from "./payments/xrpl/runtime.js";
 import { CustomerWalletSettlement, parseCustomerSenders } from "./payments/xrpl/settlement.js";
+import { AccountOnboardingService, AccountOnboardingStore, ONBOARDING_ACCOUNTS_PATH } from "./payments/xrpl/onboarding.js";
 import { createReservationRuntime } from "./reservations/runtime.js";
 import { geocodeNyc } from "./geocode.js";
 import { createMerchantDirectory } from "./payments/merchants.js";
@@ -61,13 +62,20 @@ const transport = createTransportationServiceFromEnv({
 });
 const spaceSenders = new Map<string, (text: string) => Promise<unknown>>();
 const agentState = openAgentStateStore(config.agentStatePath);
-const xrpl = config.paymentsMode === "ripple_test" ? createLiveRippleGuard() : undefined;
+const onboardingStore = new AccountOnboardingStore(ONBOARDING_ACCOUNTS_PATH);
+const usesCustomerWallets = config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple";
+const xrpl = usesCustomerWallets || Boolean(config.deepspaceOnboardingSecret) ? createLiveRippleGuard() : undefined;
+const onboarding = new AccountOnboardingService(onboardingStore, xrpl?.guard.registry);
 const customerSenders = parseCustomerSenders(config.xrplCustomerSendersJson);
+const liveSenders = () => ({ ...customerSenders, ...onboardingStore.senderMap() });
 // Merchant payees must be real Testnet addresses whenever the provider submits to XRPL.
 const merchantPaymentMode =
   config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple" ? "ripple_test" : "mock";
 const payments = createPaymentRuntime({
-  settlement: xrpl ? new CustomerWalletSettlement(xrpl.guard.executor, customerSenders) : undefined,
+  settlement:
+    xrpl && usesCustomerWallets
+      ? new CustomerWalletSettlement(xrpl.guard.executor, liveSenders, () => onboardingStore.displayNames())
+      : undefined,
   mode: config.paymentsMode,
   maxUsd: config.paymentsMaxUsd,
   xrpPerUsd: config.paymentsXrpPerUsd,
@@ -296,11 +304,14 @@ if (xrpl) {
   console.info(
     `XRPL customer wallets: ${xrpl.guard.registry.listPublic().map((w) => `${w.customerName} ${w.xrplAddress}`).join(", ") || "none yet"}.`,
   );
-  const linked = Object.keys(customerSenders).length;
+  const linked = Object.keys(liveSenders()).length;
   if (linked === 0) {
-    console.warn("XRPL_CUSTOMER_SENDERS_JSON is empty. No Photon sender is linked to a customer wallet, so person payments will be refused.");
+    console.warn("No Photon sender is linked to a customer wallet (XRPL_CUSTOMER_SENDERS_JSON or DeepSpace onboarding). Person payments will be refused.");
   } else {
     console.info(`${linked} Photon sender(s) linked to XRPL Testnet customer wallets.`);
+  }
+  if (config.deepspaceOnboardingSecret) {
+    console.info("DeepSpace onboarding API is enabled at POST /api/deepspace/accounts (Bearer DEEPSPACE_ONBOARDING_SECRET).");
   }
   const depositWallet = reservations.payments?.senderAddress;
   if (depositWallet) {
@@ -374,6 +385,14 @@ const web =
         backboard: config.backboardApiKey ? createBackboardClient({ apiKey: config.backboardApiKey }) : undefined,
         agentState,
         handleElevenLabsWebhook: (body, signature) => reservations.orchestrator.handleWebhook(body, signature),
+        deepspaceOnboardingSecret: config.deepspaceOnboardingSecret || undefined,
+        enrollPhotonUser: (input) =>
+          onboarding.enroll({
+            photonSenderId: input.photonSenderId,
+            displayName: input.displayName,
+            provisionWallet: input.provisionWallet,
+          }),
+        lookupPhotonUser: async (photonSenderId) => onboarding.publicView(photonSenderId),
       });
 if (!web) {
   void reservations.listen(config.reservationWebhookPort).catch((error) => {

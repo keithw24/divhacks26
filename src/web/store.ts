@@ -20,6 +20,9 @@ export interface WebUser {
   createdAt: string;
   onboardedAt?: string;
   preferences?: WebPreferences;
+  /** Set only after the user explicitly asks for a Testnet wallet. Classic address, never a seed. */
+  xrplAddress?: string;
+  walletRequestedAt?: string;
 }
 
 /** Proof that an email was verified, handed to the phone step. Keyed by SHA-256 of the token. */

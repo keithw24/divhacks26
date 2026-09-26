@@ -289,7 +289,7 @@ describe("web API server", () => {
     const verify = await call("POST", "/api/auth/phone/verify", { challenge, phone: "9177824515", code: ctx.phoneCodes["+19177824515"] });
     expect(verify.headers.get("access-control-allow-origin")).toBe("http://localhost:5174");
     const { token, user } = (await verify.json()) as { token: string; user: Record<string, unknown> };
-    expect(user).toMatchObject({ phone: "+1 •••-•••-4515", email: "k•••@example.com", onboarded: false });
+    expect(user).toMatchObject({ phone: "+1 •••-•••-4515", email: "k•••@example.com", onboarded: false, wallet: { status: "none" } });
 
     expect((await call("PUT", "/api/me/preferences", { name: "Keith", dietary: ["vegan"] }, token)).status).toBe(200);
     expect(deps.saveMemories).toHaveBeenCalledWith("+19177824515", "Keith", expect.arrayContaining(["My name is Keith."]));
@@ -297,6 +297,10 @@ describe("web API server", () => {
     expect((await call("POST", "/api/me/send-number", {}, token)).status).toBe(200);
     expect(deps.sendAgentNumber).toHaveBeenCalledWith("keith@example.com", "Keith");
     expect((await call("POST", "/api/me/start-chat", {}, token)).status).toBe(200);
+    expect(deps.enrollPhotonUser).toBeUndefined();
+
+    const walletReq = await call("POST", "/api/me/wallet", { wantWallet: true }, token);
+    expect(walletReq.status).toBe(503);
 
     expect((await call("DELETE", "/api/me/memories/m1", undefined, token)).status).toBe(200);
     expect((await call("DELETE", "/api/me/memories/someone-elses", undefined, token)).status).toBe(404);
@@ -355,5 +359,82 @@ describe("web API server", () => {
     expect((await call("POST", "/api/auth/email/start", { email: "nope" })).status).toBe(400);
     expect((await call("POST", "/api/auth/phone/start", { challenge: "x", phone: "9177824515" })).status).toBe(401);
     expect((await call("GET", "/api/me")).status).toBe(401);
+  });
+
+  it("returns 503 for DeepSpace routes until onboarding is wired", async () => {
+    const { call } = await start();
+    expect((await call("POST", "/api/deepspace/accounts", { photonSenderId: "+19175551212" })).status).toBe(503);
+  });
+
+  it("lets DeepSpace enroll a Photon sender without a user seed", async () => {
+    const enrollPhotonUser = vi.fn(async (input: { photonSenderId: string; displayName?: string }) => ({
+      photonSenderId: "+19175551212",
+      customerId: "onboard_abc",
+      customerName: input.displayName ?? "User",
+      xrplAddress: "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
+      created: true,
+    }));
+    const { call, base } = await start({
+      enrollPhotonUser,
+      enrollFromDeepSpace: async (header, body) => {
+        if (header !== "Bearer ds-secret") return { error: "unauthorized" };
+        return enrollPhotonUser({
+          photonSenderId: String(body.photonSenderId ?? ""),
+          displayName: typeof body.displayName === "string" ? body.displayName : undefined,
+        });
+      },
+      lookupFromDeepSpace: async (header, photonSenderId) => {
+        if (header !== "Bearer ds-secret") return { error: "unauthorized" };
+        if (!photonSenderId) return { error: "not_found" };
+        return {
+          photonSenderId,
+          customerId: "onboard_abc",
+          customerName: "Maya",
+          xrplAddress: "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
+          createdAt: "2026-01-01",
+        };
+      },
+    });
+
+    expect((await call("POST", "/api/deepspace/accounts", { photonSenderId: "+19175551212" })).status).toBe(401);
+
+    const created = await fetch(`${base}/api/deepspace/accounts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer ds-secret" },
+      body: JSON.stringify({ photonSenderId: "+19175551212", displayName: "Maya" }),
+    });
+    expect(created.status).toBe(200);
+    const body = (await created.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ customerId: "onboard_abc", xrplAddress: "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH" });
+    expect(JSON.stringify(body).toLowerCase()).not.toContain("seed");
+
+    const looked = await fetch(`${base}/api/deepspace/accounts?photonSenderId=%2B19175551212`, {
+      headers: { Authorization: "Bearer ds-secret" },
+    });
+    expect(looked.status).toBe(200);
+  });
+
+  it("creates a Testnet wallet only after an explicit wantWallet", async () => {
+    const enrollPhotonUser = vi.fn(async (input: { provisionWallet?: boolean }) => {
+      expect(input.provisionWallet).toBe(true);
+      return { xrplAddress: "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH" };
+    });
+    const { ctx, call, deps } = await start({ enrollPhotonUser });
+    await call("POST", "/api/auth/email/start", { email: "a@example.com" });
+    const { challenge } = (await (await call("POST", "/api/auth/email/verify", { email: "a@example.com", code: ctx.emailCodes["a@example.com"] })).json()) as { challenge: string };
+    await call("POST", "/api/auth/phone/start", { challenge, phone: "9175550101" });
+    const { token } = (await (await call("POST", "/api/auth/phone/verify", { challenge, phone: "9175550101", code: ctx.phoneCodes["+19175550101"] })).json()) as { token: string };
+    await call("PUT", "/api/me/preferences", { name: "Ana" }, token);
+
+    expect((await call("POST", "/api/me/start-chat", {}, token)).status).toBe(200);
+    expect(enrollPhotonUser).not.toHaveBeenCalled();
+
+    expect((await call("POST", "/api/me/wallet", {}, token)).status).toBe(400);
+    const created = await call("POST", "/api/me/wallet", { wantWallet: true }, token);
+    expect(created.status).toBe(200);
+    expect(await created.json()).toEqual({ ok: true, xrplAddress: "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH" });
+    expect(deps.enrollPhotonUser).toHaveBeenCalledTimes(1);
+    const me = await (await call("GET", "/api/me", undefined, token)).json();
+    expect(me).toMatchObject({ wallet: { status: "ready", xrplAddress: "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH" } });
   });
 });

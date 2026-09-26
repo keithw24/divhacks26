@@ -74,6 +74,11 @@ export const config = {
   autonomousMaxUsd: positiveNumber(env("AUTONOMOUS_MAX_USD", "25"), 25),
   /** Photon sender id → registered customer, e.g. {"+15551234567":"rohan"}. Unmapped senders cannot spend. */
   xrplCustomerSendersJson: env("XRPL_CUSTOMER_SENDERS_JSON"),
+  /**
+   * Shared secret so a DeepSpace (or other) signup server can enroll Photon users
+   * and receive a Testnet wallet address. Never a user seed.
+   */
+  deepspaceOnboardingSecret: env("DEEPSPACE_ONBOARDING_SECRET"),
   /** Read-only JSON for the website's XRPL Testnet section. Bound to 127.0.0.1. */
   xrplDashboardPort: positiveNumber(env("XRPL_DASHBOARD_PORT", "8790"), 8790),
   paymentsRecipientsJson: env("PAYMENTS_RECIPIENTS_JSON"),

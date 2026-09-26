@@ -23,6 +23,7 @@ export interface Me {
   email: string;
   onboarded: boolean;
   preferences: Preferences | null;
+  wallet: { status: "none" } | { status: "ready"; xrplAddress: string };
 }
 
 export interface Memory {
@@ -120,6 +121,7 @@ export const api = {
   me: () => call<Me>("GET", "/api/me"),
   savePreferences: (prefs: Preferences) => call<{ ok: true }>("PUT", "/api/me/preferences", prefs),
   startChat: () => call<{ ok: true }>("POST", "/api/me/start-chat"),
+  createWallet: () => call<{ ok: true; xrplAddress: string }>("POST", "/api/me/wallet", { wantWallet: true }),
   /** Emails the agent's number; the number itself is never sent to the browser. */
   sendNumber: () => call<{ ok: true }>("POST", "/api/me/send-number"),
   memories: () => call<{ memories: Memory[] }>("GET", "/api/me/memories"),
@@ -144,6 +146,9 @@ const MESSAGES: Record<string, string> = {
   wrong_code: "That code isn't right. Check the text and try again.",
   too_many_attempts: "Too many wrong tries. Send a new code.",
   invalid_preferences: "Add your first name to continue.",
+  want_wallet_required: "Say yes if you want a Testnet wallet.",
+  wallet_unavailable:
+    "Couldn't create a Testnet wallet right now. Chat still works; try again from the dashboard.",
   memory_unavailable: "Memory is unavailable right now. Try again shortly.",
   unauthorized: "Your session ended. Sign in again.",
 };

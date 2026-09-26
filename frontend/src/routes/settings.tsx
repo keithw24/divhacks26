@@ -12,6 +12,7 @@ import {
   useMe,
 } from "@/components/site/shell";
 import { api, errorMessage, session, type Preferences } from "@/lib/api";
+import { WalletStatusCard } from "@/components/site/wallet-card";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings — plansaroundus" }] }),
@@ -26,6 +27,7 @@ function Settings() {
   const [saved, setSaved] = useState<string>();
   const [confirmText, setConfirmText] = useState("");
   const [showDelete, setShowDelete] = useState(false);
+  const [wallet, setWallet] = useState<{ busy?: boolean; message?: string }>({});
 
   useEffect(() => {
     if (me?.preferences) setPrefs(me.preferences);
@@ -120,6 +122,24 @@ function Settings() {
           )}
         </div>
       </form>
+
+      <div className="mt-8">
+        <WalletStatusCard
+          wallet={me.wallet}
+          busy={wallet.busy}
+          message={wallet.message}
+          onCreate={() => {
+            setWallet({ busy: true });
+            void api
+              .createWallet()
+              .then(async () => {
+                await queryClient.invalidateQueries({ queryKey: ["me"] });
+                setWallet({ message: "Wallet created." });
+              })
+              .catch((err) => setWallet({ message: errorMessage(err) }));
+          }}
+        />
+      </div>
 
       <section className="mt-12">
         <h2 className="font-bold text-xl">What @agent remembers</h2>

@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   AppPage,
@@ -9,6 +10,7 @@ import {
   useMe,
 } from "@/components/site/shell";
 import { api, errorMessage } from "@/lib/api";
+import { WalletStatusCard } from "@/components/site/wallet-card";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Your @agent — plansaroundus" }] }),
@@ -35,10 +37,12 @@ type SendState = { busy?: boolean; message?: string };
  */
 function Dashboard() {
   const me = useMe({ requireOnboarded: true });
+  const queryClient = useQueryClient();
   const { welcome } = Route.useSearch();
   const [copied, setCopied] = useState<string>();
   const [email, setEmail] = useState<SendState>({});
   const [intro, setIntro] = useState<SendState>({});
+  const [wallet, setWallet] = useState<SendState>({});
 
   const copy = async (text: string) => {
     try {
@@ -158,6 +162,20 @@ function Dashboard() {
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="mt-8">
+        <WalletStatusCard
+          wallet={me.wallet}
+          busy={wallet.busy}
+          message={wallet.message}
+          onCreate={() =>
+            void send(async () => {
+              await api.createWallet();
+              await queryClient.invalidateQueries({ queryKey: ["me"] });
+            }, setWallet, "Wallet created. You can pay in iMessage after a yes.")
+          }
+        />
       </section>
 
       <section className="mt-8 bg-card outline-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">

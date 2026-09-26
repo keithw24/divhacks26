@@ -209,6 +209,15 @@ export function createAuth(opts: AuthOptions) {
       return prefs;
     },
 
+    recordWallet(phone: string, xrplAddress: string): void {
+      opts.store.update((s) => {
+        const user = s.users[phone];
+        if (!user) return;
+        user.xrplAddress = xrplAddress;
+        user.walletRequestedAt ??= new Date(now()).toISOString();
+      });
+    },
+
     /** Removes the account and every session for it. Memories are deleted by the caller. */
     deleteUser(phone: string) {
       opts.store.update((s) => {
