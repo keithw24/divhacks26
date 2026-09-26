@@ -55,6 +55,10 @@ export class ReservationStore {
     return id ? this.byId.get(id) : undefined;
   }
 
+  forSpace(spaceId: string): ReservationRequest[] {
+    return [...this.byId.values()].filter((reservation) => reservation.photonSpaceId === spaceId);
+  }
+
   inFlight(): ReservationRequest[] {
     return [...this.byId.values()].filter(
       (reservation) => reservation.status === "CALLING" || reservation.status === "AWAITING_RESTAURANT",
@@ -151,6 +155,7 @@ export class ReservationStore {
 const STATUSES = new Set<ReservationStatus>([
   "COLLECTING_DETAILS",
   "READY_FOR_CONFIRMATION",
+  "AWAITING_DEPOSIT",
   "CONFIRMED_BY_USER",
   "CALLING",
   "AWAITING_RESTAURANT",

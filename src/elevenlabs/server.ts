@@ -21,12 +21,16 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+/** Read-only GET handler. Undefined falls through to 404. */
+export type ReadRoute = (path: string, query: URLSearchParams) => { status: number; body: unknown } | undefined;
+
 export function startWebhookServer(
   port: number,
   handle: (rawBody: string, signature: string | undefined) => Promise<{ status: number; body: unknown }>,
+  read?: ReadRoute,
 ): Promise<{ close: () => Promise<void>; port: number }> {
   const server = createServer(async (req, res) => {
-    await routeWebhook(req, res, handle);
+    await routeWebhook(req, res, handle, read);
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -48,7 +52,17 @@ export async function routeWebhook(
   req: IncomingMessage,
   res: ServerResponse,
   handle: (rawBody: string, signature: string | undefined) => Promise<{ status: number; body: unknown }>,
+  read?: ReadRoute,
 ): Promise<void> {
+  if (req.method === "GET" && read && isDirectLoopback(req)) {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const found = read(url.pathname, url.searchParams);
+    if (found) {
+      res.writeHead(found.status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(found.body));
+      return;
+    }
+  }
   if (req.method !== "POST" || (req.url ?? "").split("?")[0] !== "/webhooks/elevenlabs") {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "not_found" }));
@@ -66,4 +80,12 @@ export async function routeWebhook(
     res.writeHead(tooLarge ? 413 : 400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: tooLarge ? "payload_too_large" : "bad_request" }));
   }
+}
+
+/** Tunnels connect from loopback too, so any forwarding header means the caller is remote. */
+function isDirectLoopback(req: IncomingMessage): boolean {
+  const remote = req.socket.remoteAddress ?? "";
+  const loopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
+  const forwarded = ["x-forwarded-for", "forwarded", "x-real-ip", "x-forwarded-host", "ngrok-trace-id"].some((name) => req.headers[name] != null);
+  return loopback && !forwarded;
 }

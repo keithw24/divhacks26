@@ -5,6 +5,7 @@ export type MockScenario =
   | "fully_booked"
   | "asks_for_name"
   | "asks_for_phone"
+  | "deposit_required"
   | "voicemail"
   | "no_answer"
   | "api_error"

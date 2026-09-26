@@ -39,7 +39,12 @@ export function useMe({ requireOnboarded = false } = {}) {
     if (hasSession === false) void navigate({ to: "/signin" });
   }, [hasSession, navigate]);
   useEffect(() => {
-    if (query.error) void navigate({ to: "/signin" });
+    if (query.error) {
+      // Clear the token on any failure; otherwise /signin (which skips ahead when a token exists)
+      // and this guard would bounce the user back and forth.
+      session.clear();
+      void navigate({ to: "/signin" });
+    }
     if (requireOnboarded && query.data && !query.data.onboarded)
       void navigate({ to: "/onboarding" });
   }, [query.error, query.data, requireOnboarded, navigate]);

@@ -9,12 +9,11 @@ import {
   useMe,
 } from "@/components/site/shell";
 import { api, errorMessage } from "@/lib/api";
-import { AGENT_NUMBER, agentVcard, formatUsNumber } from "@/lib/agent";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Your @agent — Murmur" }] }),
-  validateSearch: (search: Record<string, unknown>): { welcome?: "texted" | "saved" } =>
-    search["welcome"] === "texted" || search["welcome"] === "saved"
+  validateSearch: (search: Record<string, unknown>): { welcome?: "emailed" | "saved" } =>
+    search["welcome"] === "emailed" || search["welcome"] === "saved"
       ? { welcome: search["welcome"] }
       : {},
   component: Dashboard,
@@ -28,11 +27,18 @@ const PROMPTS = [
   "@agent send Keith $20 for the Uber",
 ];
 
+type SendState = { busy?: boolean; message?: string };
+
+/**
+ * The agent's number is deliberately not on this page (or anywhere in the site's code):
+ * it's emailed to the verified address, with a contact card attached.
+ */
 function Dashboard() {
   const me = useMe({ requireOnboarded: true });
   const { welcome } = Route.useSearch();
   const [copied, setCopied] = useState<string>();
-  const [resend, setResend] = useState<{ busy?: boolean; message?: string }>({});
+  const [email, setEmail] = useState<SendState>({});
+  const [intro, setIntro] = useState<SendState>({});
 
   const copy = async (text: string) => {
     try {
@@ -44,25 +50,15 @@ function Dashboard() {
     }
   };
 
-  const downloadContact = () => {
-    const url = URL.createObjectURL(new Blob([agentVcard()], { type: "text/vcard" }));
-    const a = Object.assign(document.createElement("a"), {
-      href: url,
-      download: "Murmur-agent.vcf",
-    });
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  async function resendIntro() {
-    setResend({ busy: true });
+  const send = async (fn: () => Promise<unknown>, set: (s: SendState) => void, ok: string) => {
+    set({ busy: true });
     try {
-      await api.startChat();
-      setResend({ message: "Sent. Check iMessage." });
+      await fn();
+      set({ message: ok });
     } catch (err) {
-      setResend({ message: errorMessage(err) });
+      set({ message: errorMessage(err) });
     }
-  }
+  };
 
   if (!me)
     return (
@@ -87,34 +83,44 @@ function Dashboard() {
           role="status"
           className="bg-lime text-lime-foreground outline-card rounded-2xl px-4 py-3 mb-6 font-bold"
         >
-          {welcome === "texted"
-            ? "You're set. Check iMessage: @agent just texted you."
-            : "You're set. Text @agent below to say hi."}
+          {welcome === "emailed"
+            ? `You're set. We emailed @agent's number to ${me.email}.`
+            : "You're set. Use the button below to get @agent's number by email."}
         </div>
       )}
       <PageTitle
         kicker="Your @agent"
         title={name ? `Hey ${name}.` : "You're in."}
-        sub="Everything happens in iMessage. Save the number, then text it or add it to a group chat."
+        sub="Everything happens in iMessage. To keep the beta private, @agent's number is only sent by email."
       />
 
       <Card className="bg-foreground text-background shadow-[var(--shadow-hard-primary)]">
         <div className="text-xs font-bold uppercase tracking-[0.15em] opacity-70">
-          Text @agent at
+          @agent's number
         </div>
-        <div className="font-display text-4xl md:text-5xl tracking-tight mt-1">
-          {formatUsNumber(AGENT_NUMBER)}
+        <div className="font-display text-3xl md:text-4xl tracking-tight mt-1">
+          Check your inbox
         </div>
-        <div className="mt-5 flex flex-wrap gap-2">
-          <a href={`sms:${AGENT_NUMBER}`} className={buttonPrimary}>
-            Open in Messages
-          </a>
-          <button type="button" className={buttonSecondary} onClick={() => void copy(AGENT_NUMBER)}>
-            {copied === AGENT_NUMBER ? "Copied" : "Copy number"}
+        <p className="mt-2 text-background/75 text-sm">
+          Sent to <span className="font-bold text-background">{me.email}</span> with a contact card
+          to save. Please don't share it publicly: the beta is limited to 100 people.
+        </p>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            className={buttonPrimary}
+            disabled={email.busy}
+            onClick={() =>
+              void send(api.sendNumber, setEmail, "Sent. Check your inbox (and spam).")
+            }
+          >
+            {email.busy ? "Sending…" : "Email it to me again"}
           </button>
-          <button type="button" className={buttonSecondary} onClick={downloadContact}>
-            Save contact
-          </button>
+          {email.message && (
+            <span role="status" className="text-sm font-medium">
+              {email.message}
+            </span>
+          )}
         </div>
       </Card>
 
@@ -122,7 +128,7 @@ function Dashboard() {
         <h2 className="font-bold text-xl">Add it to a group chat</h2>
         <ol className="mt-3 space-y-2">
           {[
-            "Save the contact above so it shows up by name.",
+            "Open the contact card from the email and save it, so @agent shows up by name.",
             "Open your group chat → tap the group name → Add Member → Murmur.",
             "Mention it when you need it: “@agent where should we eat?”. It reads the chat for context but only replies when mentioned.",
           ].map((step, i) => (
@@ -156,18 +162,18 @@ function Dashboard() {
 
       <section className="mt-8 bg-card outline-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="font-bold">Didn't get the intro text?</div>
+          <div className="font-bold">Want @agent to text you first?</div>
           <div className="text-sm text-muted-foreground" role="status">
-            {resend.message ?? "We'll send it again."}
+            {intro.message ?? "It'll send you a hello over iMessage."}
           </div>
         </div>
         <button
           type="button"
           className={buttonSecondary}
-          onClick={() => void resendIntro()}
-          disabled={resend.busy}
+          onClick={() => void send(api.startChat, setIntro, "Sent. Check iMessage.")}
+          disabled={intro.busy}
         >
-          {resend.busy ? "Sending…" : "Resend intro"}
+          {intro.busy ? "Sending…" : "Text me hello"}
         </button>
       </section>
     </AppPage>

@@ -1,7 +1,8 @@
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import type { Budget, VoiceReplies, WebPreferences, WebStore, WebUser } from "./store.js";
+import type { Budget, VoiceReplies, WebPreferences, WebState, WebStore, WebUser } from "./store.js";
 
 export const CODE_TTL_MS = 10 * 60 * 1000;
+export const CHALLENGE_TTL_MS = 15 * 60 * 1000;
 export const RESEND_COOLDOWN_MS = 30 * 1000;
 export const MAX_SENDS_PER_HOUR = 5;
 export const MAX_ATTEMPTS = 5;
@@ -17,7 +18,19 @@ export function normalizeUsPhone(raw: unknown): string | null {
   return `+1${ten}`;
 }
 
+/** Lowercased address, or null if it doesn't look like an email. */
+export function normalizeEmail(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const email = raw.trim().toLowerCase();
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return null;
+  return email;
+}
+
 export const maskPhone = (phone: string) => `+1 •••-•••-${phone.slice(-4)}`;
+export const maskEmail = (email: string) => {
+  const [local = "", domain = ""] = email.split("@");
+  return `${local.slice(0, 1)}•••@${domain}`;
+};
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -26,74 +39,143 @@ export interface AuthOptions {
   maxUsers: number;
   /** HMAC key for login codes. */
   secret: string;
-  sendCode(phone: string, code: string): Promise<void>;
+  sendEmailCode(email: string, code: string): Promise<void>;
+  sendPhoneCode(phone: string, code: string): Promise<void>;
   now?: () => number;
 }
 
-export type StartResult = { ok: true } | { error: "invalid_phone" | "full" | "rate_limited" | "send_failed" };
-export type VerifyResult =
+type CodeError = "no_code" | "expired" | "wrong_code" | "too_many_attempts";
+type SendError = "rate_limited" | "send_failed";
+
+export type EmailStartResult = { ok: true } | { error: "invalid_email" | SendError };
+export type EmailVerifyResult = { challenge: string } | { error: "invalid_email" | CodeError };
+export type PhoneStartResult =
+  | { ok: true }
+  | { error: "invalid_phone" | "challenge_expired" | "account_mismatch" | "full" | SendError };
+export type PhoneVerifyResult =
   | { token: string; user: WebUser }
-  | { error: "invalid_phone" | "no_code" | "expired" | "wrong_code" | "too_many_attempts" | "full" };
+  | { error: "invalid_phone" | "challenge_expired" | "account_mismatch" | "full" | CodeError };
 
 const BUDGETS = new Set<Budget>(["free", "low", "medium", "high"]);
 const VOICE = new Set<VoiceReplies>(["match", "always", "off"]);
 
+/**
+ * Two-factor sign-in: an emailed code, then a code texted over iMessage.
+ * The iMessage code comes from the agent's number, so email is verified first and the
+ * number is never shown to someone who hasn't proven an address.
+ */
 export function createAuth(opts: AuthOptions) {
   const now = opts.now ?? Date.now;
-  const hashCode = (phone: string, code: string) => createHmac("sha256", opts.secret).update(`${phone}:${code}`).digest("hex");
+  const hashCode = (key: string, code: string) => createHmac("sha256", opts.secret).update(`${key}:${code}`).digest("hex");
   const userCount = () => Object.keys(opts.store.read().users).length;
+  const userByEmail = (s: WebState, email: string) => Object.values(s.users).find((u) => u.email === email);
+
+  /** Issue and deliver a 6-digit code under `key`, with a resend cooldown and an hourly cap. */
+  async function issueCode(key: string, deliver: (code: string) => Promise<void>): Promise<{ ok: true } | { error: SendError }> {
+    const t = now();
+    const recent = (opts.store.read().codes[key]?.sends ?? []).filter((at) => t - at < HOUR);
+    if (recent.length >= MAX_SENDS_PER_HOUR) return { error: "rate_limited" };
+    if (recent.length && t - recent[recent.length - 1]! < RESEND_COOLDOWN_MS) return { error: "rate_limited" };
+    const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    opts.store.update((s) => {
+      s.codes[key] = { hash: hashCode(key, code), expiresAt: t + CODE_TTL_MS, attempts: 0, sends: [...recent, t] };
+    });
+    try {
+      await deliver(code);
+    } catch {
+      return { error: "send_failed" };
+    }
+    return { ok: true };
+  }
+
+  /** Check a code inside a store update; on success the code is consumed. */
+  function checkCode(s: WebState, key: string, rawCode: unknown): CodeError | null {
+    const code = typeof rawCode === "string" ? rawCode.replace(/\D/g, "") : "";
+    const pending = s.codes[key];
+    if (!pending) return "no_code";
+    if (now() > pending.expiresAt) return "expired";
+    if (pending.attempts >= MAX_ATTEMPTS) return "too_many_attempts";
+    const expected = Buffer.from(pending.hash, "hex");
+    const actual = Buffer.from(hashCode(key, code), "hex");
+    if (code.length !== 6 || !timingSafeEqual(expected, actual)) {
+      pending.attempts += 1;
+      return pending.attempts >= MAX_ATTEMPTS ? "too_many_attempts" : "wrong_code";
+    }
+    delete s.codes[key];
+    return null;
+  }
+
+  function challengeEmail(s: WebState, challenge: unknown): string | null {
+    if (typeof challenge !== "string" || !challenge) return null;
+    const found = s.challenges[sha256(challenge)];
+    return found && found.expiresAt >= now() ? found.email : null;
+  }
+
+  /** The email and phone must be new, or already belong to the same account. */
+  function pairingError(s: WebState, email: string, phone: string): "account_mismatch" | "full" | null {
+    const byPhone = s.users[phone];
+    const byEmail = userByEmail(s, email);
+    // Accounts from before email sign-in have no email yet; the verified one gets attached below.
+    if (byPhone?.email && byPhone.email !== email) return "account_mismatch";
+    if (byEmail && byEmail.phone !== phone) return "account_mismatch";
+    if (!byPhone && Object.keys(s.users).length >= opts.maxUsers) return "full";
+    return null;
+  }
 
   return {
     stats() {
       return { spotsTaken: Math.min(userCount(), opts.maxUsers), spotsTotal: opts.maxUsers };
     },
 
-    /** Text a 6-digit code over iMessage. New numbers are refused once the cap is reached. */
-    async startSignIn(rawPhone: unknown): Promise<StartResult> {
+    /** Step 1: email a 6-digit code. */
+    async startEmail(rawEmail: unknown): Promise<EmailStartResult> {
+      const email = normalizeEmail(rawEmail);
+      if (!email) return { error: "invalid_email" };
+      return issueCode(`email:${email}`, (code) => opts.sendEmailCode(email, code));
+    },
+
+    /** Step 2: trade the emailed code for a short-lived challenge token. */
+    verifyEmail(rawEmail: unknown, rawCode: unknown): EmailVerifyResult {
+      const email = normalizeEmail(rawEmail);
+      if (!email) return { error: "invalid_email" };
+      return opts.store.update((s): EmailVerifyResult => {
+        const error = checkCode(s, `email:${email}`, rawCode);
+        if (error) return { error };
+        const challenge = randomBytes(32).toString("base64url");
+        s.challenges[sha256(challenge)] = { email, expiresAt: now() + CHALLENGE_TTL_MS };
+        return { challenge };
+      });
+    },
+
+    /** Step 3: text a code over iMessage, only with a verified email that fits this number. */
+    async startPhone(challenge: unknown, rawPhone: unknown): Promise<PhoneStartResult> {
       const phone = normalizeUsPhone(rawPhone);
       if (!phone) return { error: "invalid_phone" };
       const state = opts.store.read();
-      if (!state.users[phone] && userCount() >= opts.maxUsers) return { error: "full" };
-
-      const t = now();
-      const recent = (state.codes[phone]?.sends ?? []).filter((at) => t - at < HOUR);
-      if (recent.length >= MAX_SENDS_PER_HOUR) return { error: "rate_limited" };
-      if (recent.length && t - recent[recent.length - 1] < RESEND_COOLDOWN_MS) return { error: "rate_limited" };
-
-      const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-      opts.store.update((s) => {
-        s.codes[phone] = { hash: hashCode(phone, code), expiresAt: t + CODE_TTL_MS, attempts: 0, sends: [...recent, t] };
-      });
-      try {
-        await opts.sendCode(phone, code);
-      } catch {
-        return { error: "send_failed" };
-      }
-      return { ok: true };
+      const email = challengeEmail(state, challenge);
+      if (!email) return { error: "challenge_expired" };
+      const pairing = pairingError(state, email, phone);
+      if (pairing) return { error: pairing };
+      return issueCode(`phone:${phone}`, (code) => opts.sendPhoneCode(phone, code));
     },
 
-    verify(rawPhone: unknown, rawCode: unknown): VerifyResult {
+    /** Step 4: verify the iMessage code, create the account if new, and start a session. */
+    verifyPhone(challenge: unknown, rawPhone: unknown, rawCode: unknown): PhoneVerifyResult {
       const phone = normalizeUsPhone(rawPhone);
       if (!phone) return { error: "invalid_phone" };
-      const code = typeof rawCode === "string" ? rawCode.replace(/\D/g, "") : "";
-      const t = now();
-      return opts.store.update((s): VerifyResult => {
-        const pending = s.codes[phone];
-        if (!pending) return { error: "no_code" };
-        if (t > pending.expiresAt) return { error: "expired" };
-        if (pending.attempts >= MAX_ATTEMPTS) return { error: "too_many_attempts" };
-        const expected = Buffer.from(pending.hash, "hex");
-        const actual = Buffer.from(hashCode(phone, code), "hex");
-        if (code.length !== 6 || !timingSafeEqual(expected, actual)) {
-          pending.attempts += 1;
-          return { error: pending.attempts >= MAX_ATTEMPTS ? "too_many_attempts" : "wrong_code" };
-        }
-        // Re-check the cap: someone else may have taken the last spot since the code was sent.
-        if (!s.users[phone] && Object.keys(s.users).length >= opts.maxUsers) return { error: "full" };
-        delete s.codes[phone];
-        s.users[phone] ??= { phone, createdAt: new Date(t).toISOString() };
+      return opts.store.update((s): PhoneVerifyResult => {
+        const email = challengeEmail(s, challenge);
+        if (!email) return { error: "challenge_expired" };
+        // Re-checked here: someone may have taken the last spot since the code was sent.
+        const pairing = pairingError(s, email, phone);
+        if (pairing) return { error: pairing };
+        const error = checkCode(s, `phone:${phone}`, rawCode);
+        if (error) return { error };
+        delete s.challenges[sha256(challenge as string)];
+        s.users[phone] ??= { phone, email, createdAt: new Date(now()).toISOString() };
+        s.users[phone].email ||= email;
         const token = randomBytes(32).toString("base64url");
-        s.sessions[sha256(token)] = { phone, expiresAt: t + SESSION_TTL_MS };
+        s.sessions[sha256(token)] = { phone, expiresAt: now() + SESSION_TTL_MS };
         return { token, user: structuredClone(s.users[phone]) };
       });
     },
@@ -104,7 +186,9 @@ export function createAuth(opts: AuthOptions) {
       const s = opts.store.read();
       const found = s.sessions[sha256(token)];
       if (!found || found.expiresAt < now()) return null;
-      return s.users[found.phone] ?? null;
+      const user = s.users[found.phone];
+      // Sessions from before email sign-in don't count: signing in again attaches the email.
+      return user?.email ? user : null;
     },
 
     signOut(token: string) {
@@ -129,18 +213,22 @@ export function createAuth(opts: AuthOptions) {
     deleteUser(phone: string) {
       opts.store.update((s) => {
         delete s.users[phone];
-        delete s.codes[phone];
+        delete s.codes[`phone:${phone}`];
         for (const [key, session] of Object.entries(s.sessions)) if (session.phone === phone) delete s.sessions[key];
       });
     },
 
-    joinWaitlist(rawPhone: unknown, rawName: unknown): { position: number } | { error: "invalid_phone" } {
-      const phone = normalizeUsPhone(rawPhone);
-      if (!phone) return { error: "invalid_phone" };
+    /** Waitlist for when all spots are taken. Requires a verified email. */
+    joinWaitlist(challenge: unknown, rawPhone: unknown, rawName: unknown): { position: number } | { error: "challenge_expired" } {
+      const phone = normalizeUsPhone(rawPhone) ?? undefined;
       const name = typeof rawName === "string" ? rawName.trim().slice(0, 60) : undefined;
       return opts.store.update((s) => {
-        let index = s.waitlist.findIndex((w) => w.phone === phone);
-        if (index === -1) index = s.waitlist.push({ phone, ...(name && { name }), at: new Date(now()).toISOString() }) - 1;
+        const email = challengeEmail(s, challenge);
+        if (!email) return { error: "challenge_expired" as const };
+        let index = s.waitlist.findIndex((w) => w.email === email);
+        if (index === -1) {
+          index = s.waitlist.push({ email, ...(phone && { phone }), ...(name && { name }), at: new Date(now()).toISOString() }) - 1;
+        }
         return { position: index + 1 };
       });
     },
@@ -181,8 +269,8 @@ export function preferencesToMemories(prefs: WebPreferences): string[] {
   for (const diet of prefs.dietary) {
     const allergy = diet.match(/^(.*?)\s*allergy$/i);
     const avoid = diet.match(/^no\s+(.+)$/i);
-    if (allergy) lines.push(`I'm allergic to ${allergy[1].toLowerCase().replace(/\b(nut|peanut)$/, "$1s")}.`);
-    else if (avoid) lines.push(`I don't eat ${avoid[1].toLowerCase()}.`);
+    if (allergy) lines.push(`I'm allergic to ${allergy[1]!.toLowerCase().replace(/\b(nut|peanut)$/, "$1s")}.`);
+    else if (avoid) lines.push(`I don't eat ${avoid[1]!.toLowerCase()}.`);
     else lines.push(`I prefer ${diet.toLowerCase()} food.`);
   }
   if (prefs.budget) {

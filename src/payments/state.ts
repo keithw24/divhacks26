@@ -48,13 +48,36 @@ export class PaymentStore {
     return this.byId.get(id);
   }
 
-  create(input: Omit<PaymentRecord, "id" | "idempotencyKey" | "createdAt" | "updatedAt" | "status"> & { status?: PaymentStatus }): PaymentRecord {
+  /** Latest non-cancelled payment created for a reservation deposit. */
+  forReservation(reservationId: string): PaymentRecord | undefined {
+    let found: PaymentRecord | undefined;
+    for (const record of this.byId.values()) {
+      if (record.parentReservationId !== reservationId || record.status === "CANCELLED") continue;
+      if (!found || record.updatedAt > found.updatedAt) found = record;
+    }
+    return found ? structuredClone(found) : undefined;
+  }
+
+  /** Every record created under one idempotency key, oldest first. */
+  byIdempotencyKey(key: string): PaymentRecord[] {
+    return [...this.byId.values()]
+      .filter((record) => record.idempotencyKey === key)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((record) => structuredClone(record));
+  }
+
+  create(
+    input: Omit<PaymentRecord, "id" | "idempotencyKey" | "createdAt" | "updatedAt" | "status"> & {
+      status?: PaymentStatus;
+      idempotencyKey?: string;
+    },
+  ): PaymentRecord {
     const now = new Date().toISOString();
     const id = randomUUID();
     const record: PaymentRecord = {
       ...input,
       id,
-      idempotencyKey: id,
+      idempotencyKey: input.idempotencyKey ?? id,
       status: input.status ?? "AWAITING_CONFIRMATION",
       createdAt: now,
       updatedAt: now,
@@ -103,7 +126,9 @@ export class PaymentStore {
   markResult(
     id: string,
     status: "SUCCEEDED" | "FAILED",
-    fields: Partial<Pick<PaymentRecord, "transactionId" | "providerStatus" | "submittedAsset" | "submittedAmount" | "submittedDrops">>,
+    fields: Partial<
+      Pick<PaymentRecord, "transactionId" | "providerStatus" | "submittedAsset" | "submittedAmount" | "submittedDrops" | "explorerUrl">
+    >,
   ): PaymentRecord | undefined {
     const current = this.byId.get(id);
     if (!current || (current.status !== "PROCESSING" && current.status !== "AWAITING_CONFIRMATION")) return undefined;

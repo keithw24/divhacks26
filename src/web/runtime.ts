@@ -4,6 +4,7 @@ import type { MemoryService } from "../memory/service.js";
 import type { StateStore } from "../store/state.js";
 import type { VoiceReplies } from "./store.js";
 import { createAuth, maskPhone } from "./auth.js";
+import { agentNumberEmail, codeEmail, type Mailer } from "./email.js";
 import { createWebApiServer } from "./server.js";
 import { createFileWebStore } from "./store.js";
 
@@ -15,7 +16,10 @@ export interface WebRuntimeOptions {
   allowedOrigins: string[];
   secret: string;
   agentName: string;
+  appName: string;
+  /** The agent's iMessage number. Only ever sent by email to verified users. */
   agentNumber: string;
+  mailer: Mailer;
   /** Send an iMessage to a phone number through Photon. */
   sendText(phone: string, text: string): Promise<void>;
   memory?: MemoryService;
@@ -35,8 +39,9 @@ export function startWebRuntime(opts: WebRuntimeOptions) {
     store,
     maxUsers: opts.maxUsers,
     secret: opts.secret || randomBytes(32).toString("hex"),
-    sendCode: (phone, code) =>
-      opts.sendText(phone, `${code} is your ${opts.agentName} sign-in code. It expires in 10 minutes. If you didn't ask for it, ignore this text.`),
+    sendEmailCode: (email, code) => opts.mailer.send(codeEmail(email, code, opts.appName)),
+    sendPhoneCode: (phone, code) =>
+      opts.sendText(phone, `${code} is your ${opts.appName} sign-in code. It expires in 10 minutes. If you didn't ask for it, ignore this text.`),
   });
 
   const assistantFor = (phone: string) => opts.agentState.getState().users[phone]?.backboardAssistantId;
@@ -50,6 +55,11 @@ export function startWebRuntime(opts: WebRuntimeOptions) {
         phone,
         `${hi} It's ${opts.agentName}. Text me anytime: "what should we do tonight?", "how do we get there?", or "is this walk okay at midnight?". ` +
           `Voice memos work too. Add me to a group chat and mention @${opts.agentName.toLowerCase()} when you want me.`,
+      );
+    },
+    async sendAgentNumber(email, name) {
+      await opts.mailer.send(
+        agentNumberEmail(email, { name, appName: opts.appName, agentName: opts.agentName, agentNumber: opts.agentNumber }),
       );
     },
     async saveMemories(phone, name, sentences) {
@@ -83,6 +93,7 @@ export function startWebRuntime(opts: WebRuntimeOptions) {
 
   server.listen(opts.port, opts.host ?? "0.0.0.0", () => {
     console.info(`Website API on :${opts.port} (${auth.stats().spotsTaken}/${opts.maxUsers} users, origins: ${opts.allowedOrigins.join(", ")})`);
+    if (!opts.mailer.configured) console.warn("SMTP is not configured; sign-in emails will fail (terminal mode prints them instead).");
   });
   server.on("error", (err) => console.error(`website API failed to start: ${err.name}`));
 

@@ -137,6 +137,31 @@ export function buildMockCompletion(scenario: MockScenario, reservation: Reserva
       { outcome: { value: "NEEDS_USER_INPUT" } },
     );
   }
+  if (scenario === "deposit_required") {
+    const party = reservation.partySize ?? 4;
+    if (reservation.deposit?.status === "PAID") {
+      return transcriptFor(
+        [
+          { role: "agent", message: "The deposit has been sent. Could you confirm the table?" },
+          { role: "user", message: `Got it, thank you. You're confirmed for ${party} at ${spokenIdeal}.` },
+        ],
+        { outcome: { value: "BOOKED" }, confirmed_time: { value: ideal }, confirmed_party_size: { value: String(party) } },
+      );
+    }
+    return transcriptFor(
+      [
+        { role: "agent", message: `Do you have a table for ${party} at ${spokenIdeal}?` },
+        { role: "user", message: `We can do ${spokenIdeal} for ${party}, but we require a $${party * 25} deposit to hold the table.` },
+        { role: "agent", message: "I'll check with the customer and call back." },
+      ],
+      {
+        outcome: { value: "NEEDS_USER_INPUT" },
+        deposit_required: { value: "true" },
+        deposit_amount_usd: { value: String(party * 25) },
+        deposit_type: { value: "DEPOSIT" },
+      },
+    );
+  }
   if (scenario === "voicemail") {
     return transcriptFor(
       [{ role: "user", message: "Please leave a message after the beep. You are confirmed." }],

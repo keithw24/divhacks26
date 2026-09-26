@@ -36,6 +36,7 @@ export interface TurnDeps {
   handleReservation?(input: {
     spaceId: string;
     senderId?: string;
+    senderName?: string;
     text: string;
     transcript: SuggestInput["transcript"];
     messageId?: string;
@@ -46,6 +47,18 @@ export interface TurnDeps {
     senderName?: string;
     text: string;
     messageId?: string;
+  }): Promise<ReservationHandlerResult>;
+  /**
+   * priority runs before reservations (event discovery, prices, purchase quotes).
+   * fallback runs after reservations and payments, and only takes yes/no on a pending ticket purchase.
+   */
+  handleTicketing?(input: {
+    spaceId: string;
+    senderId?: string;
+    senderName?: string;
+    text: string;
+    messageId?: string;
+    phase: "priority" | "fallback";
   }): Promise<ReservationHandlerResult>;
   handleMeetup?(input: {
     spaceId: string;
@@ -64,7 +77,17 @@ export interface ReservationHandlerResult {
   afterReply?: () => Promise<void>;
 }
 
-export type TurnOutcome = "ignored" | "unaddressed" | "silent" | "payment" | "reservation" | "meetup" | "transport" | "gemini" | "failed";
+export type TurnOutcome =
+  | "ignored"
+  | "unaddressed"
+  | "silent"
+  | "payment"
+  | "reservation"
+  | "ticketing"
+  | "meetup"
+  | "transport"
+  | "gemini"
+  | "failed";
 
 export function errorCategory(error: unknown): string {
   return error instanceof Error ? error.name : "Error";
@@ -78,7 +101,8 @@ export async function deliverOnce(actions: Pick<TurnActions, "reply" | "send">, 
 
 /**
  * Photon inbound turn. A new payment request or edit runs first.
- * Reservation handling is next, then a pending payment can take yes/no.
+ * Ticket discovery/pricing/quotes come next, then reservation handling, then a pending payment can take yes/no,
+ * then a pending ticket purchase can take yes/no.
  * Transportation runs after that; everything else goes to Gemini.
  * Provider work stays inside responding(). One failure returns a short reply and does not throw.
  */
@@ -116,10 +140,31 @@ export async function runConversationTurn(
           return;
         }
       }
+      const ticketing = async (phase: "priority" | "fallback"): Promise<boolean> => {
+        if (!deps.handleTicketing) return false;
+        const result = await deps.handleTicketing({
+          spaceId: input.spaceId,
+          senderId: input.senderId,
+          senderName: input.senderName,
+          text: question,
+          messageId: input.messageId,
+          phase,
+        });
+        if (!result.handled || !result.reply) return false;
+        outcome = "ticketing";
+        answer = result.reply;
+        if (actions.react) await actions.react(result.acknowledgement ?? "👍").catch(() => undefined);
+        await deliverOnce(actions, answer);
+        delivered = true;
+        if (result.afterReply) await result.afterReply();
+        return true;
+      };
+      if (await ticketing("priority")) return;
       if (deps.handleReservation) {
         const reservation = await deps.handleReservation({
           spaceId: input.spaceId,
           senderId: input.senderId,
+          senderName: input.senderName,
           text: question,
           transcript: deps.transcript(),
           messageId: input.messageId,
@@ -170,6 +215,7 @@ export async function runConversationTurn(
           return;
         }
       }
+      if (await ticketing("fallback")) return;
 
       const transportation = await deps.handleTransport({
         spaceId: input.spaceId,

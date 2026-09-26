@@ -50,6 +50,8 @@ export function reservationAgentPrompt(reservation: ReservationRequest, timeZone
     "If the restaurant offers a time inside the authorized window, accept it and ask them to book it.",
     "If they offer only a time outside the window, do not accept it. Ask whether anything inside the window is available. If nothing inside the window exists, thank them and end the call.",
     phone,
+    depositRule(reservation),
+    "Never give a card number, bank detail, wallet address, or any payment credential, and never agree to pay anything yourself.",
     "Do not treat voicemail as a booking. If you reach voicemail, hang up without leaving a reservation request.",
   ]
     .filter(Boolean)
@@ -71,5 +73,21 @@ export function dynamicVariables(reservation: ReservationRequest, timeZone = "Am
     special_requests: reservation.specialRequests?.join("; ") ?? "",
     customer_phone: reservation.customer?.phone ?? "",
     timezone: timeZone,
+    deposit_paid_usd: paidDeposit(reservation)?.amountUsd ?? "",
+    deposit_reference: paidDeposit(reservation)?.transactionId ?? "",
   };
+}
+
+function paidDeposit(reservation: ReservationRequest): { amountUsd: number; transactionId: string } | undefined {
+  const deposit = reservation.deposit;
+  if (deposit?.status !== "PAID" || deposit.amountUsd == null) return undefined;
+  return { amountUsd: deposit.amountUsd, transactionId: deposit.transactionId ?? "" };
+}
+
+function depositRule(reservation: ReservationRequest): string {
+  const paid = paidDeposit(reservation);
+  if (paid) {
+    return `The customer already paid a $${paid.amountUsd} deposit (reference ${paid.transactionId || "on file"}). If asked, say it was sent and give that reference. Do not agree to any additional payment.`;
+  }
+  return "If they require a deposit, prepayment, or card to hold the table, do not agree to pay. Ask the exact amount, set deposit_required and deposit_amount_usd, then end politely and return NEEDS_USER_INPUT so the customer can authorize it.";
 }

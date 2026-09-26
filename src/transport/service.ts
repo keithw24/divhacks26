@@ -123,6 +123,11 @@ export class TransportationService {
     );
   }
 
+  /** Another agent put a place in focus (e.g. a ticketed event's venue). "How do we get there?" uses it. */
+  noteDestination(spaceId: string, place: PlaceLocation): void {
+    this.memory.rememberPlace(spaceId, place, "destination");
+  }
+
   async handle(request: TransportationRequest): Promise<TransportationResult> {
     const { spaceId, text, senderId } = request;
     this.memory.observe(spaceId, text, senderId);

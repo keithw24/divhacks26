@@ -11,7 +11,7 @@ import {
   PageTitle,
 } from "@/components/site/shell";
 import { ApiError, api, errorMessage, session } from "@/lib/api";
-import { formatPhoneInput } from "@/lib/agent";
+import { formatPhoneInput } from "@/lib/format";
 
 export const Route = createFileRoute("/signin")({
   head: () => ({ meta: [{ title: "Sign in — Murmur" }] }),
@@ -20,12 +20,24 @@ export const Route = createFileRoute("/signin")({
 
 const RESEND_SECONDS = 30;
 
+type Step = "email" | "emailCode" | "phone" | "phoneCode" | "waitlist" | "waitlisted";
+
+const inputClass =
+  "w-full bg-background outline-card rounded-2xl px-4 py-3 text-lg focus:outline-none focus-visible:ring-4 focus-visible:ring-ring/40";
+
+/**
+ * Two-factor sign-in (same flow for new and returning users):
+ * email → emailed code → phone → code over iMessage.
+ * The agent's number is never shown here; verified users get it by email.
+ */
 function SignIn() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [step, setStep] = useState<"phone" | "code" | "waitlist" | "waitlisted">("phone");
+  const [step, setStep] = useState<Step>("email");
+  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
+  const [challenge, setChallenge] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -45,70 +57,166 @@ function SignIn() {
 
   const digits = phone.replace(/\D/g, "");
 
-  async function sendCode() {
+  /** Run an API step with shared busy/error handling. */
+  async function run(fn: () => Promise<void>) {
     setError(undefined);
     setBusy(true);
     try {
-      await api.startSignIn(digits);
-      setStep("code");
-      setCode("");
-      setCooldown(RESEND_SECONDS);
+      await fn();
     } catch (err) {
       if (err instanceof ApiError && err.code === "full") setStep("waitlist");
-      else setError(errorMessage(err));
+      else if (err instanceof ApiError && err.code === "challenge_expired") {
+        setStep("email");
+        setError(errorMessage(err));
+      } else setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
   }
 
-  async function verify(value: string) {
-    setError(undefined);
-    setBusy(true);
-    try {
-      const { token, user } = await api.verify(digits, value);
-      session.set(token);
-      queryClient.setQueryData(["me"], user);
-      await navigate({ to: user.onboarded ? "/dashboard" : "/onboarding" });
-    } catch (err) {
-      setError(errorMessage(err));
+  const sendEmailCode = () =>
+    run(async () => {
+      await api.startEmail(email);
+      setStep("emailCode");
       setCode("");
-    } finally {
-      setBusy(false);
-    }
-  }
+      setCooldown(RESEND_SECONDS);
+    });
 
-  async function joinWaitlist() {
-    setError(undefined);
-    setBusy(true);
-    try {
-      const { position } = await api.joinWaitlist(digits, name || undefined);
-      setPosition(position);
+  const verifyEmail = (value: string) =>
+    run(async () => {
+      try {
+        const result = await api.verifyEmail(email, value);
+        setChallenge(result.challenge);
+        setStep("phone");
+        setCooldown(0);
+      } finally {
+        setCode("");
+      }
+    });
+
+  const sendPhoneCode = () =>
+    run(async () => {
+      await api.startPhone(challenge, digits);
+      setStep("phoneCode");
+      setCode("");
+      setCooldown(RESEND_SECONDS);
+    });
+
+  const verifyPhone = (value: string) =>
+    run(async () => {
+      try {
+        const { token, user } = await api.verifyPhone(challenge, digits, value);
+        session.set(token);
+        queryClient.setQueryData(["me"], user);
+        await navigate({ to: user.onboarded ? "/dashboard" : "/onboarding" });
+      } finally {
+        setCode("");
+      }
+    });
+
+  const joinWaitlist = () =>
+    run(async () => {
+      const result = await api.joinWaitlist(challenge, digits || undefined, name || undefined);
+      setPosition(result.position);
       setStep("waitlisted");
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
+    });
+
+  const progress = { email: 1, emailCode: 1, phone: 2, phoneCode: 2 } as Record<
+    Step,
+    number | undefined
+  >;
 
   return (
     <AppPage>
-      {step === "phone" && (
+      {progress[step] && (
+        <div className="flex gap-2 mb-6" aria-label={`Step ${progress[step]} of 2`}>
+          {[1, 2].map((i) => (
+            <div
+              key={i}
+              className={`h-2 flex-1 rounded-full outline-card ${i <= (progress[step] ?? 0) ? "bg-primary" : "bg-card"}`}
+            />
+          ))}
+        </div>
+      )}
+
+      {step === "email" && (
         <>
           <PageTitle
-            kicker="Sign in"
-            title="Text me a code."
-            sub="We'll send a 6-digit code over iMessage to the same number you'll text @agent from."
+            kicker="Sign in · 1 of 2"
+            title="Start with your email."
+            sub="We'll email you a 6-digit code. Once you're in, we email you @agent's number too."
           />
           <Card>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                void sendCode();
+                void sendEmailCode();
+              }}
+            >
+              <label htmlFor="email" className="font-bold block mb-2">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? "email-error" : undefined}
+                className={inputClass}
+              />
+              <FieldError id="email-error">{error}</FieldError>
+              <button
+                type="submit"
+                className={`${buttonPrimary} w-full mt-5`}
+                disabled={busy || !email.includes("@")}
+              >
+                {busy ? "Sending…" : "Email me a code"}
+              </button>
+            </form>
+          </Card>
+        </>
+      )}
+
+      {step === "emailCode" && (
+        <CodeStep
+          kicker="Check your inbox"
+          title="Enter the email code."
+          sub={`We sent a 6-digit code to ${email}. Check spam if it's not there.`}
+          code={code}
+          setCode={setCode}
+          onSubmit={(v) => void verifyEmail(v)}
+          onResend={() => void sendEmailCode()}
+          onBack={() => {
+            setStep("email");
+            setError(undefined);
+          }}
+          backLabel="Use a different email"
+          busy={busy}
+          cooldown={cooldown}
+          error={error}
+        />
+      )}
+
+      {step === "phone" && (
+        <>
+          <PageTitle
+            kicker="Sign in · 2 of 2"
+            title="Now your iPhone number."
+            sub="The number you'll text @agent from. We'll send a second code over iMessage."
+          />
+          <Card>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void sendPhoneCode();
               }}
             >
               <label htmlFor="phone" className="font-bold block mb-2">
-                Your iPhone number
+                iPhone number
               </label>
               <div className="flex items-center gap-2 bg-background outline-card rounded-2xl px-4 focus-within:ring-4 focus-within:ring-ring/40">
                 <span className="font-bold text-muted-foreground">+1</span>
@@ -126,7 +234,7 @@ function SignIn() {
                 />
               </div>
               <p id="phone-hint" className="text-sm text-muted-foreground mt-2">
-                US numbers with iMessage. Standard message rates don't apply to iMessage.
+                US numbers with iMessage. Returning? Use the same email and number as last time.
               </p>
               <FieldError id="phone-error">{error}</FieldError>
               <button
@@ -141,70 +249,24 @@ function SignIn() {
         </>
       )}
 
-      {step === "code" && (
-        <>
-          <PageTitle
-            kicker="Check iMessage"
-            title="Enter your code."
-            sub={`We texted a 6-digit code to +1 ${phone}.`}
-          />
-          <Card>
-            <label htmlFor="code" className="font-bold block mb-3">
-              6-digit code
-            </label>
-            <InputOTP
-              id="code"
-              maxLength={6}
-              value={code}
-              onChange={setCode}
-              onComplete={(v: string) => void verify(v)}
-              autoFocus
-              disabled={busy}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              aria-describedby={error ? "code-error" : undefined}
-            >
-              <InputOTPGroup className="gap-2">
-                {[0, 1, 2, 3, 4, 5].map((i) => (
-                  <InputOTPSlot
-                    key={i}
-                    index={i}
-                    className="size-12 text-xl font-bold bg-background outline-card rounded-xl first:rounded-xl last:rounded-xl border-l-2"
-                  />
-                ))}
-              </InputOTPGroup>
-            </InputOTP>
-            <FieldError id="code-error">{error}</FieldError>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                type="button"
-                className={buttonPrimary}
-                disabled={busy || code.length !== 6}
-                onClick={() => void verify(code)}
-              >
-                {busy ? "Checking…" : "Sign in"}
-              </button>
-              <button
-                type="button"
-                className={buttonSecondary}
-                disabled={busy || cooldown > 0}
-                onClick={() => void sendCode()}
-              >
-                {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
-              </button>
-            </div>
-            <button
-              type="button"
-              className="mt-4 text-sm font-medium underline underline-offset-4"
-              onClick={() => {
-                setStep("phone");
-                setError(undefined);
-              }}
-            >
-              Use a different number
-            </button>
-          </Card>
-        </>
+      {step === "phoneCode" && (
+        <CodeStep
+          kicker="Check iMessage"
+          title="Enter the iMessage code."
+          sub={`We texted a 6-digit code to +1 ${phone}.`}
+          code={code}
+          setCode={setCode}
+          onSubmit={(v) => void verifyPhone(v)}
+          onResend={() => void sendPhoneCode()}
+          onBack={() => {
+            setStep("phone");
+            setError(undefined);
+          }}
+          backLabel="Use a different number"
+          busy={busy}
+          cooldown={cooldown}
+          error={error}
+        />
       )}
 
       {step === "waitlist" && (
@@ -212,7 +274,7 @@ function SignIn() {
           <PageTitle
             kicker="We're full"
             title="All 100 spots are taken."
-            sub="Join the waitlist and we'll text you when a spot opens."
+            sub="Join the waitlist and we'll email you when a spot opens."
           />
           <Card>
             <form
@@ -229,9 +291,9 @@ function SignIn() {
                 value={name}
                 maxLength={40}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full bg-background outline-card rounded-2xl px-4 py-3 focus:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+                className={inputClass}
               />
-              <p className="text-sm text-muted-foreground mt-3">Number: +1 {phone}</p>
+              <p className="text-sm text-muted-foreground mt-3">We'll email {email}.</p>
               <FieldError id="wl-error">{error}</FieldError>
               <button type="submit" className={`${buttonPrimary} w-full mt-5`} disabled={busy}>
                 {busy ? "Joining…" : "Join the waitlist"}
@@ -242,14 +304,86 @@ function SignIn() {
       )}
 
       {step === "waitlisted" && (
-        <>
-          <PageTitle
-            kicker="You're on the list"
-            title={`You're #${position} in line.`}
-            sub="We'll text you over iMessage when a spot opens."
-          />
-        </>
+        <PageTitle
+          kicker="You're on the list"
+          title={`You're #${position} in line.`}
+          sub={`We'll email ${email} when a spot opens.`}
+        />
       )}
     </AppPage>
+  );
+}
+
+function CodeStep(props: {
+  kicker: string;
+  title: string;
+  sub: string;
+  code: string;
+  setCode: (v: string) => void;
+  onSubmit: (v: string) => void;
+  onResend: () => void;
+  onBack: () => void;
+  backLabel: string;
+  busy: boolean;
+  cooldown: number;
+  error: string | undefined;
+}) {
+  return (
+    <>
+      <PageTitle kicker={props.kicker} title={props.title} sub={props.sub} />
+      <Card>
+        <label htmlFor="code" className="font-bold block mb-3">
+          6-digit code
+        </label>
+        <InputOTP
+          id="code"
+          maxLength={6}
+          value={props.code}
+          onChange={props.setCode}
+          onComplete={(v: string) => props.onSubmit(v)}
+          autoFocus
+          disabled={props.busy}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          aria-describedby={props.error ? "code-error" : undefined}
+        >
+          <InputOTPGroup className="gap-2">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <InputOTPSlot
+                key={i}
+                index={i}
+                className="size-12 text-xl font-bold bg-background outline-card rounded-xl first:rounded-xl last:rounded-xl border-l-2"
+              />
+            ))}
+          </InputOTPGroup>
+        </InputOTP>
+        <FieldError id="code-error">{props.error}</FieldError>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            className={buttonPrimary}
+            disabled={props.busy || props.code.length !== 6}
+            onClick={() => props.onSubmit(props.code)}
+          >
+            {props.busy ? "Checking…" : "Continue"}
+          </button>
+          <button
+            type="button"
+            className={buttonSecondary}
+            disabled={props.busy || props.cooldown > 0}
+            onClick={props.onResend}
+          >
+            {props.cooldown > 0 ? `Resend in ${props.cooldown}s` : "Resend code"}
+          </button>
+        </div>
+        <button
+          type="button"
+          className="mt-4 text-sm font-medium underline underline-offset-4"
+          onClick={props.onBack}
+        >
+          {props.backLabel}
+        </button>
+      </Card>
+    </>
   );
 }

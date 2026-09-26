@@ -59,6 +59,7 @@ export interface InboundDeps {
     handleTurn(input: {
       spaceId: string;
       senderId?: string;
+      senderName?: string;
       text: string;
       messageId?: string;
     }): Promise<ReservationHandlerResult>;
@@ -72,6 +73,17 @@ export interface InboundDeps {
       text: string;
       messageId?: string;
       recentTexts?: string[];
+    }): Promise<ReservationHandlerResult>;
+  };
+  ticketing?: {
+    handleTurn(input: {
+      spaceId: string;
+      senderId?: string;
+      senderName?: string;
+      text: string;
+      messageId?: string;
+      phase: "priority" | "fallback";
+      location?: { latitude: number; longitude: number };
     }): Promise<ReservationHandlerResult>;
   };
   meetup?: {
@@ -208,6 +220,7 @@ export async function handleInboundMessage(
             deps.reservations!.handleTurn({
               spaceId: request.spaceId,
               senderId: request.senderId,
+              senderName: request.senderName,
               text: request.text,
               messageId: message.messageId,
             })
@@ -223,6 +236,18 @@ export async function handleInboundMessage(
               recentTexts: group.recentMessages
                 .filter((line) => line.id !== message.messageId)
                 .map((line) => line.text),
+            })
+        : undefined,
+      handleTicketing: deps.ticketing
+        ? (request) =>
+            deps.ticketing!.handleTurn({
+              spaceId: request.spaceId,
+              senderId: request.senderId,
+              senderName: message.senderName,
+              text: request.text,
+              messageId: message.messageId,
+              phase: request.phase,
+              location: deps.location ? { latitude: deps.location.latitude, longitude: deps.location.longitude } : undefined,
             })
         : undefined,
       handleMeetup: deps.meetup
@@ -249,6 +274,7 @@ export async function handleInboundMessage(
   const responseSent =
     outcome === "payment" ||
     outcome === "reservation" ||
+    outcome === "ticketing" ||
     outcome === "meetup" ||
     outcome === "transport" ||
     outcome === "gemini" ||

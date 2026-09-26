@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { StoredMemory } from "../backboard/client.js";
-import { maskPhone, preferencesToMemories, type Auth } from "./auth.js";
+import { maskEmail, maskPhone, preferencesToMemories, type Auth } from "./auth.js";
 import type { WebUser } from "./store.js";
 
 /** What the website server needs from the agent (Photon + Backboard). */
@@ -9,6 +9,8 @@ export interface WebApiDeps {
   allowedOrigins: string[];
   /** Send the "say hi" iMessage that opens the chat with the agent. */
   startChat(phone: string, name: string | undefined): Promise<void>;
+  /** Email the agent's number (it is never shown on the website). */
+  sendAgentNumber(email: string, name: string | undefined): Promise<void>;
   saveMemories(phone: string, name: string, sentences: string[]): Promise<void>;
   listMemories(phone: string): Promise<StoredMemory[]>;
   deleteMemory(phone: string, memoryId: string): Promise<boolean>;
@@ -38,6 +40,7 @@ export function createWebApiServer(deps: WebApiDeps): Server {
 
   const publicUser = (user: WebUser) => ({
     phone: maskPhone(user.phone),
+    email: maskEmail(user.email),
     onboarded: Boolean(user.onboardedAt),
     preferences: user.preferences ?? null,
   });
@@ -52,30 +55,38 @@ export function createWebApiServer(deps: WebApiDeps): Server {
     if (method === "GET" && path === "/readyz") return { status: "ready" };
     if (method === "GET" && path === "/api/stats") return deps.auth.stats();
 
-    if (method === "POST" && path === "/api/auth/start") {
+    const limitIp = () => {
       const ip = req.socket.remoteAddress ?? "unknown";
       const now = Date.now();
       const recent = (startsByIp.get(ip) ?? []).filter((at) => now - at < IP_WINDOW_MS);
       if (recent.length >= IP_MAX_STARTS) throw new HttpError(429, "rate_limited");
       startsByIp.set(ip, [...recent, now]);
-      const body = await readJson(req);
-      const result = await deps.auth.startSignIn(body.phone);
-      if ("error" in result) throw new HttpError(result.error === "send_failed" ? 502 : result.error === "full" ? 409 : result.error === "rate_limited" ? 429 : 400, result.error);
-      return result;
-    }
+    };
 
-    if (method === "POST" && path === "/api/auth/verify") {
+    // Two-factor sign-in: email code first, then an iMessage code.
+    if (method === "POST" && path === "/api/auth/email/start") {
+      limitIp();
       const body = await readJson(req);
-      const result = deps.auth.verify(body.phone, body.code);
-      if ("error" in result) throw new HttpError(result.error === "full" ? 409 : result.error === "too_many_attempts" ? 429 : 400, result.error);
+      return orThrow(await deps.auth.startEmail(body.email));
+    }
+    if (method === "POST" && path === "/api/auth/email/verify") {
+      const body = await readJson(req);
+      return orThrow(deps.auth.verifyEmail(body.email, body.code));
+    }
+    if (method === "POST" && path === "/api/auth/phone/start") {
+      limitIp();
+      const body = await readJson(req);
+      return orThrow(await deps.auth.startPhone(body.challenge, body.phone));
+    }
+    if (method === "POST" && path === "/api/auth/phone/verify") {
+      const body = await readJson(req);
+      const result = orThrow(deps.auth.verifyPhone(body.challenge, body.phone, body.code));
       return { token: result.token, user: publicUser(result.user) };
     }
 
     if (method === "POST" && path === "/api/waitlist") {
       const body = await readJson(req);
-      const result = deps.auth.joinWaitlist(body.phone, body.name);
-      if ("error" in result) throw new HttpError(400, result.error);
-      return result;
+      return orThrow(deps.auth.joinWaitlist(body.challenge, body.phone, body.name));
     }
 
     // Everything below needs a signed-in user.
@@ -101,6 +112,13 @@ export function createWebApiServer(deps: WebApiDeps): Server {
     if (method === "POST" && path === "/api/me/start-chat") {
       await deps.startChat(user.phone, user.preferences?.name).catch(() => {
         throw new HttpError(502, "send_failed");
+      });
+      return { ok: true };
+    }
+
+    if (method === "POST" && path === "/api/me/send-number") {
+      await deps.sendAgentNumber(user.email, user.preferences?.name).catch(() => {
+        throw new HttpError(502, "email_failed");
       });
       return { ok: true };
     }
@@ -174,6 +192,21 @@ export function createWebApiServer(deps: WebApiDeps): Server {
       res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify({ error: code }));
     }
   });
+}
+
+const STATUS: Record<string, number> = {
+  rate_limited: 429,
+  too_many_attempts: 429,
+  send_failed: 502,
+  full: 409,
+  account_mismatch: 409,
+  challenge_expired: 401,
+};
+
+/** Unwrap an auth result, turning `{ error }` into an HTTP error. */
+function orThrow<T extends object>(result: T): Exclude<T, { error: string }> {
+  if ("error" in result && typeof result.error === "string") throw new HttpError(STATUS[result.error] ?? 400, result.error);
+  return result as Exclude<T, { error: string }>;
 }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {

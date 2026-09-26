@@ -64,13 +64,17 @@ function Onboarding() {
     setError(undefined);
     try {
       await api.savePreferences(prefs);
-      // The intro text is nice-to-have; the dashboard can resend it.
-      const texted = await api.startChat().then(
-        () => true,
-        () => false,
-      );
+      // The number goes out by email (never shown on the site); the iMessage hello is a bonus.
+      // Both can be resent from the dashboard, so a failure here doesn't block onboarding.
+      const [emailed] = await Promise.all([
+        api.sendNumber().then(
+          () => true,
+          () => false,
+        ),
+        api.startChat().catch(() => undefined),
+      ]);
       await queryClient.invalidateQueries({ queryKey: ["me"] });
-      await navigate({ to: "/dashboard", search: { welcome: texted ? "texted" : "saved" } });
+      await navigate({ to: "/dashboard", search: { welcome: emailed ? "emailed" : "saved" } });
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -129,7 +133,7 @@ function Onboarding() {
             </button>
           )}
           <button type="submit" className={`${buttonPrimary} flex-1`} disabled={busy}>
-            {busy ? "Saving…" : last ? "Finish and text me" : "Continue"}
+            {busy ? "Saving…" : last ? "Finish and email me the number" : "Continue"}
           </button>
         </div>
       </form>

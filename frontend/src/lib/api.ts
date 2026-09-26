@@ -19,6 +19,8 @@ export interface Preferences {
 export interface Me {
   /** Masked, e.g. "+1 •••-•••-4515". */
   phone: string;
+  /** Masked, e.g. "k•••@gmail.com". */
+  email: string;
   onboarded: boolean;
   preferences: Preferences | null;
 }
@@ -90,15 +92,22 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const api = {
   stats: () => call<{ spotsTaken: number; spotsTotal: number }>("GET", "/api/stats"),
-  startSignIn: (phone: string) => call<{ ok: true }>("POST", "/api/auth/start", { phone }),
-  verify: (phone: string, code: string) =>
-    call<{ token: string; user: Me }>("POST", "/api/auth/verify", { phone, code }),
-  joinWaitlist: (phone: string, name?: string) =>
-    call<{ position: number }>("POST", "/api/waitlist", { phone, name }),
+  // Two-factor sign-in: email code first, then an iMessage code.
+  startEmail: (email: string) => call<{ ok: true }>("POST", "/api/auth/email/start", { email }),
+  verifyEmail: (email: string, code: string) =>
+    call<{ challenge: string }>("POST", "/api/auth/email/verify", { email, code }),
+  startPhone: (challenge: string, phone: string) =>
+    call<{ ok: true }>("POST", "/api/auth/phone/start", { challenge, phone }),
+  verifyPhone: (challenge: string, phone: string, code: string) =>
+    call<{ token: string; user: Me }>("POST", "/api/auth/phone/verify", { challenge, phone, code }),
+  joinWaitlist: (challenge: string, phone?: string, name?: string) =>
+    call<{ position: number }>("POST", "/api/waitlist", { challenge, phone, name }),
   signOut: () => call<{ ok: true }>("POST", "/api/auth/signout"),
   me: () => call<Me>("GET", "/api/me"),
   savePreferences: (prefs: Preferences) => call<{ ok: true }>("PUT", "/api/me/preferences", prefs),
   startChat: () => call<{ ok: true }>("POST", "/api/me/start-chat"),
+  /** Emails the agent's number; the number itself is never sent to the browser. */
+  sendNumber: () => call<{ ok: true }>("POST", "/api/me/send-number"),
   memories: () => call<{ memories: Memory[] }>("GET", "/api/me/memories"),
   deleteMemory: (id: string) =>
     call<{ ok: true }>("DELETE", `/api/me/memories/${encodeURIComponent(id)}`),
@@ -108,9 +117,14 @@ export const api = {
 const MESSAGES: Record<string, string> = {
   offline: "Can't reach the agent right now. Check your connection and try again.",
   invalid_phone: "Enter a 10-digit US phone number.",
-  full: "All 100 spots are taken. Join the waitlist and we'll text you when one opens.",
+  invalid_email: "Enter a valid email address.",
+  challenge_expired: "Your email check timed out. Start again with your email.",
+  account_mismatch:
+    "That email and phone number belong to different accounts. Use the pair you signed up with.",
+  email_failed: "We couldn't send the email. Try again in a moment.",
+  full: "All 100 spots are taken. Join the waitlist and we'll email you when one opens.",
   rate_limited: "Too many requests. Wait a minute and try again.",
-  send_failed: "We couldn't send the iMessage. Make sure the number uses iMessage, then try again.",
+  send_failed: "We couldn't send the code. Check the address or number, then try again.",
   no_code: "Request a code first.",
   expired: "That code expired. Send a new one.",
   wrong_code: "That code isn't right. Check the text and try again.",
