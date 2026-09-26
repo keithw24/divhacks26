@@ -10,7 +10,10 @@ export interface SuggestInput {
   now?: Date;
 }
 
-/** Route one chat turn through the shared Gemini intent parser and factual skills. */
+/**
+ * Route non-transportation turns through the shared factual skill orchestrator.
+ * The dedicated transportation service runs first in agent/turn.ts.
+ */
 export async function suggestNext(input: SuggestInput): Promise<string> {
   return orchestrate({
     question: input.question,

@@ -53,7 +53,7 @@ This folder contains the first BoroughOS vertical slice: a hosted Photon
 Spectrum listener that receives real iMessage messages, acknowledges them with a
 tapback, shows a typing indicator, and replies in-thread.
 
-It deliberately uses `spectrum-ts` 12.x. Do not mix this code with the
+It uses current `spectrum-ts` (12.10+). Do not mix this code with the
 older Advanced iMessage Kit API; its constructor and event model are different.
 
 ### Add Photon credentials
@@ -68,9 +68,13 @@ Copy-Item .env.example .env
 Fill in:
 
 ```dotenv
-PHOTON_PROJECT_ID=your-project-id
-PHOTON_PROJECT_SECRET=your-project-secret
+CHAT_PROVIDER=imessage
+SPECTRUM_PROJECT_ID=your-project-id
+SPECTRUM_PROJECT_SECRET=your-project-secret
+# PHOTON_PROJECT_ID / PHOTON_PROJECT_SECRET are also accepted
 BOROUGHOS_AUTOREPLY=true
+GEMINI_API_KEY=your-gemini-key
+GEMINI_MODEL=gemini-3.8-flash
 ```
 
 Never commit `.env` or paste credentials into source code.
@@ -93,6 +97,9 @@ working round-trip produces a 👍 tapback, typing indicator, and BoroughOS repl
 - Incoming text is geocoded (Photon/Komoot, NYC-biased), then Tiger is queried
   for NYPD complaints near that block (~250m) and neighborhood (~800m), split
   by hour in `America/New_York`.
+- Transportation questions (“How should I get there?”) are handled by `src/transport` via Gemini Maps grounding.
+- Other questions use `src/agent/suggest.ts` (Gemini + Maps, including the Tiger block sketch when `DATABASE_URL` is set).
+- Replies go out with `message.reply`, falling back to `space.send` when a threaded reply is skipped. Conversation state is keyed by `space.id`.
 - Incoming content is treated as untrusted. The app ignores its own outbound
   messages and does not log message bodies, credentials, or contact data.
 
@@ -165,3 +172,127 @@ Before merging a skill branch:
 npm run typecheck
 npm test
 ```
+
+## How should I get there?
+
+The agent answers NYC transportation questions inside iMessage: directions,
+walk vs subway, nearby places, and follow-ups like “Can I walk instead?”
+Conversation context is stored per Photon `space.id`, so two group chats
+cannot leak destinations into each other.
+
+```
+iMessage
+  → Photon Spectrum
+  → transportation handler
+  → Gemini API + native Google Maps grounding
+  → optional Google Routes / Places
+  → Photon
+  → iMessage
+```
+
+`GEMINI_API_KEY` is the only Google credential required for the normal path.
+If Maps grounding metadata is missing, the agent says it could not get reliable
+route details instead of inventing a subway line.
+
+### Photon setup
+
+1. Create a project at [app.photon.codes](https://app.photon.codes).
+2. Connect an iMessage line.
+3. Copy `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` (or `PHOTON_*`) into `.env`.
+4. Set `CHAT_PROVIDER=imessage` and `npm run dev`. Spectrum listens over gRPC; no webhook is required.
+
+The listener still uses current Spectrum APIs from
+[photon-hq/spectrum-ts](https://github.com/photon-hq/spectrum-ts):
+`Spectrum()`, `imessage.config()`, `terminal.config()`, `app.messages`,
+`space.send`, and `space.responding`.
+
+### Gemini setup
+
+1. Create a key at [Google AI Studio](https://aistudio.google.com/apikey).
+2. Set `GEMINI_API_KEY`.
+3. Optional: `GEMINI_MODEL` (default `gemini-3.8-flash`).
+
+Gemini is called with the official Maps grounding tool:
+
+```ts
+tools: [{ googleMaps: {} }]
+toolConfig: { retrievalConfig: { latLng: { latitude, longitude } } }
+```
+
+That is how place names, nearby results, and geographic context are resolved.
+`GEMINI_API_KEY` is not a Google Maps Platform key.
+
+### Google Maps grounding + optional routing
+
+- **Default:** Gemini Maps grounding with `GEMINI_API_KEY` only.
+- Grounded replies include `Google Maps` source titles from `groundingChunks`.
+- If no Maps grounding chunks come back, the user gets a limited fallback.
+- **Optional:** `GOOGLE_MAPS_API_KEY` adds structured Routes/Places. It is not
+  required and is not interchangeable with the Gemini key.
+- See `docs/gemini-maps-capabilities.md` for what grounding can and cannot prove.
+
+### Required environment variables
+
+| Variable | Required to start | Used for |
+| --- | --- | --- |
+| `CHAT_PROVIDER` | no (default terminal) | `terminal` or `imessage` |
+| `SPECTRUM_PROJECT_ID` / `PHOTON_PROJECT_ID` | for iMessage | Spectrum Cloud |
+| `SPECTRUM_PROJECT_SECRET` / `PHOTON_PROJECT_SECRET` | for iMessage | Spectrum Cloud |
+| `GEMINI_API_KEY` | for transport + suggestions | Maps grounding |
+| `GEMINI_MODEL` | no | default `gemini-3.8-flash` |
+| `GOOGLE_MAPS_API_KEY` | optional | structured Routes/Places |
+| `DATABASE_URL` | only for Tiger ingest | NYPD crime hypertable |
+
+### Run locally
+
+```bash
+cp .env.example .env
+# fill Photon + Gemini + optional Maps keys
+npm install
+npm run typecheck
+npm test
+npm run dev
+```
+
+Without iMessage, you can still exercise the transportation path:
+
+```bash
+npm run transport:demo
+npm run transport:gemini-live
+```
+
+### Test
+
+```bash
+npm test
+```
+
+Automated tests mock Gemini and Maps. They do not make paid API calls.
+
+### Example iMessage interaction
+
+```
+You: How should I get from Columbia University to Times Square?
+Agent: Take the 1 from 116 St-Columbia University to Times Sq-42 St. About 35 min.
+       Walking would take much longer, so transit makes more sense here.
+
+You: I’m at Columbia University.
+You: How should I get to Washington Square Park?
+Agent: Take the 1 downtown and transfer to the A/C/E at 14 St. About 25 min.
+
+You: Can I walk instead?
+Agent: Walking is about 40 min.
+       Walking would take much longer, so transit makes more sense here.
+```
+
+Times and station names only appear when Maps grounding or optional Routes
+data actually supported them.
+
+### Current limitations
+
+- In-memory context only (clears on process restart). Backboard is not wired.
+- Shared-pool Photon lines have limited group-event support; DMs work on all plans.
+- Location pins are parsed when they contain NYC coordinates; other attachments are ignored.
+- Ambiguous chains like “Joe’s Pizza” ask one short clarification.
+- Destinations outside NYC are labeled; the agent will not invent a route.
+- Event, food, and safety requests use the unified skill orchestrator; transportation requests use the dedicated context-aware handler.

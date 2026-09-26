@@ -22,12 +22,29 @@ export function parseCoordinates(text: string): { latitude: number; longitude: n
   return { latitude, longitude };
 }
 
+const TIME_RE =
+  /\b(?:at|around)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\btonight\b|\btoday\b|\bthis (?:morning|afternoon|evening|weekend)\b/gi;
+
+/**
+ * Pull a geocodable place out of chat. Ignores clock phrases so
+ * "is Columbia safe at 11pm" does not geocode as "11pm".
+ */
 export function locationQueryFromMessage(text: string): string {
-  const near = text.match(
-    /\b(?:near|around|at|in)\s+(.+)$/i,
+  let q = text.replace(TIME_RE, " ");
+  const named = q.match(/\b(?:near|around|in)\s+(.+)/i);
+  const rest = named?.[1]?.trim() ?? "";
+  if (rest && !/^\d{1,2}(?::\d{2})?\s*(?:am|pm)?$/i.test(rest)) {
+    q = rest;
+  }
+  q = q.replace(/\b(?:is|how's|how is|how|what's|what is)\b/gi, " ");
+  q = q.replace(
+    /\b(?:un)?safe(?:ty|r|st)?\b|\bsketchy\b|\bdangerous\b|\bcrime\b|\bthis\b|\barea\b|\bblock\b|\bneighborhood\b|\bwalk(?:ing)?(?:\s+home|\s+alone)?\b/gi,
+    " ",
   );
-  if (near?.[1]) return near[1].trim();
-  return text.trim();
+  q = q.replace(/[?!.]/g, " ");
+  const cleaned = q.replace(/\s+/g, " ").trim();
+  if (/^columbia$/i.test(cleaned)) return "Columbia University";
+  return cleaned;
 }
 
 export async function geocodeNyc(query: string): Promise<GeocodedPlace | null> {
@@ -43,9 +60,12 @@ export async function geocodeNyc(query: string): Promise<GeocodedPlace | null> {
 
   const q = locationQueryFromMessage(query);
   if (q.length < 3) return null;
+  const geocodeQ = /new york|nyc|manhattan|brooklyn|bronx|queens|staten/i.test(q)
+    ? q
+    : `${q}, New York`;
 
   const url = new URL(PHOTON_URL);
-  url.searchParams.set("q", q);
+  url.searchParams.set("q", geocodeQ);
   url.searchParams.set("limit", "5");
   url.searchParams.set("lat", String(NYC_BIAS.lat));
   url.searchParams.set("lon", String(NYC_BIAS.lon));
