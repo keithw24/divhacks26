@@ -17,10 +17,9 @@ export const config = {
   // GEMINI_API_KEY is canonical. GOOGLE_API_KEY is accepted only as a legacy alias.
   geminiApiKey: env("GEMINI_API_KEY") || env("GOOGLE_API_KEY"),
   geminiModel: env("GEMINI_MODEL", "gemini-3.5-flash-lite"),
-  googleMapsApiKey: env("GOOGLE_MAPS_API_KEY"),
-
   timezone: env("TIMEZONE", "America/New_York"),
   databaseUrl: env("DATABASE_URL"),
+  googleMapsApiKey: env("GOOGLE_MAPS_API_KEY"),
   tavilyApiKey: env("TAVILY_API_KEY"),
   parksEventsDataset: env("PARKS_EVENTS_DATASET", "w3wp-dpdi"),
   permittedEventsDataset: env("PERMITTED_EVENTS_DATASET", "tvpp-9vvx"),
