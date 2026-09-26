@@ -4,6 +4,7 @@ import type { LatLng } from "../chat/location.js";
 import { formatSafetyReply } from "../formatReport.js";
 import { geocodeNyc } from "../geocode.js";
 import { currentHourEt, lookupBlockSafety, parseRequestedHour } from "../safety.js";
+import { wantsSafetySketch } from "../safetyIntent.js";
 import { systemPrompt } from "./prompt.js";
 
 let client: GoogleGenAI | undefined;
@@ -66,13 +67,23 @@ export function placeLinks(response: GenerateContentResponse, reply: string): st
 }
 
 async function citySketchFor(input: SuggestInput): Promise<string | undefined> {
-  if (!config.databaseUrl) return undefined;
+  if (!wantsSafetySketch(input.question)) {
+    console.info("tiger: skipped (not a safety prompt)");
+    return undefined;
+  }
+  if (!config.databaseUrl) {
+    console.info("tiger: skipped (no DATABASE_URL)");
+    return undefined;
+  }
   let placeLabel = "shared pin";
   let lat = input.location?.latitude;
   let lon = input.location?.longitude;
   if (lat == null || lon == null) {
     const geo = await geocodeNyc(input.question).catch(() => null);
-    if (!geo) return undefined;
+    if (!geo) {
+      console.info(`tiger: skipped (geocode missed: ${JSON.stringify(input.question)})`);
+      return undefined;
+    }
     placeLabel = geo.label;
     lat = geo.latitude;
     lon = geo.longitude;
@@ -86,28 +97,68 @@ async function citySketchFor(input: SuggestInput): Promise<string | undefined> {
   );
 }
 
+function isRetryableModelError(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : String(err);
+  return /429|404|503|RESOURCE_EXHAUSTED|no longer available|exceeded your current quota|high demand/i.test(text);
+}
+
+function fallbackReply(citySketch: string | undefined): string {
+  if (citySketch) {
+    return `${citySketch}\n\nGemini is unavailable right now, so this is the city-data sketch only.`;
+  }
+  return "Gemini is unavailable right now (quota or retired model). Try GEMINI_MODEL=gemini-3.5-flash-lite in .env.";
+}
+
+async function generateWithGemini(input: SuggestInput, citySketch: string | undefined, model: string, useMaps: boolean) {
+  return gemini().models.generateContent({
+    model,
+    contents: [{ role: "user", parts: [{ text: buildContext({ ...input, citySketch }) }] }],
+    config: {
+      systemInstruction: systemPrompt(input.isGroup),
+      ...(useMaps ? { tools: [{ googleMaps: {} }] } : {}),
+      ...(useMaps && input.location
+        ? {
+            toolConfig: {
+              retrievalConfig: { latLng: { latitude: input.location.latitude, longitude: input.location.longitude } },
+            },
+          }
+        : {}),
+    },
+  });
+}
+
 /** Ask Gemini what the person/group should do next, grounded in Google Maps. */
 export async function suggestNext(input: SuggestInput): Promise<string> {
   const citySketch = await citySketchFor(input).catch((err) => {
     console.error("tiger sketch failed:", err);
     return undefined;
   });
-  const response = await gemini().models.generateContent({
-    model: config.geminiModel,
-    contents: [{ role: "user", parts: [{ text: buildContext({ ...input, citySketch }) }] }],
-    config: {
-      systemInstruction: systemPrompt(input.isGroup),
-      tools: [{ googleMaps: {} }],
-      ...(input.location && {
-        toolConfig: {
-          retrievalConfig: { latLng: { latitude: input.location.latitude, longitude: input.location.longitude } },
-        },
-      }),
-    },
-  });
+  if (citySketch) {
+    const first = citySketch.split("\n")[0] ?? "tiger sketch";
+    console.info(`tiger: queried nypd_complaints (${first})`);
+  }
 
-  const reply = response.text?.trim();
-  if (!reply) return "Hmm, I couldn't come up with anything. Where are you right now?";
-  const links = placeLinks(response, reply);
-  return links.length ? `${reply}\n\n${links.join("\n")}` : reply;
+  const tried = new Set<string>();
+  const attempts: Array<{ model: string; useMaps: boolean }> = [
+    { model: config.geminiModel, useMaps: false },
+    { model: "gemini-3.5-flash-lite", useMaps: false },
+    { model: "gemini-flash-lite-latest", useMaps: false },
+  ];
+
+  for (const attempt of attempts) {
+    if (tried.has(attempt.model)) continue;
+    tried.add(attempt.model);
+    try {
+      const response = await generateWithGemini(input, citySketch, attempt.model, attempt.useMaps);
+      const reply = response.text?.trim();
+      if (!reply) continue;
+      const links = attempt.useMaps ? placeLinks(response, reply) : [];
+      return links.length ? `${reply}\n\n${links.join("\n")}` : reply;
+    } catch (err) {
+      console.error(`gemini ${attempt.model} failed:`, err);
+      if (!isRetryableModelError(err)) throw err;
+    }
+  }
+
+  return fallbackReply(citySketch);
 }

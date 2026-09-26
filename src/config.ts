@@ -9,7 +9,7 @@ export const config = {
   agentName: env("AGENT_NAME", "Agent"),
   terminalAsGroup: env("TERMINAL_AS_GROUP") === "1",
   geminiApiKey: env("GEMINI_API_KEY"),
-  geminiModel: env("GEMINI_MODEL", "gemini-3.8-flash"),
+  geminiModel: env("GEMINI_MODEL", "gemini-3.5-flash-lite"),
   timezone: env("TIMEZONE", "America/New_York"),
   databaseUrl: env("DATABASE_URL"),
 };

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { formatSafetyReply } from "../src/formatReport.js";
 import { parseCoordinates, locationQueryFromMessage } from "../src/geocode.js";
 import { parseRequestedHour } from "../src/safety.js";
+import { wantsSafetySketch } from "../src/safetyIntent.js";
 
 describe("location parsing", () => {
   it("reads NYC coordinates", () => {
@@ -17,8 +18,27 @@ describe("location parsing", () => {
     );
   });
 
+  it("does not treat clock phrases as the place", () => {
+    expect(locationQueryFromMessage("is columbia safe at 11pm")).toBe(
+      "Columbia University",
+    );
+  });
+
   it("parses a requested hour", () => {
     expect(parseRequestedHour("Columbia at 9pm", 11)).toBe(21);
+  });
+});
+
+describe("wantsSafetySketch", () => {
+  it("fires on safety wording", () => {
+    expect(wantsSafetySketch("is Columbia safe at 11pm")).toBe(true);
+    expect(wantsSafetySketch("how sketchy is this block")).toBe(true);
+  });
+
+  it("stays off for hangout prompts", () => {
+    expect(wantsSafetySketch("what should we do near Columbia")).toBe(false);
+    expect(wantsSafetySketch("what's a good dinner spot")).toBe(false);
+    expect(wantsSafetySketch("what should we do at night")).toBe(false);
   });
 });
 
