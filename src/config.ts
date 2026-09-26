@@ -1,6 +1,7 @@
 export interface Config {
   photonProjectId: string;
   photonProjectSecret: string;
+  databaseUrl: string;
   autoReply: boolean;
 }
 
@@ -14,6 +15,7 @@ export function loadConfig(): Config {
   return {
     photonProjectId: required("PHOTON_PROJECT_ID"),
     photonProjectSecret: required("PHOTON_PROJECT_SECRET"),
+    databaseUrl: required("DATABASE_URL"),
     autoReply: process.env.BOROUGHOS_AUTOREPLY !== "false",
   };
 }

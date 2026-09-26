@@ -86,11 +86,13 @@ working round-trip produces a 👍 tapback, typing indicator, and BoroughOS repl
 ### Current boundary
 
 - Photon/Spectrum owns conversation transport.
-- `src/respond.ts` owns the temporary deterministic response.
-- The next layer can replace `createBoroughReply` with Gemini orchestration and
-  later feed the 311 evidence, policy checks, and XRPL transaction workflow.
+- Incoming text is geocoded (Photon/Komoot, NYC-biased), then Tiger is queried
+  for NYPD complaints near that block (~250m) and neighborhood (~800m), split
+  by hour in `America/New_York`.
 - Incoming content is treated as untrusted. The app ignores its own outbound
   messages and does not log message bodies, credentials, or contact data.
+
+Text the iMessage line a place, optionally with a time: `Columbia University at 9pm`.
 
 ### Dashboard checklist
 

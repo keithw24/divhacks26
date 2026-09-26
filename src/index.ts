@@ -30,7 +30,7 @@ for await (const [space, message] of app.messages) {
     continue;
   }
 
-  const reply = createBoroughReply(message.content.text);
+  const reply = await createBoroughReply(message.content.text, config.databaseUrl);
   await message.react(reply.acknowledgement);
 
   if (config.autoReply) {
