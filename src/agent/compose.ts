@@ -1,4 +1,6 @@
 import type { Budget, Recommendation, RouteResult, SkillResult } from "../domain/contracts.js";
+import type { EvidencePlan } from "../domain/evidence.js";
+import { buildEvidenceGraph, renderEvidencePlan } from "../evidence/graph.js";
 import type { BlockSafetyReport } from "../safety.js";
 import { asksForMorePlans, membersFromTranscript } from "../planning/constraints.js";
 import { formatGroupPlans } from "../planning/format.js";
@@ -63,19 +65,7 @@ export async function rankRecommendations(
   return rankRecommendationsSync(question, recommendations, transcript, defaults, spaceId).picks;
 }
 
-const miles = (meters: number) => meters < 1200 ? `${Math.max(1, Math.round(meters / 80))} min walk` : `${(meters / 1609.344).toFixed(1)} mi away`;
-const eventWhen = (iso?: string) =>
-  iso
-    ? new Date(iso).toLocaleString("en-US", {
-        timeZone: "America/New_York",
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      })
-    : undefined;
-
+/** Legacy safetyLine/reason strings are deliberately ignored: only graph claims can be rendered. */
 export function renderResponse(input: {
   picks: RankedRecommendation[];
   safety?: SkillResult<BlockSafetyReport | null>;
@@ -84,38 +74,7 @@ export function renderResponse(input: {
   warnings: string[];
   groupText?: string;
   offerMore?: boolean;
+  graph?: EvidencePlan;
 }): string {
-  const lines: string[] = [];
-  if (input.groupText) {
-    lines.push(input.groupText);
-  } else {
-    input.picks.forEach(({ item, reason }, index) => {
-      const facts = [miles(item.distanceMeters)];
-      if (item.startsAt) facts.push(`starts ${eventWhen(item.startsAt)}`);
-      if (item.kind === "event" && item.location.label && item.location.label !== item.name) {
-        facts.push(`at ${item.location.label}`);
-      }
-      if (item.openNow === true) facts.push("open now");
-      if (item.rating) facts.push(`${item.rating.toFixed(1)}★`);
-      if (item.priceLevel) facts.push(item.priceLevel.replace("PRICE_LEVEL_", "").toLowerCase());
-      lines.push(`${index + 1}. ${item.name} — ${facts.join(", ")}; ${reason}`);
-      if (item.url) lines.push(item.url);
-    });
-    if (input.offerMore) {
-      lines.push("If none of these work, say “show more” and I’ll list the next options that still fit everyone’s hard limits.");
-    }
-  }
-
-  if (input.safetyLine) lines.push(input.safetyLine);
-  if (input.route) {
-    lines.push(`Route: ${input.route.data.summary}`);
-    lines.push(input.route.data.directionsUrl);
-    if (input.route.data.mode === "WALK" || input.route.data.mode === "BICYCLE") {
-      lines.push("Google walking and cycling routes are beta; check current path conditions.");
-    }
-  }
-  if (!lines.length) lines.push("I couldn't find a verified match right now. Try a wider area or a different time.");
-  const uniqueWarnings = [...new Set(input.warnings)].filter(Boolean);
-  if (uniqueWarnings.length && lines.length < 12) lines.push(`Note: ${uniqueWarnings[0]}`);
-  return lines.join("\n").slice(0, 1900);
+  return renderEvidencePlan(input.graph ?? buildEvidenceGraph(input));
 }

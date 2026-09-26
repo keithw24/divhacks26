@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { emptyPreferences, PreferencesFields } from "@/components/site/preferences-form";
+import { WalletChoice } from "@/components/site/wallet-card";
 import {
   AppPage,
   buttonPrimary,
@@ -30,6 +31,11 @@ const STEPS = [
     sub: "Used whenever it suggests food or plans for your group. You can change this anytime.",
   },
   { key: "voice", title: "Talk or text?", sub: "Voice memos go both ways." },
+  {
+    key: "wallet",
+    title: "Want a Testnet wallet?",
+    sub: "Only if you want to send or receive in iMessage. You can add one later.",
+  },
 ] as const;
 
 function Onboarding() {
@@ -38,14 +44,15 @@ function Onboarding() {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(0);
   const [prefs, setPrefs] = useState<Preferences>(emptyPreferences);
+  const [wantWallet, setWantWallet] = useState<boolean | null>(null);
   const [nameError, setNameError] = useState<string>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
-  // Returning users editing again start from what they saved.
   useEffect(() => {
     if (me?.preferences) setPrefs(me.preferences);
-  }, [me?.preferences]);
+    if (me?.wallet.status === "ready") setWantWallet(true);
+  }, [me?.preferences, me?.wallet]);
 
   const current = STEPS[step] ?? STEPS[0];
   const last = step === STEPS.length - 1;
@@ -53,6 +60,10 @@ function Onboarding() {
   async function next() {
     if (step === 0 && !prefs.name.trim()) {
       setNameError("Add your first name to continue.");
+      return;
+    }
+    if (last && wantWallet === null) {
+      setError("Choose whether you want a Testnet wallet.");
       return;
     }
     setNameError(undefined);
@@ -64,8 +75,6 @@ function Onboarding() {
     setError(undefined);
     try {
       await api.savePreferences(prefs);
-      // The number goes out by email (never shown on the site); the iMessage hello is a bonus.
-      // Both can be resent from the dashboard, so a failure here doesn't block onboarding.
       const [emailed] = await Promise.all([
         api.sendNumber().then(
           () => true,
@@ -73,6 +82,9 @@ function Onboarding() {
         ),
         api.startChat().catch(() => undefined),
       ]);
+      if (wantWallet) {
+        await api.createWallet();
+      }
       await queryClient.invalidateQueries({ queryKey: ["me"] });
       await navigate({ to: "/dashboard", search: { welcome: emailed ? "emailed" : "saved" } });
     } catch (err) {
@@ -113,12 +125,16 @@ function Onboarding() {
         }}
       >
         <Card>
-          <PreferencesFields
-            value={prefs}
-            onChange={setPrefs}
-            sections={[current.key]}
-            nameError={nameError}
-          />
+          {current.key === "wallet" ? (
+            <WalletChoice value={wantWallet} onChange={setWantWallet} />
+          ) : (
+            <PreferencesFields
+              value={prefs}
+              onChange={setPrefs}
+              sections={[current.key]}
+              nameError={nameError}
+            />
+          )}
         </Card>
         <FieldError id="onboarding-error">{error}</FieldError>
         <div className="mt-6 flex gap-3">
@@ -133,7 +149,15 @@ function Onboarding() {
             </button>
           )}
           <button type="submit" className={`${buttonPrimary} flex-1`} disabled={busy}>
-            {busy ? "Saving…" : last ? "Finish and email me the number" : "Continue"}
+            {busy
+              ? wantWallet
+                ? "Creating wallet…"
+                : "Saving…"
+              : last
+                ? wantWallet
+                  ? "Create wallet and email me the number"
+                  : "Finish and email me the number"
+                : "Continue"}
           </button>
         </div>
       </form>

@@ -1,3 +1,4 @@
+import { listEvidencePlans, deleteEvidencePlans } from "../evidence/history.js";
 import { randomBytes } from "node:crypto";
 import type { BackboardClient } from "../backboard/client.js";
 import type { MemoryService } from "../memory/service.js";
@@ -5,6 +6,7 @@ import type { StateStore } from "../store/state.js";
 import type { VoiceReplies } from "./store.js";
 import { createAuth, maskPhone } from "./auth.js";
 import { agentNumberEmail, codeEmail, type Mailer } from "./email.js";
+import { onboardHttpAuth } from "../payments/xrpl/onboarding.js";
 import { createWebApiServer } from "./server.js";
 import { createFileWebStore } from "./store.js";
 
@@ -22,6 +24,25 @@ export interface WebRuntimeOptions {
   mailer: Mailer;
   /** Send an iMessage to a phone number through Photon. */
   sendText(phone: string, text: string): Promise<void>;
+  /** Signup / DeepSpace: Photon sender → Testnet wallet. Address only; never a seed. */
+  enrollPhotonUser?(input: { photonSenderId: string; displayName?: string; provisionWallet?: boolean }): Promise<{
+    photonSenderId: string;
+    customerId: string;
+    customerName: string;
+    xrplAddress?: string;
+    created: boolean;
+  }>;
+  lookupPhotonUser?(photonSenderId: string): Promise<
+    | {
+        photonSenderId: string;
+        customerId: string;
+        customerName: string;
+        xrplAddress?: string;
+        createdAt: string;
+      }
+    | undefined
+  >;
+  deepspaceOnboardingSecret?: string;
   memory?: MemoryService;
   backboard?: BackboardClient;
   agentState: StateStore;
@@ -48,6 +69,7 @@ export function startWebRuntime(opts: WebRuntimeOptions) {
 
   const server = createWebApiServer({
     auth,
+    listEvidence: (phone) => listEvidencePlans(opts.agentState, phone),
     allowedOrigins: opts.allowedOrigins,
     async startChat(phone, name) {
       const hi = name ? `Hey ${name}!` : "Hey!";
@@ -56,6 +78,31 @@ export function startWebRuntime(opts: WebRuntimeOptions) {
         `${hi} It's ${opts.agentName}. Text me anytime: "what should we do tonight?", "how do we get there?", or "is this walk okay at midnight?". ` +
           `Voice memos work too. Add me to a group chat and mention @${opts.agentName.toLowerCase()} when you want me.`,
       );
+    },
+    enrollPhotonUser: opts.enrollPhotonUser,
+    lookupPhotonUser: opts.lookupPhotonUser,
+    enrollFromDeepSpace: async (header, body) => {
+      const denied = onboardHttpAuth(opts.deepspaceOnboardingSecret, header);
+      if (denied) return denied;
+      const photonSenderId = typeof body.photonSenderId === "string" ? body.photonSenderId : "";
+      if (!opts.enrollPhotonUser) return { error: "deepspace_onboarding_unconfigured" };
+      try {
+        return await opts.enrollPhotonUser({
+          photonSenderId,
+          displayName: typeof body.displayName === "string" ? body.displayName : undefined,
+          provisionWallet: body.provisionWallet,
+        });
+      } catch (err) {
+        const code = err && typeof err === "object" && "code" in err ? String((err as { code: string }).code) : "invalid_photon_sender";
+        return { error: code };
+      }
+    },
+    lookupFromDeepSpace: async (header, photonSenderId) => {
+      const denied = onboardHttpAuth(opts.deepspaceOnboardingSecret, header);
+      if (denied) return denied;
+      if (!opts.lookupPhotonUser) return { error: "deepspace_onboarding_unconfigured" };
+      const found = await opts.lookupPhotonUser(photonSenderId);
+      return found ?? { error: "not_found" };
     },
     async sendAgentNumber(email, name) {
       await opts.mailer.send(
@@ -83,6 +130,7 @@ export function startWebRuntime(opts: WebRuntimeOptions) {
     async deleteAllMemories(phone) {
       const assistantId = assistantFor(phone);
       if (assistantId && opts.backboard?.resetMemories) await opts.backboard.resetMemories(assistantId);
+      deleteEvidencePlans(opts.agentState, phone);
       opts.agentState.update((state) => {
         const profile = state.users[phone];
         if (profile) profile.recentMemoryTexts = [];

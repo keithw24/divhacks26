@@ -1,6 +1,8 @@
-import { attachment, Spectrum, type Message } from "spectrum-ts";
+import { attachment, Spectrum, type Message, type Space } from "spectrum-ts";
+import { saveEvidencePlan } from "./evidence/history.js";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { terminal } from "spectrum-ts/providers/terminal";
+import { ConversationInbox } from "./chat/inbox.js";
 import { handleInboundMessage } from "./agent/inbound.js";
 import { suggestNext } from "./agent/suggest.js";
 import { errorCategory } from "./agent/turn.js";
@@ -20,6 +22,7 @@ import { DASHBOARD_PATH, startXrplDashboardServer } from "./payments/xrpl/dashbo
 import { xrplPayments } from "./payments/xrpl/payments.js";
 import { createLiveRippleGuard } from "./payments/xrpl/runtime.js";
 import { CustomerWalletSettlement, parseCustomerSenders } from "./payments/xrpl/settlement.js";
+import { AccountOnboardingService, AccountOnboardingStore, ONBOARDING_ACCOUNTS_PATH } from "./payments/xrpl/onboarding.js";
 import { createReservationRuntime } from "./reservations/runtime.js";
 import { geocodeNyc } from "./geocode.js";
 import { createMerchantDirectory } from "./payments/merchants.js";
@@ -61,13 +64,20 @@ const transport = createTransportationServiceFromEnv({
 });
 const spaceSenders = new Map<string, (text: string) => Promise<unknown>>();
 const agentState = openAgentStateStore(config.agentStatePath);
-const xrpl = config.paymentsMode === "ripple_test" ? createLiveRippleGuard() : undefined;
+const onboardingStore = new AccountOnboardingStore(ONBOARDING_ACCOUNTS_PATH);
+const usesCustomerWallets = config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple";
+const xrpl = usesCustomerWallets || Boolean(config.deepspaceOnboardingSecret) ? createLiveRippleGuard() : undefined;
+const onboarding = new AccountOnboardingService(onboardingStore, xrpl?.guard.registry);
 const customerSenders = parseCustomerSenders(config.xrplCustomerSendersJson);
+const liveSenders = () => ({ ...customerSenders, ...onboardingStore.senderMap() });
 // Merchant payees must be real Testnet addresses whenever the provider submits to XRPL.
 const merchantPaymentMode =
   config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple" ? "ripple_test" : "mock";
 const payments = createPaymentRuntime({
-  settlement: xrpl ? new CustomerWalletSettlement(xrpl.guard.executor, customerSenders) : undefined,
+  settlement:
+    xrpl && usesCustomerWallets
+      ? new CustomerWalletSettlement(xrpl.guard.executor, liveSenders, () => onboardingStore.displayNames())
+      : undefined,
   mode: config.paymentsMode,
   maxUsd: config.paymentsMaxUsd,
   xrpPerUsd: config.paymentsXrpPerUsd,
@@ -296,11 +306,14 @@ if (xrpl) {
   console.info(
     `XRPL customer wallets: ${xrpl.guard.registry.listPublic().map((w) => `${w.customerName} ${w.xrplAddress}`).join(", ") || "none yet"}.`,
   );
-  const linked = Object.keys(customerSenders).length;
+  const linked = Object.keys(liveSenders()).length;
   if (linked === 0) {
-    console.warn("XRPL_CUSTOMER_SENDERS_JSON is empty. No Photon sender is linked to a customer wallet, so person payments will be refused.");
+    console.warn("No Photon sender is linked to a customer wallet (XRPL_CUSTOMER_SENDERS_JSON or DeepSpace onboarding). Person payments will be refused.");
   } else {
     console.info(`${linked} Photon sender(s) linked to XRPL Testnet customer wallets.`);
+  }
+  if (config.deepspaceOnboardingSecret) {
+    console.info("DeepSpace onboarding API is enabled at POST /api/deepspace/accounts (Bearer DEEPSPACE_ONBOARDING_SECRET).");
   }
   const depositWallet = reservations.payments?.senderAddress;
   if (depositWallet) {
@@ -374,6 +387,14 @@ const web =
         backboard: config.backboardApiKey ? createBackboardClient({ apiKey: config.backboardApiKey }) : undefined,
         agentState,
         handleElevenLabsWebhook: (body, signature) => reservations.orchestrator.handleWebhook(body, signature),
+        deepspaceOnboardingSecret: config.deepspaceOnboardingSecret || undefined,
+        enrollPhotonUser: (input) =>
+          onboarding.enroll({
+            photonSenderId: input.photonSenderId,
+            displayName: input.displayName,
+            provisionWallet: input.provisionWallet,
+          }),
+        lookupPhotonUser: async (photonSenderId) => onboarding.publicView(photonSenderId),
       });
 if (!web) {
   void reservations.listen(config.reservationWebhookPort).catch((error) => {
@@ -398,13 +419,8 @@ const claims = createMessageClaimer({
 });
 console.info(`agent instance ${INSTANCE_ID} (message claims: ${config.chatProvider === "imessage" && config.databaseUrl && config.messageClaims ? "database" : "this process only"})`);
 
-for await (const [space, message] of app.messages) {
-  if (message.direction !== "inbound" || message.sender?.kind === "agent") continue;
-  if (!(await claims.claim(message.id))) {
-    console.info(`inbound.skipped ${JSON.stringify({ reason: "already_claimed", instance: INSTANCE_ID })}`);
-    continue;
-  }
-  console.info(`inbound.claimed ${JSON.stringify({ instance: INSTANCE_ID })}`);
+async function processMessages(items: { space: Space; message: Message }[]) {
+  const { space, message } = items[items.length - 1]!;
 
   const isGroup =
     config.chatProvider === "terminal"
@@ -412,11 +428,16 @@ for await (const [space, message] of app.messages) {
       : (space as { type?: string }).type === "group";
   const who = message.sender?.id ?? "someone";
 
-  const text = await readMessage(space.id, who, message).catch((err) => {
-    console.error(`could not read message: ${errorCategory(err)}`);
-    return null;
-  });
-  if (text === null) continue;
+  const texts: string[] = [];
+  for (const item of items) {
+    const part = await readMessage(space.id, who, item.message).catch((err) => {
+      console.error(`could not read message: ${errorCategory(err)}`);
+      return null;
+    });
+    if (part !== null) texts.push(part);
+  }
+  if (!texts.length) return;
+  const text = texts.join("\n");
 
   const isVoice = message.content.type === "voice";
   if (message.content.type !== "text") {
@@ -433,6 +454,7 @@ for await (const [space, message] of app.messages) {
     {
       spaceId: space.id,
       messageId: message.id,
+      messageIds: items.map((item) => item.message.id),
       senderId: who,
       senderName: senderDisplayName(message.sender),
       text,
@@ -445,7 +467,7 @@ for await (const [space, message] of app.messages) {
       audioEvents,
     },
     {
-      reply: (replyText) => message.reply(replyText),
+      reply: (replyText) => space.send(replyText),
       send: (replyText) => space.send(replyText),
       react: (emoji) => message.react(emoji),
       responding: (fn) => space.responding(fn),
@@ -477,6 +499,7 @@ for await (const [space, message] of app.messages) {
       suggest: (input) =>
         suggestNext({
           ...input,
+          onEvidence: (plan) => saveEvidencePlan(agentState, who, plan),
           // The chart follows the text card; it is dropped if Gemini's restyle fails the read-back check.
           onSafetyReport: (report) => {
             if (config.chatProvider !== "imessage") return;
@@ -537,4 +560,28 @@ for await (const [space, message] of app.messages) {
   ).catch((err) => {
     console.error(`reply failed: ${errorCategory(err)}`);
   });
+}
+
+// Keep consuming arrivals while a turn is running so corrections can be collected.
+const inbox = new ConversationInbox<{ space: Space; message: Message }>({
+  delayMs: config.messageBatchDelayMs,
+  identify: ({ space, message }) => ({
+    spaceId: space.id,
+    messageId: message.id,
+    senderId: message.sender?.id ?? "someone",
+    mergeable: message.content.type === "text",
+  }),
+  process: processMessages,
+  onError: (error) => console.error(`inbound failed: ${errorCategory(error)}`),
+});
+for await (const [space, message] of app.messages) {
+  if (message.direction !== "inbound" || message.sender?.kind === "agent") continue;
+  if (!(await claims.claim(message.id))) {
+    console.info(`inbound.skipped ${JSON.stringify({ reason: "already_claimed", instance: INSTANCE_ID })}`);
+    continue;
+  }
+  console.info(`inbound.claimed ${JSON.stringify({ instance: INSTANCE_ID })}`);
+  const key = JSON.stringify([space.id, message.id]);
+  if (agentState.getState().handledMessageIds?.includes(key)) continue;
+  inbox.push({ space, message });
 }

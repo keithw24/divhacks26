@@ -1,3 +1,4 @@
+import type { EvidencePlan } from "../domain/evidence.js";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { MeetupPersistence, MeetupPlan, PersonLocation } from "../meetup/types.js";
@@ -28,6 +29,8 @@ export interface SpaceState {
 
 /** Stable human → Backboard assistant. Keyed by Photon sender id, never display name. */
 export interface UserProfile {
+  /** Bounded evidence audits for plans this person requested. */
+  evidencePlans?: EvidencePlan[];
   userId: string;
   photonIdentifier: string;
   displayName?: string;
@@ -44,6 +47,8 @@ export interface ThreadMapping {
 }
 
 export interface AgentState {
+  /** Recent inbound IDs claimed before model calls or delivery, including batched corrections. */
+  handledMessageIds?: string[];
   users: Record<string, UserProfile>;
   spaces: Record<string, SpaceState>;
   threads: Record<string, ThreadMapping>;
@@ -162,6 +167,9 @@ function readStateFile(filePath: string): AgentState {
     const parsed = JSON.parse(raw) as Partial<AgentState>;
     if (!parsed || typeof parsed !== "object") return emptyState();
     return {
+      handledMessageIds: Array.isArray(parsed.handledMessageIds)
+        ? parsed.handledMessageIds.filter((id): id is string => typeof id === "string").slice(-5000)
+        : [],
       users: parsed.users ?? {},
       spaces: parsed.spaces ?? {},
       threads: parsed.threads ?? {},

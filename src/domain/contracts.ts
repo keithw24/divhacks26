@@ -12,6 +12,7 @@ export interface Source {
   name: string;
   url?: string;
   updatedAt?: string;
+  updatedAtKind?: "provider" | "ingested";
 }
 
 export interface SkillResult<T> {

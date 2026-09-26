@@ -107,7 +107,7 @@ export async function findFood(input: FoodInput): Promise<SkillResult<FoodRecomm
         openNow: place.currentOpeningHours?.openNow,
         categories: [place.primaryTypeDisplayName?.text ?? "restaurant"],
         url: place.websiteUri || place.googleMapsUri,
-        source: { name: "Google Places", url: place.websiteUri || place.googleMapsUri },
+        source: { name: "Google Places", url: place.googleMapsUri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}&query_place_id=${encodeURIComponent(place.id)}` },
       }];
     });
     data.sort((a, b) => (Number(b.openNow) - Number(a.openNow)) || ((b.rating ?? 0) - (a.rating ?? 0)) || (a.distanceMeters - b.distanceMeters));
