@@ -1,0 +1,126 @@
+/** Client for the agent's website API (src/web/server.ts in the agent repo root). */
+
+export const API_URL =
+  (import.meta.env["VITE_AGENT_API_URL"] as string | undefined)?.replace(/\/$/, "") ??
+  "http://localhost:8788";
+
+export type Budget = "free" | "low" | "medium" | "high";
+export type VoiceReplies = "match" | "always" | "off";
+
+export interface Preferences {
+  name: string;
+  homeNeighborhood?: string;
+  dietary: string[];
+  budget?: Budget;
+  doesntDrink: boolean;
+  voiceReplies: VoiceReplies;
+}
+
+export interface Me {
+  /** Masked, e.g. "+1 •••-•••-4515". */
+  phone: string;
+  onboarded: boolean;
+  preferences: Preferences | null;
+}
+
+export interface Memory {
+  id: string;
+  text: string;
+  createdAt?: string;
+}
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(code);
+  }
+}
+
+const TOKEN_KEY = "murmur.session";
+
+/** Session token; storage can be unavailable (private mode), so every access is guarded. */
+export const session = {
+  get(): string | null {
+    try {
+      return localStorage.getItem(TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  set(token: string) {
+    try {
+      localStorage.setItem(TOKEN_KEY, token);
+    } catch {
+      /* stays signed in for this page only */
+    }
+  },
+  clear() {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* nothing to clear */
+    }
+  },
+};
+
+async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const token = session.get();
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method,
+      headers: {
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body === undefined ? null : JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(0, "offline");
+  }
+  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) {
+    if (res.status === 401) session.clear();
+    throw new ApiError(res.status, data.error ?? "server_error");
+  }
+  return data as T;
+}
+
+export const api = {
+  stats: () => call<{ spotsTaken: number; spotsTotal: number }>("GET", "/api/stats"),
+  startSignIn: (phone: string) => call<{ ok: true }>("POST", "/api/auth/start", { phone }),
+  verify: (phone: string, code: string) =>
+    call<{ token: string; user: Me }>("POST", "/api/auth/verify", { phone, code }),
+  joinWaitlist: (phone: string, name?: string) =>
+    call<{ position: number }>("POST", "/api/waitlist", { phone, name }),
+  signOut: () => call<{ ok: true }>("POST", "/api/auth/signout"),
+  me: () => call<Me>("GET", "/api/me"),
+  savePreferences: (prefs: Preferences) => call<{ ok: true }>("PUT", "/api/me/preferences", prefs),
+  startChat: () => call<{ ok: true }>("POST", "/api/me/start-chat"),
+  memories: () => call<{ memories: Memory[] }>("GET", "/api/me/memories"),
+  deleteMemory: (id: string) =>
+    call<{ ok: true }>("DELETE", `/api/me/memories/${encodeURIComponent(id)}`),
+  deleteAccount: () => call<{ ok: true }>("DELETE", "/api/me"),
+};
+
+const MESSAGES: Record<string, string> = {
+  offline: "Can't reach the agent right now. Check your connection and try again.",
+  invalid_phone: "Enter a 10-digit US phone number.",
+  full: "All 100 spots are taken. Join the waitlist and we'll text you when one opens.",
+  rate_limited: "Too many requests. Wait a minute and try again.",
+  send_failed: "We couldn't send the iMessage. Make sure the number uses iMessage, then try again.",
+  no_code: "Request a code first.",
+  expired: "That code expired. Send a new one.",
+  wrong_code: "That code isn't right. Check the text and try again.",
+  too_many_attempts: "Too many wrong tries. Send a new code.",
+  invalid_preferences: "Add your first name to continue.",
+  memory_unavailable: "Memory is unavailable right now. Try again shortly.",
+  unauthorized: "Your session ended. Sign in again.",
+};
+
+export function errorMessage(err: unknown): string {
+  const code = err instanceof ApiError ? err.code : "server_error";
+  return MESSAGES[code] ?? "Something went wrong. Try again.";
+}
