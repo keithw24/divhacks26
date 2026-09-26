@@ -14,7 +14,7 @@ import {
 import { api, errorMessage, session, type Preferences } from "@/lib/api";
 
 export const Route = createFileRoute("/settings")({
-  head: () => ({ meta: [{ title: "Settings — Murmur" }] }),
+  head: () => ({ meta: [{ title: "Settings — plansaroundus" }] }),
   component: Settings,
 });
 

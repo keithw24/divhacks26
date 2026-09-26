@@ -104,7 +104,7 @@ export const config = {
   webAuthSecret: env("WEB_AUTH_SECRET"),
   webStatePath: env("WEB_STATE_PATH", "data/web-users.json"),
   agentNumber: env("AGENT_NUMBER", "+14155951440"),
-  appName: env("APP_NAME", "Murmur"),
+  appName: env("APP_NAME", "plansaroundus"),
   // Outgoing email for sign-in codes and the agent-number email (any SMTP provider).
   smtpHost: env("SMTP_HOST"),
   smtpPort: positiveNumber(env("SMTP_PORT", "465"), 465),

@@ -9,15 +9,15 @@ import { api } from "@/lib/api";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Murmur — the @agent that lives in your iMessage group chat" },
+      { title: "plansaroundus — the @agent that lives in your iMessage group chat" },
       {
         name: "description",
         content:
-          "Murmur is an action layer for iMessage. Mention @agent and it uses group context and personal memory to plan, call restaurants, and send confirmed payments — without leaving the chat.",
+          "plansaroundus is an action layer for iMessage. Mention @agent and it uses group context and personal memory to plan, call restaurants, and send confirmed payments — without leaving the chat.",
       },
       {
         property: "og:title",
-        content: "Murmur — the @agent that lives in your iMessage group chat",
+        content: "plansaroundus — the @agent that lives in your iMessage group chat",
       },
       {
         property: "og:description",
@@ -120,7 +120,7 @@ function Index() {
           <div className="size-7 rounded-lg bg-foreground text-primary font-bold grid place-items-center text-sm">
             @
           </div>
-          <span className="font-bold tracking-tight text-lg">Murmur</span>
+          <span className="font-bold tracking-tight text-lg">plansaroundus</span>
         </div>
         <div className="hidden md:flex items-center gap-6 text-sm font-medium">
           <a className="hover:text-primary" href="#how">
@@ -159,9 +159,9 @@ function Index() {
             Your group chat can actually get things done.
           </h1>
           <p className="max-w-[58ch] mx-auto mt-6 text-lg md:text-xl text-pretty text-muted-foreground animate-rise [animation-delay:160ms]">
-            Murmur is an action layer for iMessage. It understands the conversation, remembers the
-            people in it, and turns what the group wants into real actions — calls, payments, plans
-            — right in the same thread. Not another chatbot to open.
+            plansaroundus is an action layer for iMessage. It understands the conversation,
+            remembers the people in it, and turns what the group wants into real actions — calls,
+            payments, plans — right in the same thread. Not another chatbot to open.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3 animate-rise [animation-delay:240ms]">
             <StartLink className="bg-foreground text-background px-6 py-3 rounded-full font-bold outline-card shadow-[var(--shadow-hard-primary)]">
@@ -833,7 +833,7 @@ function Index() {
         </StartLink>
         <SpotsMeter className="mt-6" />
         <p className="mt-8 text-xs uppercase tracking-[0.15em] opacity-60">
-          Murmur · conversations shown are demo examples, not real bookings
+          plansaroundus · conversations shown are demo examples, not real bookings
         </p>
       </section>
     </div>

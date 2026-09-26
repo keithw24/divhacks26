@@ -11,7 +11,7 @@ import {
 import { api, errorMessage } from "@/lib/api";
 
 export const Route = createFileRoute("/dashboard")({
-  head: () => ({ meta: [{ title: "Your @agent — Murmur" }] }),
+  head: () => ({ meta: [{ title: "Your @agent — plansaroundus" }] }),
   validateSearch: (search: Record<string, unknown>): { welcome?: "emailed" | "saved" } =>
     search["welcome"] === "emailed" || search["welcome"] === "saved"
       ? { welcome: search["welcome"] }
@@ -129,7 +129,7 @@ function Dashboard() {
         <ol className="mt-3 space-y-2">
           {[
             "Open the contact card from the email and save it, so @agent shows up by name.",
-            "Open your group chat → tap the group name → Add Member → Murmur.",
+            "Open your group chat → tap the group name → Add Member → plansaroundus.",
             "Mention it when you need it: “@agent where should we eat?”. It reads the chat for context but only replies when mentioned.",
           ].map((step, i) => (
             <li key={step} className="flex gap-3 items-start bg-card outline-card rounded-2xl p-4">

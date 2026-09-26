@@ -9,7 +9,7 @@ export function Logo() {
       <div className="size-7 rounded-lg bg-foreground text-primary font-bold grid place-items-center text-sm">
         @
       </div>
-      <span className="font-bold tracking-tight text-lg">Murmur</span>
+      <span className="font-bold tracking-tight text-lg">plansaroundus</span>
     </Link>
   );
 }

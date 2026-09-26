@@ -14,7 +14,7 @@ import { ApiError, api, errorMessage, session } from "@/lib/api";
 import { formatPhoneInput } from "@/lib/format";
 
 export const Route = createFileRoute("/signin")({
-  head: () => ({ meta: [{ title: "Sign in — Murmur" }] }),
+  head: () => ({ meta: [{ title: "Sign in — plansaroundus" }] }),
   component: SignIn,
 });
 

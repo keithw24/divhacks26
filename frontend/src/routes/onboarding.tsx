@@ -14,7 +14,7 @@ import {
 import { api, errorMessage, type Preferences } from "@/lib/api";
 
 export const Route = createFileRoute("/onboarding")({
-  head: () => ({ meta: [{ title: "Set up @agent — Murmur" }] }),
+  head: () => ({ meta: [{ title: "Set up @agent — plansaroundus" }] }),
   component: Onboarding,
 });
 
