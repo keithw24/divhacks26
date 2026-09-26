@@ -16,6 +16,8 @@ import { extractMentionedPlaces, extractTransportIntent } from "./intent.js";
 import { displayName, hasCoordinates, lookupGazetteer } from "./locations.js";
 import { logDurationSource, logTransportError } from "./log.js";
 import { collectRoutes } from "./routing.js";
+import { prefersSaferSlowerRoute } from "../formatReport.js";
+import type { BlockSafetyReport } from "../safety.js";
 import { applyRoutePreferences, type RoutePreferences } from "./preferences.js";
 import {
   UNGROUNDED_FALLBACK,
@@ -52,6 +54,12 @@ export interface TransportationDependencies {
   resolver?: PlaceResolver;
   gemini?: GeminiMapsClient;
   routing?: RoutingProvider;
+  safetyLookup?: (input: {
+    latitude: number;
+    longitude: number;
+    label: string;
+    when: string;
+  }) => Promise<BlockSafetyReport | null>;
 }
 
 interface RoleResolution {
@@ -66,12 +74,14 @@ export class TransportationService {
   private readonly resolver?: PlaceResolver;
   private readonly gemini?: GeminiMapsClient;
   private readonly routing?: RoutingProvider;
+  private readonly safetyLookup?: TransportationDependencies["safetyLookup"];
 
   constructor(deps: TransportationDependencies = {}) {
     this.memory = deps.memory ?? new ConversationMemory();
     this.resolver = deps.resolver;
     this.gemini = deps.gemini;
     this.routing = deps.routing;
+    this.safetyLookup = deps.safetyLookup;
   }
 
   hasPlaceContext(spaceId: string): boolean {
@@ -124,14 +134,23 @@ export class TransportationService {
       return this.handleNearby(spaceId, text, ctx.origin);
     }
 
-    const destinationQuery = intent.destinationQuery ?? (ctx.destination ? undefined : ctx.pendingDestination);
+    const destinationQuery = homeDestinationQuery(
+      intent.destinationQuery ?? (ctx.destination ? undefined : ctx.pendingDestination),
+      request.preferences?.defaultOrigin,
+    );
     const destination = await this.resolveRole(spaceId, {
       query: destinationQuery,
       useContext: intent.destinationFromThere || !intent.destinationQuery,
       contextual: ctx.destination,
     });
 
-    const destinationKnown = destination.status === "resolved" && Boolean(destination.place);
+    if (isHomePlace(intent.destinationQuery) && !request.preferences?.defaultOrigin && destination.status !== "resolved") {
+      return this.done({
+        handled: true,
+        acknowledgement: "👀",
+        reply: "Where’s home? A neighborhood or nearest intersection works.",
+      });
+    }
     const destinationStep = chooseTransportStep({
       destinationAmbiguous: destination.status === "ambiguous",
       originAmbiguous: false,
@@ -204,18 +223,24 @@ export class TransportationService {
     if (request.preferences?.preferTransit && !request.preferences.explicitRequest && !modes.includes("TRANSIT")) {
       modes = ["TRANSIT", ...modes];
     }
+    const safer = await this.saferSlowerIfNeeded(origin.place, destination.place, request.text, modes);
+    modes = safer.modes;
+    const routePrefs: RoutePreferences = {
+      ...request.preferences,
+      preferSaferSlower: safer.preferSaferSlower || request.preferences?.preferSaferSlower,
+    };
     this.memory.setMode(spaceId, modes[0]);
     const collected = await collectRoutes(this.routing, origin.place, destination.place, modes);
-    const adjusted = applyRoutePreferences(collected.routes, request.preferences);
+    const adjusted = applyRoutePreferences(collected.routes, routePrefs);
     let routes = adjusted.routes;
-    if (intent.wantsFastest) {
+    if (intent.wantsFastest && !routePrefs.preferSaferSlower) {
       routes = [...routes].sort(
         (a, b) =>
           (a.durationSeconds ?? Number.MAX_SAFE_INTEGER) - (b.durationSeconds ?? Number.MAX_SAFE_INTEGER),
       );
     }
     const preferenceNote = adjusted.note;
-    const preferenceNotes = preferenceLines(request.preferences);
+    const preferenceNotes = preferenceLines(routePrefs);
     const conversation = ctx.recentMessages.slice(-6).map((turn) => turn.text);
     const hasGoogleDuration = routes.some((route) => typeof route.durationSeconds === "number");
     let durationSource: DurationSource | null = hasGoogleDuration ? "google_routes" : null;
@@ -251,7 +276,8 @@ export class TransportationService {
       partySize: intent.partySize ?? ctx.partySize,
       sources: destination.sources,
       extraNote: preferenceNote,
-      preferFastest: intent.wantsFastest,
+      preferFastest: intent.wantsFastest && !routePrefs.preferSaferSlower,
+      preferSaferSlower: routePrefs.preferSaferSlower,
     });
     const extraMinutes =
       durationSource === "gemini_estimate" && estimate
@@ -339,6 +365,45 @@ export class TransportationService {
       acknowledgement: verifiedRoute ? "👍" : "👀",
       reply: verifiedRoute ? composed : USER_FALLBACK,
     });
+  }
+
+  private async saferSlowerIfNeeded(
+    origin: PlaceLocation,
+    destination: PlaceLocation,
+    when: string,
+    modes: TravelMode[],
+  ): Promise<{ modes: TravelMode[]; preferSaferSlower: boolean }> {
+    if (!this.safetyLookup || !hasCoordinates(origin)) {
+      return { modes, preferSaferSlower: false };
+    }
+    try {
+      const [here, home] = await Promise.all([
+        this.safetyLookup({
+          latitude: origin.latitude!,
+          longitude: origin.longitude!,
+          label: displayName(origin),
+          when,
+        }),
+        hasCoordinates(destination)
+          ? this.safetyLookup({
+              latitude: destination.latitude!,
+              longitude: destination.longitude!,
+              label: displayName(destination),
+              when,
+            })
+          : Promise.resolve(null),
+      ]);
+      const tradeTime = prefersSaferSlowerRoute(here) || prefersSaferSlowerRoute(home);
+      if (!tradeTime) return { modes, preferSaferSlower: false };
+      const next = modes.includes("TRANSIT") ? modes : ["TRANSIT", ...modes];
+      return {
+        modes: ["TRANSIT", ...next.filter((mode) => mode !== "TRANSIT")],
+        preferSaferSlower: true,
+      };
+    } catch (error) {
+      logTransportError("safetyLookup", error);
+      return { modes, preferSaferSlower: false };
+    }
   }
 
   private async handleNearby(
@@ -476,6 +541,16 @@ function modesFor(
   if (kind === "walk-check") return ["WALK", "TRANSIT"];
   if (modes.length > 0) return compareModes && !modes.includes("TRANSIT") ? [...modes, "TRANSIT"] : modes;
   return ["WALK", "TRANSIT"];
+}
+
+function isHomePlace(query?: string): boolean {
+  return Boolean(query && /^(my\s+)?(home|place|apartment)$/i.test(query.trim()));
+}
+
+function homeDestinationQuery(query: string | undefined, home?: string): string | undefined {
+  if (!query) return undefined;
+  if (isHomePlace(query)) return home;
+  return query;
 }
 
 function preferenceLines(prefs?: RoutePreferences): string[] {

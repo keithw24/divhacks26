@@ -99,7 +99,13 @@ function optionLine(route: RouteResult): string {
   return duration ? `${modeLabel(route.mode)} is about ${duration}.` : `${modeLabel(route.mode)} is available.`;
 }
 
-function recommendation(routes: RouteResult[]): string | undefined {
+function recommendation(routes: RouteResult[], preferSaferSlower?: boolean): string | undefined {
+  if (preferSaferSlower) {
+    const transit = routes.find((route) => route.mode === "TRANSIT");
+    if (transit) {
+      return "I’d take this slightly longer transit option rather than walking this hour.";
+    }
+  }
   const walk = routes.find((route) => route.mode === "WALK" && route.durationSeconds !== undefined);
   const transit = routes.find((route) => route.mode === "TRANSIT" && route.durationSeconds !== undefined);
   if (walk && transit && walk.durationSeconds !== undefined && transit.durationSeconds !== undefined) {
@@ -304,6 +310,7 @@ export function formatRouteReply(input: {
   sources?: MapsSource[];
   extraNote?: string;
   preferFastest?: boolean;
+  preferSaferSlower?: boolean;
 }): string {
   const lines: string[] = [];
   const destOutside =
@@ -324,7 +331,7 @@ export function formatRouteReply(input: {
     for (const route of options) {
       lines.push(optionLine(route));
     }
-    const rec = input.preferFastest ? undefined : recommendation(options);
+    const rec = input.preferFastest ? undefined : recommendation(options, input.preferSaferSlower);
     if (rec) lines.push(rec);
   }
 
@@ -350,6 +357,7 @@ export function composeDirectionsReply(input: {
   sources?: MapsSource[];
   extraNote?: string;
   preferFastest?: boolean;
+  preferSaferSlower?: boolean;
 }): string {
   const hasGoogleDuration = input.routes.some((route) => typeof route.durationSeconds === "number");
   if (hasGoogleDuration) return formatRouteReply(input);

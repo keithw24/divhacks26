@@ -10,6 +10,13 @@ export function safetyBand(ratio: number | null | undefined): SafetyBand | null 
   return "elevated";
 }
 
+/** Prefer a slower transit route instead of walking when this hour/area is not typical NYC. */
+export function prefersSaferSlowerRoute(report: BlockSafetyReport | null | undefined): boolean {
+  if (!report?.baselines) return false;
+  const band = safetyBand(report.baselines.hourVsNyc ?? report.baselines.areaVsNyc);
+  return band === "slightly elevated" || band === "elevated";
+}
+
 /** @deprecated use safetyBand */
 export function activityBand(ratio: number | null | undefined): SafetyBand | null {
   return safetyBand(ratio);

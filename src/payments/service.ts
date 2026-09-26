@@ -173,6 +173,7 @@ export class PaymentService {
           amountUsd: claimed.amountUsd,
           memo: claimed.memo ?? undefined,
           idempotencyKey: claimed.idempotencyKey,
+          recipientName: claimed.recipientName,
         }),
         this.timeoutMs,
       );
@@ -200,6 +201,8 @@ export class PaymentService {
           amountUsd: claimed.amountUsd,
           memo: claimed.memo,
           transactionId: result.transactionId,
+          submittedAsset: result.submittedAsset,
+          nessiePurchaseId: result.nessiePurchaseId,
         }),
       );
     }
@@ -209,6 +212,7 @@ export class PaymentService {
       paymentId: claimed.id,
       spaceId: claimed.photonSpaceId,
       status: result.status || "unknown",
+      reason: result.error,
     });
     return this.finish(input, failureText(claimed.amountUsd));
   }
@@ -317,7 +321,8 @@ function progressText(payment: PaymentRecord): string {
 }
 
 function isConfirmed(result: PaymentResult): result is PaymentResult & { transactionId: string } {
-  return result.success === true && result.status === "tesSUCCESS" && typeof result.transactionId === "string" && result.transactionId.length > 0;
+  const statusOk = result.status === "tesSUCCESS" || result.status === "completed";
+  return result.success === true && statusOk && typeof result.transactionId === "string" && result.transactionId.length > 0;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

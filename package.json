@@ -17,6 +17,7 @@
     "test:backboard-live": "tsx test/live/backboard-live.ts",
     "test:photon-memory-live": "tsx test/live/photon-memory-live.ts",
     "test:ripple-live": "tsx test/live/ripple-live.ts",
+    "payments:fund-testnet": "tsx scripts/fund-xrpl-testnet.ts",
     "transport:demo": "tsx src/transport/demo.ts",
     "demo:reservation": "tsx src/reservations/demo.ts",
     "transport:gemini-live": "tsx src/transport/gemini-live.ts"

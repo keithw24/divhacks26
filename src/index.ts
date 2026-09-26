@@ -59,6 +59,10 @@ const payments = createPaymentRuntime({
   geminiApiKey: config.geminiApiKey,
   geminiModel: config.geminiModel,
   stateStore: agentState,
+  nessieApiKey: config.nessieApiKey,
+  nessieBaseUrl: config.nessieBaseUrl,
+  nessieCustomerId: config.nessieCustomerId,
+  nessieAccountId: config.nessieAccountId,
 });
 const memory = config.backboardApiKey
   ? createBackboardMemoryService({
@@ -158,13 +162,21 @@ console.info(
     ? "Reservations: live ElevenLabs outbound calls are enabled."
     : "Reservations: mock mode (no real phone calls).",
 );
-if (config.paymentsMode === "ripple_test") {
+if (config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple") {
   console.info("Payments: XRPL Testnet. Dollar amounts are converted to test XRP. No real money moves.");
   if (!config.xrplTestnetSeed) {
-    console.warn("PAYMENTS_MODE=ripple_test but XRPL_TESTNET_SEED is missing. Confirmed payments will fail closed.");
+    console.warn("PAYMENTS_MODE includes ripple_test but XRPL_TESTNET_SEED is missing. Confirmed ledger payments will fail closed.");
   }
-} else {
-  console.info("Payments: mock mode (no Ripple transaction is submitted).");
+}
+if (config.paymentsMode === "nessie" || config.paymentsMode === "nessie_ripple") {
+  console.info(
+    config.nessieApiKey
+      ? "Payments: Nessie mock bank (Capital One hackathon API). No real money moves."
+      : "PAYMENTS_MODE includes Nessie but NESSIE_API_KEY is missing. Confirmed Nessie payments will fail closed.",
+  );
+}
+if (config.paymentsMode === "mock") {
+  console.info("Payments: mock mode (no Nessie or Ripple transaction is submitted).");
 }
 void reservations.listen(config.reservationWebhookPort).catch((error) => {
   console.error(`reservation webhook failed to listen: ${errorCategory(error)}`);

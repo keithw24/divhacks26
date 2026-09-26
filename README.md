@@ -497,11 +497,17 @@ Chat amounts are US dollars. XRPL Testnet does not settle bank dollars. In `ripp
 
 `mock` (the default) runs the same pending and confirmation flow and returns a fake transaction id. It does not open a socket.
 
+`nessie` records a completed **purchase** on Capital One's Nessie hackathon API (fake USD, fake merchants). That is not a real bank debit. `nessie_ripple` writes that Nessie purchase first, then submits the same dollar amount as test XRP on XRPL Testnet (peg `PAYMENTS_XRP_PER_USD`). The XRPL memo includes `nessie:<purchaseId>` so the two records match. Fund a Testnet sender with `npm run payments:fund-testnet`.
+
 ### Environment
 
 | Variable | Default | Used for |
 | --- | --- | --- |
-| `PAYMENTS_MODE` | `mock` | `mock` or `ripple_test`. Anything else stays on mock |
+| `PAYMENTS_MODE` | `mock` | `mock`, `nessie`, `ripple_test`, or `nessie_ripple` |
+| `NESSIE_API_KEY` | | Capital One Nessie hackathon key. Never commit it |
+| `NESSIE_BASE_URL` | `http://api.nessieisreal.com` | Nessie host |
+| `NESSIE_CUSTOMER_ID` | | Optional existing Nessie customer |
+| `NESSIE_ACCOUNT_ID` | | Optional existing Nessie checking account |
 | `PAYMENTS_MAX_USD` | `500` | Reject larger requests before confirmation |
 | `PAYMENTS_XRP_PER_USD` | `1` | Demo peg used only in `ripple_test` |
 | `PAYMENTS_TIMEOUT_MS` | `20000` | Give up without claiming success |

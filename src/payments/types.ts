@@ -40,6 +40,7 @@ export interface PaymentSendInput {
   amountUsd: number;
   memo?: string;
   idempotencyKey: string;
+  recipientName?: string;
 }
 
 export interface PaymentResult {
@@ -50,6 +51,8 @@ export interface PaymentResult {
   submittedAsset?: string;
   submittedAmount?: string;
   submittedDrops?: string;
+  balanceUsd?: number;
+  nessiePurchaseId?: string;
 }
 
 /**

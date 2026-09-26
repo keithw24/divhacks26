@@ -1,5 +1,5 @@
 import type { TransportIntent, TravelMode } from "./types.js";
-import { wantsSafetySketch } from "../safetyIntent.js";
+import { asksDirectionsHome, wantsSafetySketch } from "../safetyIntent.js";
 
 const NUMBER_WORDS: Record<string, number> = {
   one: 1,
@@ -94,7 +94,8 @@ export function extractTransportIntent(text: string): TransportIntent {
   const raw = collapse(text);
   const lower = raw.toLowerCase();
 
-  if (wantsSafetySketch(raw)) {
+  const homeTrip = asksDirectionsHome(raw);
+  if (wantsSafetySketch(raw) && !homeTrip) {
     return {
       isTransport: false,
       kind: undefined,
@@ -143,6 +144,7 @@ export function extractTransportIntent(text: string): TransportIntent {
   }
 
   if (!destinationQuery) destinationQuery = trailingDestination(raw);
+  if (!destinationQuery && homeTrip) destinationQuery = "home";
 
   const mentionsRide = /\b(?:uber|lyft|taxi|cab)\b/i.test(raw);
   if (mentionsRide && /\bhow much\b/i.test(raw) && destinationQuery) {
@@ -162,6 +164,7 @@ export function extractTransportIntent(text: string): TransportIntent {
   const happening = /\bwhat'?s happening around me\b/i.test(lower);
   const walkCheck = /\b(can i walk|should i walk|walk instead|walk there)\b/i.test(lower);
   const directions =
+    homeTrip ||
     /\b(how (do|should|can|would) (i|we|the)\b|\bget (there|to|from)\b|\b(easiest|best|fastest|good) way\b|\bfind me a (good )?way\b|\bdirections\b|\btake (me|us) to\b|\bhow should .{0,24}get\b)/i.test(
       raw,
     ) || Boolean(fromTo || toFrom);
