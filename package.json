@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "iMessage agent for NYC (Photon + Gemini + Tiger crime sketch)",
+  "description": "Around Me iMessage agent for NYC using Photon, Gemini, Tiger Data, and Google Maps",
   "engines": {
     "node": ">=20"
   },

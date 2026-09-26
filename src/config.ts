@@ -21,6 +21,9 @@ export const config = {
 
   timezone: env("TIMEZONE", "America/New_York"),
   databaseUrl: env("DATABASE_URL"),
+  tavilyApiKey: env("TAVILY_API_KEY"),
+  parksEventsDataset: env("PARKS_EVENTS_DATASET", "w3wp-dpdi"),
+  permittedEventsDataset: env("PERMITTED_EVENTS_DATASET", "tvpp-9vvx"),
 };
 
 export function loadConfig() {

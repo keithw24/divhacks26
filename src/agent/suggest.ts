@@ -12,6 +12,7 @@ function gemini() {
   if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is not set (see .env.example)");
   return getGeminiClient(config.geminiApiKey);
 }
+import { orchestrate } from "./orchestrate.js";
 
 export interface SuggestInput {
   isGroup: boolean;
@@ -127,8 +128,11 @@ async function generateWithGemini(input: SuggestInput, citySketch: string | unde
   });
 }
 
-/** Ask Gemini what the person/group should do next, grounded in Google Maps. */
-export async function suggestNext(input: SuggestInput): Promise<string> {
+/**
+ * Single-prompt Gemini suggestion (with the Tiger city sketch and a model fallback chain).
+ * Used when the skill pipeline has nothing verified to offer, e.g. no Places key or no events loaded.
+ */
+export async function suggestWithGemini(input: SuggestInput): Promise<string> {
   const citySketch = await citySketchFor(input).catch((err) => {
     console.error(`tiger sketch failed: ${err instanceof Error ? err.name : "Error"}`);
     return undefined;
@@ -161,4 +165,18 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
   }
 
   return fallbackReply(citySketch);
+}
+
+/**
+ * Route one chat turn through the shared intent parser and factual skills (safety, food, events, route).
+ * If no skill returns anything usable, fall back to the single-prompt Gemini suggestion.
+ */
+export async function suggestNext(input: SuggestInput): Promise<string> {
+  return orchestrate({
+    question: input.question,
+    transcript: input.transcript,
+    location: input.location,
+    now: input.now,
+    fallback: () => suggestWithGemini(input),
+  });
 }
