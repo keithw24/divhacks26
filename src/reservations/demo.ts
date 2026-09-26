@@ -69,7 +69,7 @@ async function run(): Promise<void> {
   if (response.status !== 200 || reservation.status !== "BOOKED") fail("Webhook did not book the reservation");
   console.log("[Webhook] BOOKED");
   console.log(`[Photon] Sent result to space ${spaceId}`);
-  if (!notes.some((text) => text.startsWith("Booked!"))) fail("Photon did not receive the booking");
+  if (!notes.some((text) => text.startsWith("Booked"))) fail("Photon did not receive the booking");
   orchestrator.dispose();
 }
 

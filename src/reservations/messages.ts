@@ -1,5 +1,5 @@
 import { weekdayNameFromIso } from "./clock.js";
-import { formatBetween, formatClockTime, formatTimeRange, shortTime } from "./constraints.js";
+import { formatClockTime, formatTimeRange, shortTime } from "./constraints.js";
 import type { ReservationRequest, ReservationResult } from "./types.js";
 
 export function collectionPrompt(reservation: ReservationRequest): { kind: ReservationRequest["pendingQuestion"]; text: string } | { kind: "ready" } {
@@ -74,25 +74,19 @@ export function resultText(reservation: ReservationRequest, result: ReservationR
     const name = result.confirmationName ?? reservation.customer?.name;
     const who = name ? ` under ${name}` : "";
     const number = result.confirmationNumber ? ` Confirmation ${result.confirmationNumber}.` : "";
-    return `Booked! ${reservation.restaurant.name} confirmed ${party} people ${day} at ${when}${who}.${number}`;
+    return `Booked — ${reservation.restaurant.name} for ${party} ${day} at ${when}${who}.${number}`;
   }
   if (result.outcome === "UNAVAILABLE") {
-    const flexibility = reservation.flexibility;
-    if (flexibility?.alternativeTimesAllowed && flexibility.earliestTime && flexibility.latestTime && reservation.requestedDate) {
-      return `They don't have anything between ${formatBetween(flexibility.earliestTime, flexibility.latestTime)} ${weekdayNameFromIso(reservation.requestedDate)}.`;
-    }
-    if (reservation.requestedTime && reservation.requestedDate) {
-      return `They don't have a table at ${formatClockTime(reservation.requestedTime)} ${weekdayNameFromIso(reservation.requestedDate)}.`;
-    }
-    return "They don't have a table in the window you allowed.";
+    return `${reservation.restaurant.name} doesn't have availability in the time range you gave me.`;
   }
   if (result.outcome === "NEEDS_USER_INPUT") {
-    if (result.offeredTime && reservation.flexibility?.earliestTime && reservation.flexibility.latestTime) {
-      const range = formatTimeRange(reservation.flexibility.earliestTime, reservation.flexibility.latestTime);
-      return `They can't do your ${range} window, but they offered ${formatClockTime(result.offeredTime)}. Want me to take it?`;
+    if (result.offeredTime) {
+      const preferred = reservation.requestedTime ? formatClockTime(reservation.requestedTime) : "that time";
+      return `${reservation.restaurant.name} couldn't do ${preferred}. They offered ${formatClockTime(result.offeredTime)} instead. Want me to take it?`;
     }
     if (result.questionForUser) return result.questionForUser;
     return "They asked for something I don't have. What should I tell them?";
   }
-  return "I couldn't reach them.";
+  const name = reservation.restaurant.name || "them";
+  return `I couldn't reach ${name}. Want me to try again?`;
 }

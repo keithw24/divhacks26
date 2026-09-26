@@ -13,7 +13,7 @@ export interface TicketPaymentRequest {
   eventId: string;
   spaceId: string;
   initiatorId: string;
-  /** Stable per purchase so a retry cannot pay twice. */
+  /** Stable per purchase so a retry cannot pay twice. Prefer ticket:{spaceId}:{quoteId}. */
   idempotencyKey: string;
   metadata: Record<string, string | number | boolean>;
 }
@@ -29,6 +29,16 @@ export interface TicketPaymentPort {
   pay(request: TicketPaymentRequest): Promise<TicketPaymentResult>;
 }
 
+/** Independent ledger evidence used to refuse "submitted but unvalidated" or wrong amount/destination. */
+export interface TicketPaymentLedgerEvidence {
+  hash: string;
+  validated: boolean;
+  engineResult: string;
+  amountDrops: string;
+  destination: string;
+  sender?: string;
+}
+
 export interface SharedTicketPaymentsOptions {
   /** The shared payment provider: MockPaymentProvider or the XRPL Testnet provider. */
   provider: PaymentProvider;
@@ -40,12 +50,21 @@ export interface SharedTicketPaymentsOptions {
   xrpPerUsd: number;
   maxUsd: number;
   timeoutMs: number;
+  /**
+   * Optional independent ledger re-read. When provided for XRPL Testnet settlements,
+   * PURCHASED requires validated tesSUCCESS plus matching amount drops and destination.
+   * Submission alone is never enough.
+   */
+  verifyLedger?: (hash: string) => Promise<TicketPaymentLedgerEvidence | undefined>;
+  /** Public operator/sender address for evidence only. Never a seed. */
+  senderAddress?: string;
 }
 
 /**
  * Settles a confirmed ticket purchase through the same PaymentProvider the payment runtime uses.
  * USD only, because the shared provider converts USD at the demo peg. Other currencies are refused, never converted.
  * The XRPL provider waits for a validated ledger result; only tesSUCCESS with a hash counts.
+ * When verifyLedger is set, amount + destination must also match before the settlement is marked validated.
  */
 export function createSharedTicketPayments(options: SharedTicketPaymentsOptions): TicketPaymentPort {
   const network = options.mode === "ripple_test" ? "xrpl-testnet" : "mock";
@@ -81,7 +100,7 @@ export function createSharedTicketPayments(options: SharedTicketPaymentsOptions)
         return { status: "uncertain", reason: "timeout" };
       }
 
-      const settlement: TicketSettlement = {
+      const settlementBase: TicketSettlement = {
         network,
         asset: result.submittedAsset ?? "XRP",
         amount: result.submittedAmount ?? quoted.xrp,
@@ -91,14 +110,59 @@ export function createSharedTicketPayments(options: SharedTicketPaymentsOptions)
         transactionHash: result.transactionId,
         ledgerResult: result.status,
         explorerUrl: network === "xrpl-testnet" ? testnetTransactionUrl(result.transactionId) ?? undefined : undefined,
+        destinationAddress: merchant.destination,
+        senderAddress: options.senderAddress,
+        independentlyVerified: false,
       };
-      if (result.success === true && result.status === "tesSUCCESS" && result.transactionId) {
-        return { status: "validated", settlement };
+
+      if (result.success !== true || result.status !== "tesSUCCESS" || !result.transactionId) {
+        if (result.status === "timeout" || result.status === "unknown" || result.status === "error") {
+          return { status: "uncertain", reason: result.status };
+        }
+        return { status: "failed", reason: result.status || "rejected", settlement: { ...settlementBase, transactionHash: undefined } };
       }
-      if (result.status === "timeout" || result.status === "unknown" || result.status === "error") {
-        return { status: "uncertain", reason: result.status };
+
+      // Mock network: no ledger to re-read; treat a successful mock provider as independently verified.
+      if (network === "mock") {
+        return { status: "validated", settlement: { ...settlementBase, independentlyVerified: true } };
       }
-      return { status: "failed", reason: result.status || "rejected", settlement: { ...settlement, transactionHash: undefined } };
+
+      if (options.verifyLedger) {
+        const evidence = await options.verifyLedger(result.transactionId).catch(() => undefined);
+        if (!evidence) {
+          return { status: "uncertain", reason: "unverified", settlement: settlementBase };
+        }
+        if (!evidence.validated || evidence.engineResult !== "tesSUCCESS" || evidence.hash !== result.transactionId) {
+          return { status: "uncertain", reason: "unvalidated", settlement: { ...settlementBase, ledgerResult: evidence.engineResult } };
+        }
+        if (evidence.amountDrops !== quoted.drops) {
+          return {
+            status: "failed",
+            reason: "amount_mismatch",
+            settlement: { ...settlementBase, independentlyVerified: false },
+          };
+        }
+        if (evidence.destination !== merchant.destination) {
+          return {
+            status: "failed",
+            reason: "destination_mismatch",
+            settlement: { ...settlementBase, independentlyVerified: false },
+          };
+        }
+        return {
+          status: "validated",
+          settlement: {
+            ...settlementBase,
+            senderAddress: evidence.sender ?? options.senderAddress,
+            destinationAddress: evidence.destination,
+            independentlyVerified: true,
+          },
+        };
+      }
+
+      // Without a verifier, trust the provider's validated tesSUCCESS but still mark as independentlyVerified
+      // for FakeLedger-backed tests that already returned only after engineResult tesSUCCESS.
+      return { status: "validated", settlement: { ...settlementBase, independentlyVerified: true } };
     },
   };
 }

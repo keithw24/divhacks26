@@ -103,6 +103,8 @@ export const config = {
   smtpUser: env("SMTP_USER"),
   smtpPass: env("SMTP_PASS"),
   emailFrom: env("EMAIL_FROM"),
+  /** When true, mock providers and silent fixture fallbacks are refused. */
+  liveDemoMode: env("LIVE_DEMO_MODE", "false").toLowerCase() === "true",
 };
 
 function ticketPurchaseMode(value: string): "mock" | "provider" | "link" | undefined {

@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { readPublicIntegrations } from "../integrations/report.js";
 import type { StoredMemory } from "../backboard/client.js";
 import { maskEmail, maskPhone, preferencesToMemories, type Auth } from "./auth.js";
 import type { WebUser } from "./store.js";
@@ -49,6 +50,7 @@ export function createWebApiServer(deps: WebApiDeps): Server {
     const method = req.method ?? "GET";
     const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
 
+    if (method === "GET" && path === "/api/integrations") return readPublicIntegrations();
     if (method === "GET" && path === "/healthz") {
       return { status: "ok", uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000) };
     }

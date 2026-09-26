@@ -17,7 +17,7 @@ describe("ticketing follow-ups", () => {
     await say("space-a", "how much is the second one?");
     const result = await say("space-a", "get two");
     expect(result.reply).toBe(
-      "I found 2 tickets for Phoebe Bridgers at $62 each (General Admission), $124 total. Want me to buy them? (Demo checkout: no real tickets, paid with test funds.)",
+      "I found 2 tickets for Phoebe Bridgers at $62 each (General Admission), $124 total. Want me to purchase them? (Demo checkout: no real tickets, paid with test funds on XRPL Testnet.)",
     );
     const pending = service.store.pending("space-a")!;
     expect(pending).toMatchObject({ eventId: "mock-brooklyn-steel", quantity: 2, unitPrice: 62, total: 124, currency: "USD", status: "AWAITING_CONFIRMATION" });
@@ -39,7 +39,7 @@ describe("ticketing follow-ups", () => {
     await say("space-a", "anything fun happening tonight?");
     expect((await say("space-a", "How much are Knicks tickets?")).reply).toContain("start at $84 all-in");
     const quote = await say("space-a", "Get me 2 under $120 each.");
-    expect(quote.reply).toContain("I found 2 tickets for New York Knicks vs. Boston Celtics at $84 each (Section 224, Row 18), $168 total. Want me to buy them?");
+    expect(quote.reply).toContain("I found 2 tickets for New York Knicks vs. Boston Celtics at $84 each (Section 224, Row 18), $168 total. Want me to purchase them?");
     const done = await say("space-a", "yes");
     expect(done.reply).toMatch(/^Done — 2 demo tickets for New York Knicks vs\. Boston Celtics, \$168 total\. Order DEMO-[0-9A-F]{8}\./);
     expect((provider as MockTicketProvider).purchases).toHaveLength(1);
@@ -134,7 +134,7 @@ describe("purchase confirmation", () => {
     const original = provider.getOffers.bind(provider);
     provider.getOffers = async (event) => (await original(event)).map((item) => ({ ...item, allInUnitPrice: (item.allInUnitPrice ?? 0) + 5 }));
     const result = await say("space-a", "yes");
-    expect(result.reply).toContain("The price changed: 2 tickets for New York Knicks vs. Boston Celtics now come to $178 total");
+    expect(result.reply).toContain("The price changed from $168 to $178, so I didn't purchase anything.");
     expect(provider.purchases).toHaveLength(0);
     expect(service.store.pending("space-a")?.total).toBe(178);
   });
@@ -155,7 +155,7 @@ describe("purchase confirmation", () => {
 });
 
 describe("providers without purchasing", () => {
-  it("returns the official checkout URL and never pretends to buy", async () => {
+  it("quotes first, then returns the official checkout URL after yes — never pretends to buy", async () => {
     const commerce = {
       offers: [
         { id: "000000000001", attributes: { name: "Standard", currency: "USD", prices: [{ priceZone: "1", value: "92.00", total: "108.00" }] } },
@@ -169,14 +169,25 @@ describe("providers without purchasing", () => {
     const { say, service } = ticketing({ provider, purchaseMode: "provider" });
     expect(service.effectiveMode).toBe("link");
     await say("space-a", "any games tonight?");
-    const result = await say("space-a", "get 2 under $120");
-    expect(result.reply).toBe(
-      "2 tickets are listed for New York Knicks vs. Boston Celtics at $108 each (Standard), $216 total. I can't complete checkout through this provider, but here's the official link to buy: https://www.ticketmaster.com/event/vvG1zZ9KnicksCeltics",
+    const quote = await say("space-a", "get 2 under $120");
+    expect(quote.reply).toBe(
+      "2 tickets to New York Knicks vs. Boston Celtics are $216 total (Standard). Want me to prepare the checkout?",
     );
-    expect(service.store.pending("space-a")).toBeUndefined();
-    expect(service.store.purchasesFor("space-a")[0]?.status).toBe("LINK_ONLY");
+    expect(service.store.pending("space-a")?.status).toBe("AWAITING_CONFIRMATION");
+    expect(service.store.pending("space-a")?.total).toBe(216);
+    const done = await say("space-a", "yes");
+    expect(done.reply).toContain("still available for $216");
+    expect(done.reply).toContain("https://www.ticketmaster.com/event/vvG1zZ9KnicksCeltics");
+    expect(done.reply).not.toMatch(/Booked|purchased|Confirmation:/i);
+    const record = service.store.purchasesFor("space-a").find((item) => item.status === "CHECKOUT_REQUIRED");
+    expect(record).toMatchObject({
+      status: "CHECKOUT_REQUIRED",
+      checkoutUrl: "https://www.ticketmaster.com/event/vvG1zZ9KnicksCeltics",
+      eventId: "vvG1zZ9KnicksCeltics",
+      quantity: 2,
+      total: 216,
+    });
     expect(calls.some((url) => url.includes("/partners/") || url.includes("/cart"))).toBe(false);
-    expect((await say("space-a", "yes")).handled).toBe(false);
   });
 
   it("falls back to the link when only a price range is available", async () => {
@@ -191,7 +202,7 @@ describe("providers without purchasing", () => {
     const result = await say("space-a", "buy 2 tickets");
     expect(result.reply).toContain("start around $84 all-in");
     expect(result.reply).toContain("https://www.ticketmaster.com/event/vvG1zZ9KnicksCeltics");
-    expect(result.reply).not.toMatch(/Want me to buy/);
+    expect(result.reply).not.toMatch(/Want me to (buy|purchase|prepare)/);
   });
 });
 

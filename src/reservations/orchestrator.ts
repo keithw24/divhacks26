@@ -1,8 +1,19 @@
 import { buildMockCompletion, type MockOutboundCaller } from "../elevenlabs/calls.js";
+import type { RestaurantCallService } from "../phone/service.js";
 import type { MockScenario, OutboundCaller } from "../elevenlabs/types.js";
 import { verifyElevenLabsSignature } from "../elevenlabs/webhook.js";
 import { zonedDateISO } from "./clock.js";
 import { DepositFlow } from "./deposit-flow.js";
+import {
+  adaptReservationProvider,
+  executeReservation,
+  executionTimeline,
+  type ExecutionDependencies,
+  type ExecutionTraceStep,
+  type PhoneBookingRequest,
+  type PhoneBookingResult,
+  type ReservationExecutionResult,
+} from "./execution/index.js";
 import type { DemoDepositCatalog } from "./deposits.js";
 import type { ReservationPaymentPort } from "./payment.js";
 import type { ReservationProvider } from "./providers.js";
@@ -28,6 +39,18 @@ export interface ReservationTurnInput {
   text: string;
   transcript?: { who: string; text: string }[];
   messageId?: string;
+  /**
+   * A restaurant the user picked from a grounded search result, with details already known in this
+   * conversation. Skips text and model extraction. The phone still comes only from a trusted lookup.
+   */
+  selection?: ReservationSelection;
+}
+
+export interface ReservationSelection {
+  restaurant: { name: string; address?: string; placeId?: string };
+  partySize?: number;
+  requestedDate?: string;
+  requestedTime?: string;
 }
 
 export interface ReservationTurnResult {
@@ -82,6 +105,8 @@ export function isAmbiguousConfirm(text: string): boolean {
   return /^(maybe|perhaps|i think so|possibly|probably|not sure|idk)$/i.test(normalizedReply(text));
 }
 
+const DO_NOT_CALL = /\b(?:don'?t|do not|never)\s+(?:please\s+)?(?:call|phone|dial)\b|\b(?:no calls?|without calling)\b/i;
+
 function applyExtraction(reservation: ReservationRequest, extraction: ReservationExtraction, overwrite = false): void {
   if (extraction.restaurantName && !reservation.restaurant.phone) {
     if (normalizePlace(extraction.restaurantName) !== normalizePlace(reservation.restaurant.name)) {
@@ -131,6 +156,7 @@ export class ReservationOrchestrator {
   private readonly store: ReservationStore;
   private readonly timeouts = new Map<string, NodeJS.Timeout>();
   private readonly deposits: DepositFlow;
+  private readonly executionDeps: ExecutionDependencies;
 
   constructor(
     private readonly options: {
@@ -152,6 +178,8 @@ export class ReservationOrchestrator {
       providers?: readonly ReservationProvider[];
       paymentMode?: "mock" | "ripple_test";
       depositHoldMinutes?: number;
+      /** Real outbound calls. Omitted in tests that dial through the mock caller directly. */
+      phone?: RestaurantCallService;
     },
   ) {
     this.store = options.store ?? new ReservationStore();
@@ -171,6 +199,15 @@ export class ReservationOrchestrator {
         holdMinutes: options.depositHoldMinutes,
       },
     );
+    this.executionDeps = {
+      providers: (options.providers ?? []).map((provider) =>
+        adaptReservationProvider(provider, { now: () => this.now(), holdMinutes: options.depositHoldMinutes }),
+      ),
+      phone: { bookByPhone: (request) => this.schedulePhone(request) },
+      payment: { onDepositRequired: (input) => this.startDeposit(input) },
+      now: () => this.now(),
+      onUpdate: (reservation) => this.store.save(reservation),
+    };
     for (const reservation of this.store.inFlight()) this.armTimeout(reservation);
   }
 
@@ -194,6 +231,14 @@ export class ReservationOrchestrator {
     const active = this.store.active(input.spaceId);
     const replayed = this.deposits.cachedReply(active, input.messageId);
     if (replayed) return { handled: true, reply: replayed, acknowledgement: "👍" };
+    if (input.selection) {
+      try {
+        return await this.startFromSelection(input, input.selection);
+      } catch (error) {
+        logReservation("call_failed", { spaceId: input.spaceId, reason: error instanceof Error ? error.name : "Error" });
+        return { handled: true, reply: "Sorry, something went wrong on my end. Try again in a sec?" };
+      }
+    }
     const classification = classifyReservationMessage(input.text, {
       knownRestaurants: this.options.directory.knownNames(),
       activeStatus: active?.status,
@@ -284,6 +329,13 @@ export class ReservationOrchestrator {
     if (!reservation.requester?.senderId && input.senderId) {
       reservation.requester = { senderId: input.senderId, senderName: input.senderName };
     }
+    if (DO_NOT_CALL.test(text)) {
+      reservation.doNotCall = true;
+      this.store.save(reservation);
+      if (reservation.pendingQuestion === "confirm" || reservation.status === "READY_FOR_CONFIRMATION") {
+        return { handled: true, reply: "Okay, I won't call.", acknowledgement: "👍" };
+      }
+    }
     const paymentTurn = await this.deposits.reply(reservation, input);
     if (paymentTurn) return paymentTurn;
     if (
@@ -358,6 +410,30 @@ export class ReservationOrchestrator {
       return { handled: false };
     }
     await this.refreshRestaurant(reservation, text);
+    return this.askNext(reservation, input);
+  }
+
+  private async startFromSelection(input: ReservationTurnInput, selection: ReservationSelection): Promise<ReservationTurnResult> {
+    const active = this.store.active(input.spaceId);
+    if (active && (active.status === "CALLING" || active.status === "AWAITING_RESTAURANT")) {
+      return { handled: true, reply: `I'm still waiting to hear back from ${active.restaurant.name}.`, acknowledgement: "📞" };
+    }
+    const reservation = createReservation(input.spaceId);
+    if (input.senderId) reservation.requester = { senderId: input.senderId, senderName: input.senderName };
+    reservation.restaurant = { ...selection.restaurant };
+    reservation.partySize = selection.partySize;
+    reservation.requestedDate = selection.requestedDate;
+    reservation.requestedTime = selection.requestedTime;
+    this.store.save(reservation);
+    logReservation("reservation_created", { reservationId: reservation.id, spaceId: input.spaceId, restaurant: reservation.restaurant.name });
+
+    await this.refreshRestaurant(reservation, [selection.restaurant.name, selection.restaurant.address].filter(Boolean).join(" "));
+    const picked = selection.restaurant.placeId;
+    const found = reservation.restaurant.placeId;
+    if (picked && found && picked !== found) {
+      reservation.restaurant = { ...selection.restaurant };
+      reservation.locationOptions = undefined;
+    }
     return this.askNext(reservation, input);
   }
 
@@ -493,12 +569,22 @@ export class ReservationOrchestrator {
       });
       return { handled: true, reply: step.text, acknowledgement: "👍" };
     }
+    const routed = await this.routeReady(reservation);
+    if (routed) return routed;
     if (!reservation.restaurant.phone || !reservation.restaurant.phoneSource) {
       reservation.status = "NEEDS_USER_INPUT";
       this.store.save(reservation);
       return {
         handled: true,
         reply: `I couldn't find a verified phone number for ${reservation.restaurant.name}, so I won't call.`,
+        acknowledgement: "👍",
+      };
+    }
+    if (reservation.doNotCall) {
+      this.store.save(reservation);
+      return {
+        handled: true,
+        reply: "I couldn't book that online, and I won't call the restaurant.",
         acknowledgement: "👍",
       };
     }
@@ -530,6 +616,9 @@ export class ReservationOrchestrator {
     if (reservation.confirming) {
       return { handled: true, reply: callingText(reservation.restaurant.name), acknowledgement: "📞" };
     }
+    if (reservation.doNotCall) {
+      return { handled: true, reply: "Okay, I won't call.", acknowledgement: "👍" };
+    }
     reservation.confirming = true;
     if (messageId) reservation.confirmationMessageId = messageId;
     await this.refreshRestaurant(reservation);
@@ -538,16 +627,80 @@ export class ReservationOrchestrator {
       reservation.phoneChecked = true;
       return this.askNext(reservation);
     }
+    const result = await executeReservation(reservation, this.executionDeps, { allowPhone: true, messageId });
+    if (result.status === "CONFIRMED") {
+      reservation.confirming = false;
+      return this.applyConfirmed(reservation, result);
+    }
+    if (!result.afterReply) reservation.confirming = false;
+    this.store.save(reservation);
+    return {
+      handled: true,
+      reply: result.reply || callingText(reservation.restaurant.name),
+      acknowledgement: result.afterReply ? "📞" : "👍",
+      afterReply: result.afterReply,
+    };
+  }
+
+  /**
+   * Online booking when the details are complete. Phone stays behind the existing confirmation
+   * until the user agrees, unless they already said not to call.
+   */
+  private async routeReady(reservation: ReservationRequest): Promise<ReservationTurnResult | undefined> {
+    const result = await executeReservation(reservation, this.executionDeps, { allowPhone: false });
+    if (result.status === "CONFIRMED") return this.applyConfirmed(reservation, result);
+    if (result.disposition === "needs_payment" || result.disposition === "failed") {
+      if (!result.reply) return undefined;
+      return { handled: true, reply: result.reply, acknowledgement: "👍" };
+    }
+    if (result.disposition === "needs_user" && result.alternative) {
+      reservation.offeredTime = result.alternative.time;
+      reservation.pendingQuestion = "offer";
+      reservation.status = "NEEDS_USER_INPUT";
+      this.store.save(reservation);
+      return { handled: true, reply: result.reply, acknowledgement: "👍" };
+    }
+    if (result.disposition === "phone_forbidden") {
+      return { handled: true, reply: result.reply, acknowledgement: "👍" };
+    }
+    return undefined;
+  }
+
+  private applyConfirmed(reservation: ReservationRequest, result: ReservationExecutionResult): ReservationTurnResult {
+    reservation.status = "BOOKED";
+    reservation.pendingQuestion = undefined;
+    reservation.resultDelivered = true;
+    reservation.confirming = false;
+    reservation.result = {
+      outcome: "BOOKED",
+      confirmedDate: reservation.requestedDate,
+      confirmedTime: result.confirmedTime,
+      confirmedPartySize: result.partySize ?? reservation.partySize,
+      confirmationName: result.confirmationName ?? reservation.customer?.name,
+      confirmationNumber: result.confirmationId,
+    };
+    this.store.save(reservation);
+    logReservation("reservation_booked", { reservationId: reservation.id, spaceId: reservation.photonSpaceId, channel: result.channel });
+    return { handled: true, reply: result.reply, acknowledgement: "👍" };
+  }
+
+  /** Existing ElevenLabs dial, scheduled after the reply so the chat message goes out first. */
+  private async schedulePhone(request: PhoneBookingRequest): Promise<PhoneBookingResult> {
+    const reservation = request.reservation;
+    if (
+      reservation.callPlaced ||
+      reservation.status === "CALLING" ||
+      reservation.status === "AWAITING_RESTAURANT"
+    ) {
+      return { status: "PENDING", reason: "calling", reply: `I'm already calling ${reservation.restaurant.name}.` };
+    }
     try {
       assertDialable(reservation.restaurant);
     } catch {
-      reservation.confirming = false;
-      reservation.status = "NEEDS_USER_INPUT";
-      this.store.save(reservation);
       return {
-        handled: true,
+        status: "FAILED",
+        reason: "missing_phone",
         reply: `I couldn't find a verified phone number for ${reservation.restaurant.name || "that restaurant"}, so I won't call.`,
-        acknowledgement: "👍",
       };
     }
     reservation.status = "CONFIRMED_BY_USER";
@@ -560,11 +713,48 @@ export class ReservationOrchestrator {
     reservation.status = "CALLING";
     this.store.save(reservation);
     return {
-      handled: true,
+      status: "PENDING",
+      reason: "calling",
       reply: callingText(reservation.restaurant.name),
-      acknowledgement: "📞",
+      evidence: { provider: "elevenlabs" },
       afterReply: () => this.dial(reservation),
     };
+  }
+
+  /** Deposit-required online slots stay on the existing payment flow and never dial. */
+  private async startDeposit(input: {
+    reservation: ReservationRequest;
+    providerId: string;
+    time: string;
+    executionId: string;
+  }): Promise<{ status: "PENDING" | "DENIED" | "CONFIRMED"; reason?: string; confirmationId?: string; confirmedTime?: string; reply?: string }> {
+    const turn = await this.deposits.hold(input.reservation);
+    const deposit = input.reservation.deposit;
+    if (input.reservation.status === "BOOKED") {
+      return {
+        status: "CONFIRMED",
+        confirmationId: input.reservation.result?.confirmationNumber,
+        confirmedTime: input.reservation.result?.confirmedTime,
+        reply: turn?.reply,
+      };
+    }
+    if (deposit?.status === "PAID") {
+      return {
+        status: "DENIED",
+        reason: "confirmation_failed_after_payment",
+        reply: turn?.reply ?? `${input.reservation.restaurant.name} hasn't confirmed the reservation, so it isn't booked.`,
+      };
+    }
+    const guardDenied = deposit?.state === "GUARDRAIL_DENIED" || deposit?.policy?.decision === "DENY";
+    const denied = deposit?.status === "FAILED" || deposit?.status === "REJECTED" || deposit?.status === "CANCELLED" || guardDenied;
+    if (denied) {
+      return {
+        status: "DENIED",
+        reason: guardDenied ? "guardrail_denied" : "payment_denied",
+        reply: turn?.reply,
+      };
+    }
+    return { status: "PENDING", reason: "payment_required", reply: turn?.reply };
   }
 
   private async dial(reservation: ReservationRequest): Promise<void> {
@@ -573,14 +763,16 @@ export class ReservationOrchestrator {
     if (reservation.deposit) reservation.deposit.bookingAttemptId = reservation.id;
     try {
       const dialable = assertDialable(reservation.restaurant);
-      const placed = await this.options.caller.placeCall({
-        toNumber: dialable.phone,
-        reservationId: reservation.id,
-        spaceId: reservation.photonSpaceId,
-        systemPrompt: reservationAgentPrompt(reservation, this.zone()),
-        firstMessage: openingLine(reservation),
-        dynamicVariables: dynamicVariables(reservation, this.zone()),
-      });
+      const placed = this.options.phone
+        ? await this.options.phone.placeAuthorizedReservation(reservation, this.zone())
+        : await this.options.caller.placeCall({
+            toNumber: dialable.phone,
+            reservationId: reservation.id,
+            spaceId: reservation.photonSpaceId,
+            systemPrompt: reservationAgentPrompt(reservation, this.zone()),
+            firstMessage: openingLine(reservation),
+            dynamicVariables: dynamicVariables(reservation, this.zone()),
+          });
       reservation.call = {
         provider: "elevenlabs",
         conversationId: placed.conversationId,
@@ -601,6 +793,18 @@ export class ReservationOrchestrator {
         await this.completeMock(reservation);
       }
     } catch (error) {
+      if (error instanceof Error && error.message === "NO_VERIFIED_PHONE_NUMBER") {
+        reservation.callPlaced = false;
+        reservation.confirming = false;
+        reservation.status = "NEEDS_USER_INPUT";
+        reservation.pendingQuestion = undefined;
+        this.store.save(reservation);
+        await this.options.notify?.(
+          reservation.photonSpaceId,
+          `I couldn't find a verified phone number for ${reservation.restaurant.name || "that restaurant"}, so I won't call.`,
+        );
+        return;
+      }
       logReservation("call_failed", {
         reservationId: reservation.id,
         spaceId: reservation.photonSpaceId,
@@ -676,6 +880,14 @@ export class ReservationOrchestrator {
     if (result.outcome === "BOOKED") {
       reservation.status = "BOOKED";
       reservation.pendingQuestion = undefined;
+      if (reservation.bookingExecution && reservation.bookingExecution.phase !== "CONFIRMED") {
+        reservation.bookingExecution.phase = "CONFIRMED";
+        reservation.bookingExecution.status = "CONFIRMED";
+        reservation.bookingExecution.channel = reservation.bookingExecution.channel ?? "phone";
+        reservation.bookingExecution.confirmedTime = result.confirmedTime;
+        reservation.bookingExecution.confirmationId = result.confirmationNumber;
+        reservation.bookingExecution.confirmationName = result.confirmationName ?? reservation.customer?.name;
+      }
       logReservation("reservation_booked", { reservationId: reservation.id, spaceId: reservation.photonSpaceId });
       logReservation("call_connected", { reservationId: reservation.id, spaceId: reservation.photonSpaceId });
     } else if (result.outcome === "UNAVAILABLE") {
@@ -710,12 +922,22 @@ export class ReservationOrchestrator {
       outcome: result.outcome,
     });
     reservation.resultDelivered = true;
+    if (reservation.bookingExecution?.phase === "CALLING_RESTAURANT" && result.outcome !== "BOOKED") {
+      reservation.bookingExecution.phase = result.outcome === "NEEDS_USER_INPUT" ? "AWAITING_USER" : "FAILED";
+      reservation.bookingExecution.status = result.outcome === "NEEDS_USER_INPUT" ? "PENDING" : "FAILED";
+    }
+    this.options.phone?.recordOutcome(reservation, result);
     const askForPayment = result.paymentRequired ? this.deposits.captureFromCall(reservation, result) : undefined;
     const afterPayment = askForPayment ? undefined : this.deposits.afterCallResult(reservation);
     this.store.save(reservation);
     if (reservation.deposit?.quietResult) return;
     const text = askForPayment ?? afterPayment ?? resultText(reservation, result);
     await this.options.notify?.(reservation.photonSpaceId, text);
+  }
+
+  /** Online-then-phone decision path for one reservation. No secrets or wallet keys. */
+  bookingTrace(reservationId: string): ExecutionTraceStep[] {
+    return executionTimeline(this.store.get(reservationId)?.bookingExecution);
   }
 
   /** Inspectable restaurant payment trace for one reservation. Public addresses only. */

@@ -68,6 +68,19 @@ export interface TurnDeps {
     isGroup: boolean;
     messageId?: string;
   }): Promise<ReservationHandlerResult>;
+  /**
+   * Cross-domain step. Resolves messages that only make sense against another agent's state
+   * ("yes" with two things pending, "book the first one" after restaurants, "from dinner to the concert").
+   */
+  handleOrchestration?(input: {
+    spaceId: string;
+    senderId?: string;
+    senderName?: string;
+    text: string;
+    isGroup: boolean;
+    messageId?: string;
+    handleTransport: (request: TransportationRequest) => Promise<TransportationResult>;
+  }): Promise<ReservationHandlerResult & { outcome?: "payment" | "reservation" | "ticketing" | "transport" | "orchestration" }>;
 }
 
 export interface ReservationHandlerResult {
@@ -86,6 +99,7 @@ export type TurnOutcome =
   | "ticketing"
   | "meetup"
   | "transport"
+  | "orchestration"
   | "gemini"
   | "failed";
 
@@ -100,7 +114,7 @@ export async function deliverOnce(actions: Pick<TurnActions, "reply" | "send">, 
 }
 
 /**
- * Photon inbound turn. A new payment request or edit runs first.
+ * Photon inbound turn. A new payment request or edit runs first, then the cross-domain step.
  * Ticket discovery/pricing/quotes come next, then reservation handling, then a pending payment can take yes/no,
  * then a pending ticket purchase can take yes/no.
  * Transportation runs after that; everything else goes to Gemini.
@@ -137,6 +151,26 @@ export async function runConversationTurn(
           await deliverOnce(actions, answer);
           delivered = true;
           if (payment.afterReply) await payment.afterReply();
+          return;
+        }
+      }
+      if (deps.handleOrchestration) {
+        const orchestrated = await deps.handleOrchestration({
+          spaceId: input.spaceId,
+          senderId: input.senderId,
+          senderName: input.senderName,
+          text: question,
+          isGroup: input.isGroup,
+          messageId: input.messageId,
+          handleTransport: (request) => deps.handleTransport(request),
+        });
+        if (orchestrated.handled && orchestrated.reply) {
+          outcome = orchestrated.outcome ?? "orchestration";
+          answer = orchestrated.reply;
+          if (actions.react) await actions.react(orchestrated.acknowledgement ?? "👍").catch(() => undefined);
+          await deliverOnce(actions, answer);
+          delivered = true;
+          if (orchestrated.afterReply) await orchestrated.afterReply();
           return;
         }
       }

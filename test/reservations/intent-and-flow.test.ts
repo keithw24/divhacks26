@@ -116,7 +116,7 @@ describe("definition of done", () => {
     expect(caller.calls[0]?.systemPrompt).toMatch(/7:30/);
     expect(caller.calls[0]?.systemPrompt).not.toMatch(/I am Rohan/);
     expect(notes.map((note) => note.text)).toEqual([
-      "Booked! L'Artusi confirmed 4 people Friday at 7:45 PM under Rohan.",
+      "Booked — L'Artusi for 4 Friday at 7:45 PM under Rohan.",
     ]);
     expect(notes[0]?.spaceId).toBe("space-lartusi");
   });

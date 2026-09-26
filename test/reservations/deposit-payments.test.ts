@@ -659,8 +659,10 @@ describe("restaurant deposits on the website XRPL dashboard", () => {
         engineResult: "tesSUCCESS",
         verifiedOnLedger: true,
         explorerUrl: `https://testnet.xrpl.org/transactions/${TX}`,
+        recipientKind: "merchant",
       }),
     ]);
+    expect(dashboard.transactions[0]?.policy?.checks).toContainEqual({ code: "HUMAN_AUTHORIZATION", passed: true });
     expect(dashboard.guardrails).toEqual([]);
   });
 

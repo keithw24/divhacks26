@@ -44,6 +44,8 @@ export interface TransportationRequest {
   senderId?: string;
   isGroup?: boolean;
   preferences?: RoutePreferences;
+  /** Places another agent already resolved from grounded conversation state ("from dinner", "to the concert"). */
+  endpoints?: { origin?: PlaceLocation; destination?: PlaceLocation };
 }
 
 export interface TransportationResult {
@@ -129,13 +131,15 @@ export class TransportationService {
   }
 
   async handle(request: TransportationRequest): Promise<TransportationResult> {
-    const { spaceId, text, senderId } = request;
+    const { spaceId, text, senderId, endpoints } = request;
     this.memory.observe(spaceId, text, senderId);
 
-    try {
-      await this.captureMentions(spaceId, text);
-    } catch (error) {
-      logTransportError("observe", error);
+    if (!endpoints) {
+      try {
+        await this.captureMentions(spaceId, text);
+      } catch (error) {
+        logTransportError("observe", error);
+      }
     }
 
     const intent = extractTransportIntent(text);
@@ -154,11 +158,13 @@ export class TransportationService {
       intent.destinationQuery ?? (ctx.destination ? undefined : ctx.pendingDestination),
       request.preferences?.defaultOrigin,
     );
-    const destination = await this.resolveRole(spaceId, {
-      query: destinationQuery,
-      useContext: intent.destinationFromThere || !intent.destinationQuery,
-      contextual: ctx.destination,
-    });
+    const destination: RoleResolution = endpoints?.destination
+      ? { status: "resolved", place: endpoints.destination }
+      : await this.resolveRole(spaceId, {
+          query: destinationQuery,
+          useContext: intent.destinationFromThere || !intent.destinationQuery,
+          contextual: ctx.destination,
+        });
 
     if (isHomePlace(intent.destinationQuery) && !request.preferences?.defaultOrigin && destination.status !== "resolved") {
       return this.done({
@@ -191,11 +197,13 @@ export class TransportationService {
       });
     }
 
-    let origin = await this.resolveRole(spaceId, {
-      query: intent.originQuery ?? (ctx.origin ? undefined : ctx.pendingOrigin),
-      useContext: intent.originFromHere || !intent.originQuery,
-      contextual: ctx.origin,
-    });
+    let origin: RoleResolution = endpoints?.origin
+      ? { status: "resolved", place: endpoints.origin }
+      : await this.resolveRole(spaceId, {
+          query: intent.originQuery ?? (ctx.origin ? undefined : ctx.pendingOrigin),
+          useContext: intent.originFromHere || !intent.originQuery,
+          contextual: ctx.origin,
+        });
     if (origin.status === "unknown" && !intent.originFromHere && request.preferences?.defaultOrigin) {
       const inferred = await this.resolveRole(spaceId, {
         query: request.preferences.defaultOrigin,

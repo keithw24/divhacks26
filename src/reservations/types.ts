@@ -1,3 +1,4 @@
+import type { BookingExecutionRecord } from "./execution/types.js";
 import type {
   PaymentGuardDecision,
   PaymentHistoryEntry,
@@ -130,6 +131,10 @@ export interface ReservationRequest {
    * `source: "demo"` is configured fixture data, not a live restaurant policy.
    */
   deposit?: ReservationDepositState;
+  /** The user said not to call the restaurant. Phone fallback stays off. */
+  doNotCall?: boolean;
+  /** Decision record for online-then-phone booking. Survives a restart. */
+  bookingExecution?: BookingExecutionRecord;
 }
 
 export interface ReservationDepositState {

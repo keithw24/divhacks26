@@ -143,11 +143,19 @@ export class TicketProviderError extends Error {
   }
 }
 
+/**
+ * Lifecycle of one quote → confirmation → checkout/payment.
+ * COMPLETED is the durable "purchased" state (demo or provider). CHECKOUT_REQUIRED means
+ * the provider needs the user on its site — never treat that as purchased.
+ */
 export type TicketPurchaseStatus =
   | "AWAITING_CONFIRMATION"
   | "PROCESSING"
   | "PAYMENT_SUBMITTED"
   | "COMPLETED"
+  | "CHECKOUT_REQUIRED"
+  | "PRICE_CHANGED"
+  | "SOLD_OUT"
   | "FAILED"
   | "CANCELLED"
   | "EXPIRED"
@@ -164,14 +172,30 @@ export interface TicketSettlement {
   transactionHash?: string;
   ledgerResult?: string;
   explorerUrl?: string;
+  /** Public addresses only. Never seeds. */
+  senderAddress?: string;
+  destinationAddress?: string;
+  /** True only after an independent ledger re-read matched amount + destination. */
+  independentlyVerified?: boolean;
+}
+
+/** Traceable breadcrumb on a purchase. No secrets. */
+export interface TicketPurchaseEvidence {
+  type: string;
+  at: string;
+  messageId?: string;
+  details?: Record<string, string | number | boolean | null>;
 }
 
 /**
  * One ticket purchase from intent to result. Links:
  * Photon space → event → offer → purchase intent → payment transaction → order.
+ * `id` is the quote id shown before confirmation.
  */
 export interface TicketPurchaseRecord {
   id: string;
+  /** Same as id. Kept explicit so confirmation always binds to the quote the user saw. */
+  quoteId: string;
   spaceId: string;
   initiatorId: string;
   initiatorName?: string;
@@ -182,6 +206,8 @@ export interface TicketPurchaseRecord {
   offerId: string;
   quantity: number;
   unitPrice: number;
+  /** Per-ticket fees when the provider supplied an all-in price above face value. */
+  fees?: number;
   total: number;
   currency: string;
   allIn: boolean;
@@ -195,14 +221,18 @@ export interface TicketPurchaseRecord {
   isTestTransaction?: boolean;
   paymentTransactionId?: string;
   orderId?: string;
+  confirmationNumber?: string;
   checkoutUrl?: string;
   failureReason?: string;
   requestMessageId?: string;
   confirmMessageId?: string;
+  quotedAt: string;
+  confirmedAt?: string;
   createdAt: string;
   updatedAt: string;
   expiresAt: string;
   completedAt?: string;
+  evidence: TicketPurchaseEvidence[];
 }
 
 export interface TicketingState {

@@ -32,7 +32,11 @@
     "payments:fund-testnet": "tsx scripts/fund-xrpl-testnet.ts",
     "transport:demo": "tsx src/transport/demo.ts",
     "demo:reservation": "tsx src/reservations/demo.ts",
-    "transport:gemini-live": "tsx src/transport/gemini-live.ts"
+    "demo:restaurant-call": "tsx src/phone/demo.ts",
+    "transport:gemini-live": "tsx src/transport/gemini-live.ts",
+    "integrations:check": "tsx src/integrations/check.ts",
+    "integrations:test-call": "tsx src/integrations/test-call.ts",
+    "integrations:test-imessage": "tsx src/integrations/test-imessage.ts"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",

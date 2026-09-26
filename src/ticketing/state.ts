@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { TicketingState, TicketPurchaseRecord, TicketPurchaseStatus } from "./types.js";
+import type { TicketPurchaseEvidence, TicketingState, TicketPurchaseRecord, TicketPurchaseStatus } from "./types.js";
 
 const MAX_RESULTS = 8;
 
@@ -36,13 +36,22 @@ export class TicketingStore {
   }
 
   createPurchase(
-    input: Omit<TicketPurchaseRecord, "id" | "createdAt" | "updatedAt" | "status"> & { status?: TicketPurchaseStatus },
+    input: Omit<TicketPurchaseRecord, "id" | "quoteId" | "quotedAt" | "createdAt" | "updatedAt" | "status" | "evidence"> & {
+      status?: TicketPurchaseStatus;
+      quoteId?: string;
+      quotedAt?: string;
+      evidence?: TicketPurchaseEvidence[];
+    },
   ): TicketPurchaseRecord {
     const now = new Date(this.clock()).toISOString();
+    const id = `tkt-${randomUUID()}`;
     const record: TicketPurchaseRecord = {
       ...input,
-      id: `tkt-${randomUUID()}`,
+      id,
+      quoteId: input.quoteId ?? id,
       status: input.status ?? "AWAITING_CONFIRMATION",
+      quotedAt: input.quotedAt ?? now,
+      evidence: input.evidence ?? [],
       createdAt: now,
       updatedAt: now,
     };
@@ -57,6 +66,14 @@ export class TicketingStore {
 
   purchasesFor(spaceId: string): TicketPurchaseRecord[] {
     return [...this.purchases.values()].filter((record) => record.spaceId === spaceId).map((record) => structuredClone(record));
+  }
+
+  /** All purchases across spaces, newest first. For the public dashboard. */
+  listPurchases(limit = 50): TicketPurchaseRecord[] {
+    return [...this.purchases.values()]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, limit)
+      .map((record) => structuredClone(record));
   }
 
   /** Pending purchase for this space, or undefined when none is awaiting a yes. */
@@ -75,9 +92,15 @@ export class TicketingStore {
     return this.write(id, { status: "PROCESSING" });
   }
 
-  patch(id: string, fields: Partial<Omit<TicketPurchaseRecord, "id" | "spaceId" | "createdAt">>): TicketPurchaseRecord | undefined {
+  patch(id: string, fields: Partial<Omit<TicketPurchaseRecord, "id" | "spaceId" | "createdAt" | "quoteId">>): TicketPurchaseRecord | undefined {
     if (!this.purchases.has(id)) return undefined;
     return this.write(id, fields);
+  }
+
+  appendEvidence(id: string, entry: TicketPurchaseEvidence): TicketPurchaseRecord | undefined {
+    const current = this.purchases.get(id);
+    if (!current) return undefined;
+    return this.write(id, { evidence: [...current.evidence, entry] });
   }
 
   replyFor(spaceId: string, messageId: string): string | undefined {

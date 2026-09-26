@@ -4,6 +4,7 @@ import type {
   Location,
   SkillResult,
 } from "../domain/contracts.js";
+import { logIntegration } from "../integrations/log.js";
 import { distanceMeters } from "./geo.js";
 
 export interface FoodInput {
@@ -13,6 +14,8 @@ export interface FoodInput {
   openNow?: boolean;
   apiKey?: string;
   fetcher?: typeof fetch;
+  /** When set, the provider error is returned instead of a generic unavailable line. */
+  strict?: boolean;
 }
 
 interface PlacesResponse {
@@ -57,6 +60,7 @@ export async function findFood(input: FoodInput): Promise<SkillResult<FoodRecomm
   };
   if (input.budget && priceLevels[input.budget]) body.priceLevels = priceLevels[input.budget];
 
+  const started = Date.now();
   try {
     const response = await fetcher("https://places.googleapis.com/v1/places:searchText", {
       method: "POST",
@@ -107,6 +111,7 @@ export async function findFood(input: FoodInput): Promise<SkillResult<FoodRecomm
       }];
     });
     data.sort((a, b) => (Number(b.openNow) - Number(a.openNow)) || ((b.rating ?? 0) - (a.rating ?? 0)) || (a.distanceMeters - b.distanceMeters));
+    logIntegration("GOOGLE", "LIVE", `${data.length} restaurants returned in ${Date.now() - started}ms`);
     return {
       status: data.length ? "ok" : "partial",
       data: data.slice(0, 5),
@@ -115,6 +120,7 @@ export async function findFood(input: FoodInput): Promise<SkillResult<FoodRecomm
     };
   } catch (error) {
     console.error("food skill failed:", error);
-    return { status: "unavailable", data: [], sources: [], warnings: ["Restaurant search is temporarily unavailable."] };
+    const warning = input.strict && error instanceof Error ? error.message : "Restaurant search is temporarily unavailable.";
+    return { status: "unavailable", data: [], sources: [], warnings: [warning] };
   }
 }

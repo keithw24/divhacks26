@@ -1,3 +1,5 @@
+import { logIntegration } from "../integrations/log.js";
+
 export type BackboardFailureKind =
   | "timeout"
   | "unauthorized"
@@ -70,6 +72,7 @@ export function createBackboardClient(options: BackboardClientOptions): Backboar
   const apiKey = options.apiKey;
 
   async function request(method: string, path: string, body?: unknown): Promise<unknown> {
+    const started = Date.now();
     let response: Response;
     try {
       response = await fetchImpl(`${baseUrl}${path}`, {
@@ -96,6 +99,7 @@ export function createBackboardClient(options: BackboardClientOptions): Backboar
         throw new BackboardRequestError("malformed", response.status);
       }
     }
+    logIntegration("BACKBOARD", "LIVE", `${method} completed in ${Date.now() - started}ms status=${response.status}`);
     if (!response.ok) throw new BackboardRequestError(kindForStatus(response.status), response.status);
     return parsed;
   }

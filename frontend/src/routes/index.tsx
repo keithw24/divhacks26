@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { AgentTag, ChatWindow, Incoming, Outgoing } from "@/components/site/chat";
 import { useHasSession } from "@/components/site/shell";
+import { IntegrationStatus } from "@/components/site/integration-status";
 import { XrplTestnetSection } from "@/components/site/xrpl-testnet";
 import { api } from "@/lib/api";
 
@@ -657,6 +658,7 @@ function Index() {
       {/* 8. INTEGRATIONS */}
       <section id="integrations" className="px-5 py-12 max-w-4xl mx-auto">
         <SectionTitle kicker="Built with" title="One brain, many hands." />
+        <IntegrationStatus />
         <div className="mt-6 grid md:grid-cols-2 gap-3">
           <div className="bg-blue text-blue-foreground outline-card rounded-2xl p-5">
             <div className="font-display text-2xl tracking-tight">Photon</div>

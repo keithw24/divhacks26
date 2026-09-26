@@ -161,7 +161,7 @@ describe("directions duration fallback", () => {
       { lowMinutes: 20, highMinutes: 25, phrase: "about 20–25 minutes" },
     );
     const service = createTransportationService({
-      routing: createGoogleRoutesProvider("maps-test-SENTINEL-key"),
+      routing: createGoogleRoutesProvider("maps-test-SENTINEL-key", { timeoutMs: 180 }),
       gemini: client,
     });
 

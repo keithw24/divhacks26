@@ -72,8 +72,8 @@ describe("call outcomes", () => {
       await say(scenario, "Book L'Artusi for four Friday at 8 under Rohan, exactly 8.");
       const yes = await say(scenario, "Yes.");
       await yes.afterReply?.();
-      expect(notes.at(-1)?.text).toBe("I couldn't reach them.");
-      expect(notes.some((note) => note.text.startsWith("Booked!"))).toBe(false);
+      expect(notes.at(-1)?.text).toBe("I couldn't reach L'Artusi. Want me to try again?");
+      expect(notes.some((note) => note.text.startsWith("Booked"))).toBe(false);
     }
   });
 
@@ -96,7 +96,7 @@ describe("call outcomes", () => {
     await yes.afterReply?.();
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(orchestrator.reservations.active("s")?.status).toBe("CALL_FAILED");
-    expect(notes.at(-1)?.text).toBe("I couldn't reach them.");
+    expect(notes.at(-1)?.text).toBe("I couldn't reach L'Artusi. Want me to try again?");
   });
 });
 

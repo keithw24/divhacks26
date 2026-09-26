@@ -46,9 +46,12 @@ describe("XRPL Testnet ticket payments", () => {
     });
     expect(record.orderId).toMatch(/^DEMO-/);
     expect((provider as MockTicketProvider).purchases).toHaveLength(1);
-    expect(reply.reply).toContain("Paid 168 XRP on XRPL Testnet for 2 demo tickets to New York Knicks vs. Boston Celtics ($168 ticket total).");
+    expect(reply.reply).toContain("Booked — 2 tickets to New York Knicks vs. Boston Celtics for $168 total.");
+    expect(reply.reply).toContain("Confirmation:");
+    expect(reply.reply).toContain("Payment: validated on XRPL Testnet");
     expect(reply.reply).toContain(`Transaction: ${TX_HASH}`);
     expect(reply.reply).toContain(`https://testnet.xrpl.org/transactions/${TX_HASH}`);
+    expect(reply.reply).toContain("Demo settlement only");
 
     const events = traces.map((trace) => trace.event);
     expect(events).toEqual(
@@ -112,8 +115,8 @@ describe("XRPL Testnet ticket payments", () => {
 describe("test settlement is never real-world settlement", () => {
   it("labels Testnet-paid tickets as a demo and a test transaction", async () => {
     const { reply, service } = await buyKnicks({ payments: testnetPayments(new FakeLedger()) });
-    expect(reply.reply).toContain("This was a test transaction, not a real ticket purchase.");
-    expect(reply.reply).not.toMatch(/tickets? .* purchased for/);
+    expect(reply.reply).toContain("Demo settlement only — XRPL Testnet, not a real Ticketmaster purchase.");
+    expect(reply.reply).toContain("Payment: validated on XRPL Testnet");
     const record = service.store.purchasesFor("space-a").find((item) => item.status === "COMPLETED")!;
     expect(record.isDemo).toBe(true);
     expect(record.settlement?.isTestTransaction).toBe(true);
@@ -147,8 +150,9 @@ describe("test settlement is never real-world settlement", () => {
     await say("space-a", "any games tonight?");
     await say("space-a", "get 2");
     const done = await say("space-a", "yes");
-    expect(done.reply).toContain("demo tickets");
-    expect(done.reply).toContain("not a real ticket purchase");
+    expect(done.reply).toContain("Booked —");
+    expect(done.reply).toContain("Demo settlement only");
+    expect(done.reply).toContain("not a real Ticketmaster purchase");
     expect(calls.some((url) => url.includes("/cart"))).toBe(false);
     expect(service.store.purchasesFor("space-a").find((item) => item.status === "COMPLETED")?.isDemo).toBe(true);
   });

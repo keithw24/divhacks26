@@ -49,7 +49,7 @@ describe("maps provider failures", () => {
       });
     });
     const service = createTransportationService({
-      routing: createGoogleRoutesProvider("maps-test-SENTINEL-key"),
+      routing: createGoogleRoutesProvider("maps-test-SENTINEL-key", { timeoutMs: 180 }),
     });
     const pending = service.handle({
       spaceId: "maps-hang",

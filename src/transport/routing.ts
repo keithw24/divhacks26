@@ -1,8 +1,10 @@
+import { logIntegration } from "../integrations/log.js";
 import { hasCoordinates } from "./locations.js";
 import { logTransportError } from "./log.js";
 import type { PlaceLocation, RouteResult, RouteStep, RoutingProvider, TravelMode } from "./types.js";
 
 const ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes";
+const ROUTES_TIMEOUT_MS = 10_000;
 
 const FIELD_MASK = [
   "routes.duration",
@@ -88,9 +90,11 @@ function stepsFromRoute(route: NonNullable<ComputeRoutesResponse["routes"]>[numb
   return steps;
 }
 
-export function createGoogleRoutesProvider(apiKey: string): RoutingProvider {
+export function createGoogleRoutesProvider(apiKey: string, options?: { timeoutMs?: number }): RoutingProvider {
+  const timeoutMs = options?.timeoutMs ?? ROUTES_TIMEOUT_MS;
   return {
     async getRoute(origin, destination, mode): Promise<RouteResult | undefined> {
+      const started = Date.now();
       const body: Record<string, unknown> = {
         origin: waypoint(origin),
         destination: waypoint(destination),
@@ -112,13 +116,13 @@ export function createGoogleRoutesProvider(apiKey: string): RoutingProvider {
           "X-Goog-FieldMask": FIELD_MASK,
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(180),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       pending.catch(() => undefined);
       const response = await Promise.race([
         pending,
         new Promise<Response>((_, reject) => {
-          setTimeout(() => reject(new Error("Routes request timed out")), 180);
+          setTimeout(() => reject(new Error("Routes request timed out")), timeoutMs);
         }),
       ]);
 
@@ -137,6 +141,7 @@ export function createGoogleRoutesProvider(apiKey: string): RoutingProvider {
       const steps = stepsAreObjects ? stepsFromRoute(route) : [];
       if (durationSeconds === undefined && steps.length === 0) return undefined;
 
+      logIntegration("GOOGLE", "LIVE", `route returned in ${Date.now() - started}ms`);
       return {
         mode,
         durationSeconds,
@@ -153,6 +158,7 @@ export function createPlacesResolver(apiKey: string): {
 } {
   return {
     async resolve(query, bias) {
+      const started = Date.now();
       const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
         method: "POST",
         headers: {
@@ -174,6 +180,7 @@ export function createPlacesResolver(apiKey: string): {
             },
           },
         }),
+        signal: AbortSignal.timeout(10_000),
       });
 
       const payload = (await response.json()) as {
@@ -201,6 +208,7 @@ export function createPlacesResolver(apiKey: string): {
           confidence: Math.max(0.45, 0.88 - index * 0.12),
         }));
 
+      if (places.length > 0) logIntegration("GOOGLE", "LIVE", `place returned in ${Date.now() - started}ms`);
       if (places.length === 0) return { status: "unknown", query, places: [] };
       if (places.length === 1) return { status: "resolved", query, places };
       const top = places[0];

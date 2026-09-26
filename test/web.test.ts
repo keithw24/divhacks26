@@ -317,6 +317,21 @@ describe("web API server", () => {
     expect(me).not.toMatch(/415|595|1440/);
   });
 
+  it("serves integration status without secrets or a hardcoded live claim", async () => {
+    const { base } = await start();
+    const body = await (await fetch(`${base}/api/integrations`)).json();
+    expect(Array.isArray(body.integrations)).toBe(true);
+    expect(body.integrations.length).toBeGreaterThan(0);
+    const encoded = JSON.stringify(body);
+    for (const name of ["GOOGLE_MAPS_API_KEY", "BACKBOARD_API_KEY", "ELEVENLABS_API_KEY", "DATABASE_URL", "XRPL_TESTNET_SEED"]) {
+      const value = process.env[name];
+      if (value && value.length > 8) expect(encoded).not.toContain(value);
+    }
+    for (const row of body.integrations) {
+      expect(["LIVE", "NOT_CONFIGURED", "ERROR", "MOCK", "UNVERIFIED"]).toContain(row.status);
+    }
+  });
+
   it("serves deployment probes and the ElevenLabs webhook on the API port", async () => {
     const webhook = vi.fn(async () => ({ status: 202, body: { received: true } }));
     const { base } = await start({ handleElevenLabsWebhook: webhook });

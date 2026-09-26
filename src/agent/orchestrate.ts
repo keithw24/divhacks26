@@ -77,6 +77,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
         budget: intent.budget,
         openNow: !/tomorrow|later/i.test(intent.when),
         apiKey: config.googleMapsApiKey,
+        strict: config.liveDemoMode,
       })
     : Promise.resolve(null);
   const eventsPromise = intent.needs.includes("events")
@@ -164,6 +165,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
           travelMode,
           departureTime: now.toISOString(),
           apiKey: config.googleMapsApiKey,
+          strict: config.liveDemoMode,
         })
       : undefined;
   if (tradeTimeForSafety && route?.data) {

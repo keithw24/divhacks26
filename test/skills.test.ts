@@ -122,6 +122,18 @@ describe("route skill", () => {
     expect(result.data.durationMinutes).toBeUndefined();
   });
 
+  it("surfaces a missing Routes key instead of a stand-in when strict", async () => {
+    const result = await getRoute({
+      origin,
+      destination: { label: "Bryant Park", latitude: 40.7536, longitude: -73.9832 },
+      travelMode: "WALK",
+      strict: true,
+    });
+    expect(result.status).toBe("unavailable");
+    expect(result.warnings[0]).toContain("GOOGLE_MAPS_API_KEY");
+    expect(result.data.durationMinutes).toBeUndefined();
+  });
+
   it("displays Google's beta caveat for a walking route", () => {
     const text = renderResponse({
       picks: [],

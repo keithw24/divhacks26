@@ -64,7 +64,7 @@ const PURCHASE_OBJECT =
   /\b(those|them|these|it|that one|this one|the cheapest|cheapest|tickets?|seats?|one|ones|pair|couple|\d{1,2}|two|three|four|five|six|seven|eight|nine|ten)\b/i;
 
 const CONFIRM =
-  /^(?:yes|yep|yeah|yup|ya|sure|confirm(?:ed)?|do it|go ahead|buy (?:them|it|those)|book (?:them|it)|purchase (?:them|it)|get (?:them|those)|yes please|yes buy (?:them|it)|let'?s do it)(?: please)?$/i;
+  /^(?:yes|yep|yeah|yup|ya|sure|confirm(?:ed)?|do it|go ahead|buy (?:them|it|those)|book (?:them|it)|purchase (?:them|it)|get (?:them|those)|yes[, ]+(?:please|buy (?:them|it|those)|purchase (?:them|it)|book (?:them|it)|do it)|let'?s do it)(?: please)?$/i;
 const CANCEL = /^(?:no|nope|nah|cancel|never ?mind|don'?t|do not|stop|not now|skip|no thanks|no thank you|hold off)$/i;
 const UNSURE = /^(?:maybe|i think so|probably|hmm+|not sure|wait|ok(?:ay)?|sounds good|cool)$/i;
 

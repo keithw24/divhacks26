@@ -14,6 +14,7 @@ import { createBackboardMemoryService, type MemoryService } from "../memory/back
 import type { Participant, StateStore } from "../store/state.js";
 import { ingestionKey } from "../store/state.js";
 import type { MeetupTurnInput, MeetupTurnResult, PersonLocation } from "../meetup/types.js";
+import type { OrchestratorTurnInput, OrchestratorTurnResult } from "../orchestration/orchestrator.js";
 import type { TransportationRequest, TransportationResult } from "../transport/service.js";
 
 export interface InboundMessage {
@@ -97,6 +98,10 @@ export interface InboundDeps {
     handleTurn(input: MeetupTurnInput): Promise<MeetupTurnResult>;
   };
   liveLocations?: (spaceId: string) => MeetupTurnInput["liveLocations"];
+  /** Cross-domain handoffs: one agent's grounded output becomes the next agent's input. */
+  orchestration?: {
+    handleTurn(input: OrchestratorTurnInput): Promise<OrchestratorTurnResult>;
+  };
 }
 
 export async function handleInboundMessage(
@@ -268,6 +273,18 @@ export async function handleInboundMessage(
               })),
             })
         : undefined,
+      handleOrchestration: deps.orchestration
+        ? (request) =>
+            deps.orchestration!.handleTurn({
+              spaceId: request.spaceId,
+              senderId: request.senderId,
+              senderName: message.senderName,
+              text: request.text,
+              messageId: message.messageId,
+              isGroup: request.isGroup,
+              handleTransport: request.handleTransport,
+            })
+        : undefined,
     },
   );
 
@@ -277,6 +294,7 @@ export async function handleInboundMessage(
     outcome === "ticketing" ||
     outcome === "meetup" ||
     outcome === "transport" ||
+    outcome === "orchestration" ||
     outcome === "gemini" ||
     outcome === "failed";
   const event: AgentTurnLog = {

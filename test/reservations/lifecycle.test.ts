@@ -87,7 +87,7 @@ describe("reservation lifecycle", () => {
     expect(h.notes).toEqual([
       expect.objectContaining({
         spaceId: SPACE,
-        text: "Booked! L'Artusi confirmed 4 people Friday at 7:45 PM under Rohan.",
+        text: "Booked — L'Artusi for 4 Friday at 7:45 PM under Rohan.",
       }),
     ]);
     expect(h.notes.some((note) => note.spaceId === "other-space")).toBe(false);
@@ -110,7 +110,7 @@ describe("reservation lifecycle", () => {
     expect(reservation.status).toBe("NEEDS_USER_INPUT");
     expect(reservation.offeredTime).toBe("21:00");
     expect(h.notes.map((note) => note.text)).toEqual([
-      "They can't do your 7:30–8:30 window, but they offered 9:00 PM. Want me to take it?",
+      "L'Artusi couldn't do 8:00 PM. They offered 9:00 PM instead. Want me to take it?",
     ]);
     expect(h.caller.calls).toHaveLength(1);
 
@@ -183,7 +183,7 @@ describe("reservation lifecycle", () => {
       expect(response.status).toBe(200);
       expect(loaded?.status).toBe("BOOKED");
       expect(notes).toEqual([
-        { spaceId: SPACE, text: "Booked! L'Artusi confirmed 4 people Friday at 7:45 PM under Rohan." },
+        { spaceId: SPACE, text: "Booked — L'Artusi for 4 Friday at 7:45 PM under Rohan." },
       ]);
 
       second.dispose();
@@ -244,7 +244,7 @@ describe("reservation lifecycle", () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 30));
       expect(second.reservations.get(reservation.id)?.status).toBe("CALL_FAILED");
-      expect(notes.map((note) => note.text)).toEqual(["I couldn't reach them."]);
+      expect(notes.map((note) => note.text)).toEqual(["I couldn't reach L'Artusi. Want me to try again?"]);
       second.dispose();
     } finally {
       rmSync(dir, { recursive: true, force: true });

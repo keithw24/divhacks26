@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { MeetupPersistence, MeetupPlan, PersonLocation } from "../meetup/types.js";
+import { emptyPhoneCallBook, type PhoneCallBook, type PhoneCallRecord } from "../phone/types.js";
 
 export interface Participant {
   id: string;
@@ -52,6 +53,10 @@ export interface AgentState {
   payments: PaymentPersistence;
   /** Group meetup leave times. Scoped by Photon space id. */
   meetups: MeetupPersistence;
+  /** Cross-domain references (focused event, picked restaurant) keyed by Photon space id. */
+  orchestration?: Record<string, unknown>;
+  /** Outbound restaurant calls waiting on ElevenLabs. Keyed by Photon space id. */
+  phoneCalls?: PhoneCallBook;
 }
 
 /** Enough to match a webhook back to a Photon space after restart. */
@@ -100,6 +105,8 @@ export function emptyState(): AgentState {
     reservations: emptyReservationBook(),
     payments: emptyPaymentBook(),
     meetups: emptyMeetupBook(),
+    orchestration: {},
+    phoneCalls: emptyPhoneCallBook(),
   };
 }
 
@@ -156,6 +163,8 @@ function readStateFile(filePath: string): AgentState {
       reservations: readReservationBook(parsed.reservations),
       payments: readPaymentBook(parsed.payments),
       meetups: readMeetupBook(parsed.meetups),
+      orchestration: parsed.orchestration && typeof parsed.orchestration === "object" ? parsed.orchestration : {},
+      phoneCalls: readPhoneCallBook(parsed.phoneCalls),
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -231,6 +240,21 @@ function readMeetupBook(value: unknown): MeetupPersistence {
     }
   }
   return { records, activeBySpace: stringMap(record.activeBySpace), locationsBySpace };
+}
+
+function readPhoneCallBook(value: unknown): PhoneCallBook {
+  const book = emptyPhoneCallBook();
+  if (!value || typeof value !== "object") return book;
+  const raw = value as Partial<PhoneCallBook>;
+  if (raw.bySpace && typeof raw.bySpace === "object") {
+    for (const [spaceId, record] of Object.entries(raw.bySpace)) {
+      if (!record || typeof record !== "object") continue;
+      if (record.spaceId !== spaceId || typeof record.restaurantName !== "string") continue;
+      book.bySpace[spaceId] = record as PhoneCallRecord;
+    }
+  }
+  book.byConversation = stringMap(raw.byConversation);
+  return book;
 }
 
 function stringMap(value: unknown): Record<string, string> {

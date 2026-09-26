@@ -1,4 +1,5 @@
 import type { Location, RouteResult, SkillResult, TravelMode } from "../domain/contracts.js";
+import { logIntegration } from "../integrations/log.js";
 import { mapsDirectionsUrl } from "./geo.js";
 
 export interface RouteInput {
@@ -8,6 +9,8 @@ export interface RouteInput {
   departureTime?: string;
   apiKey?: string;
   fetcher?: typeof fetch;
+  /** When set, a missing key or provider error is returned instead of a directions-link stand-in. */
+  strict?: boolean;
 }
 
 interface RoutesResponse {
@@ -31,10 +34,17 @@ export async function getRoute(input: RouteInput): Promise<SkillResult<RouteResu
     summary: `Open directions to ${input.destination.label}`,
     directionsUrl,
   };
+  const blocked = (warning: string): SkillResult<RouteResult> => ({
+    status: "unavailable",
+    data: fallback,
+    sources: [{ name: "Google Maps", url: directionsUrl }],
+    warnings: [warning],
+  });
 
   if (!input.apiKey) {
     console.info("duration_source=none");
     console.error("[route] GOOGLE_MAPS_API_KEY is not set");
+    if (input.strict) return blocked("GOOGLE_MAPS_API_KEY is not set");
     return {
       status: "partial",
       data: fallback,
@@ -44,6 +54,7 @@ export async function getRoute(input: RouteInput): Promise<SkillResult<RouteResu
   }
 
   const fetcher = input.fetcher ?? fetch;
+  const started = Date.now();
   try {
     const body: Record<string, unknown> = {
       origin: { location: { latLng: { latitude: input.origin.latitude, longitude: input.origin.longitude } } },
@@ -82,6 +93,7 @@ export async function getRoute(input: RouteInput): Promise<SkillResult<RouteResu
       directionsUrl,
       ...(route.polyline?.encodedPolyline && { encodedPolyline: route.polyline.encodedPolyline }),
     };
+    logIntegration("GOOGLE", "LIVE", `route returned in ${Date.now() - started}ms`);
     return {
       status: "ok",
       data,
@@ -91,6 +103,8 @@ export async function getRoute(input: RouteInput): Promise<SkillResult<RouteResu
   } catch (error) {
     console.info("duration_source=none");
     console.error("route skill failed:", error);
+    const warning = error instanceof Error ? error.message : "Routes request failed";
+    if (input.strict) return blocked(warning);
     return {
       status: "partial",
       data: fallback,

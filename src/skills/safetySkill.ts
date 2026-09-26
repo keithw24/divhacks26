@@ -1,4 +1,5 @@
 import type { Location, SkillResult } from "../domain/contracts.js";
+import { logIntegration } from "../integrations/log.js";
 import {
   currentHourEt,
   lookupBlockSafety,
@@ -24,6 +25,7 @@ export async function getSafety(input: SafetyInput): Promise<SkillResult<BlockSa
     };
   }
 
+  const started = Date.now();
   try {
     const clock = currentHourEt(input.now);
     const hourEt = parseRequestedHour(input.when, clock.hourEt);
@@ -39,6 +41,7 @@ export async function getSafety(input: SafetyInput): Promise<SkillResult<BlockSa
     console.info(
       `tiger: queried nypd_complaints (${input.origin.label}, ${hourEt}:00 ET, ${vsNycLabel})`,
     );
+    logIntegration("TIGER", "LIVE", `nypd_complaints query returned in ${Date.now() - started}ms`);
     return {
       status: "ok",
       data: { ...report, placeLabel: input.origin.label },

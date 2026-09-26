@@ -127,26 +127,54 @@ export function quoteLine(offer: TicketOffer, quantity: number, event: TicketEve
 }
 
 export function confirmPurchaseReply(offer: TicketOffer, quantity: number, event: TicketEvent, demo: boolean): string {
-  const ask = quantity === 1 ? "Want me to buy it?" : "Want me to buy them?";
-  const demoNote = demo ? " (Demo checkout: no real tickets, paid with test funds.)" : "";
+  const ask = quantity === 1 ? "Want me to purchase it?" : "Want me to purchase them?";
+  const demoNote = demo ? " (Demo checkout: no real tickets, paid with test funds on XRPL Testnet.)" : "";
   return `${quoteLine(offer, quantity, event)}. ${ask}${demoNote}`;
+}
+
+/** Pending link-mode quote: show the total, ask before handing off to the provider site. */
+export function confirmCheckoutReply(offer: TicketOffer, quantity: number, event: TicketEvent): string {
+  const total = formatMoney(unitPriceOf(offer) * quantity, offer.currency);
+  return `${quantity === 1 ? "One ticket" : `${quantity} tickets`} to ${event.name} ${quantity === 1 ? "is" : "are"} ${total} total${seatText(offer)}. Want me to prepare the checkout?`;
+}
+
+export function checkoutPreparedReply(record: TicketPurchaseRecord): string {
+  const noun = record.quantity === 1 ? "ticket" : "tickets";
+  const total = formatMoney(record.total, record.currency);
+  const url = record.checkoutUrl;
+  const link = url ? `\n\n${url}` : "";
+  return `Your ${record.quantity} ${noun} to ${record.eventName} ${record.quantity === 1 ? "is" : "are"} still available for ${total}. I prepared the checkout for you:${link}`;
+}
+
+export function soldOutReply(): string {
+  return "Those tickets are no longer available, so I didn't charge you.";
 }
 
 export function overBudgetReply(alternative: TicketOffer | undefined, quantity: number, maxUnitPrice: number, event: TicketEvent, demo: boolean): string {
   const cap = formatMoney(maxUnitPrice, alternative?.currency ?? event.currency ?? "USD");
   if (!alternative) return `I don't see ${quantity} tickets for ${event.name} under ${cap} each right now.`;
   const ask = quantity === 1 ? "Want that one instead?" : "Want those instead?";
-  const demoNote = demo ? " (Demo checkout: no real tickets, paid with test funds.)" : "";
+  const demoNote = demo ? " (Demo checkout: no real tickets, paid with test funds on XRPL Testnet.)" : "";
   const unit = formatMoney(unitPriceOf(alternative), alternative.currency);
   const fees = offerIsAllIn(alternative) ? "" : isUsEvent(event) ? " before fees" : "";
   const total = quantity === 1 ? "" : `, ${formatMoney(unitPriceOf(alternative) * quantity, alternative.currency)} total for ${quantity}`;
   return `Nothing under ${cap} each right now. The cheapest I see is ${unit}${quantity === 1 ? "" : " each"}${seatText(alternative)}${total}${fees}. ${ask}${demoNote}`;
 }
 
-export function requoteReply(offer: TicketOffer, quantity: number, total: number, event: TicketEvent, demo: boolean): string {
-  const ask = quantity === 1 ? "Want me to buy it at that price?" : "Want me to buy them at that price?";
-  const demoNote = demo ? " (Demo checkout: no real tickets, paid with test funds.)" : "";
+export function requoteReply(
+  offer: TicketOffer,
+  quantity: number,
+  total: number,
+  event: TicketEvent,
+  demo: boolean,
+  previousTotal?: number,
+): string {
+  const ask = quantity === 1 ? "Want me to continue at the new price?" : "Want me to continue at the new price?";
+  const demoNote = demo ? " (Demo checkout: no real tickets, paid with test funds on XRPL Testnet.)" : "";
   const noun = quantity === 1 ? "ticket" : "tickets";
+  if (previousTotal !== undefined && Math.round(previousTotal * 100) !== Math.round(total * 100)) {
+    return `The price changed from ${formatMoney(previousTotal, offer.currency)} to ${formatMoney(total, offer.currency)}, so I didn't purchase anything. ${ask}${demoNote}`;
+  }
   return `The price changed: ${quantity} ${noun} for ${event.name} now come to ${formatMoney(total, offer.currency)} total${seatText(offer)}. ${ask}${demoNote}`;
 }
 
@@ -177,23 +205,26 @@ export function linkOnlyReply(input: { event: TicketEvent; offer?: TicketOffer; 
 export function completedReply(record: TicketPurchaseRecord): string {
   const noun = record.quantity === 1 ? "ticket" : "tickets";
   const total = formatMoney(record.total, record.currency);
+  const confirmation = record.confirmationNumber ?? record.orderId;
   if (!record.isDemo) {
-    return `Done — ${record.quantity} ${noun} for ${record.eventName} purchased for ${total}.${record.orderId ? ` Order ${record.orderId}.` : ""}`;
+    return `Booked — ${record.quantity} ${noun} to ${record.eventName} for ${total} total.${confirmation ? `\nConfirmation: ${confirmation}` : ""}`;
   }
-  const order = record.orderId ? ` Order ${record.orderId}.` : "";
   const settlement = record.settlement;
   if (settlement?.network === "xrpl-testnet") {
     const tx = settlement.transactionHash ? `\nTransaction: ${settlement.transactionHash}` : "";
     const explorer = settlement.explorerUrl ? `\n${settlement.explorerUrl}` : "";
     return (
-      `Paid ${settlement.amount} ${settlement.asset} on XRPL Testnet for ${record.quantity} demo ${noun} to ${record.eventName} (${total} ticket total).${order}` +
-      ` This was a test transaction, not a real ticket purchase.${tx}${explorer}`
+      `Booked — ${record.quantity} ${noun} to ${record.eventName} for ${total} total.` +
+      `${confirmation ? `\nConfirmation: ${confirmation}` : ""}` +
+      `\nPayment: validated on XRPL Testnet` +
+      `${tx}${explorer}` +
+      `\n(Demo settlement only — XRPL Testnet, not a real Ticketmaster purchase.)`
     );
   }
   if (settlement) {
-    return `Done — ${record.quantity} demo ${noun} for ${record.eventName}, ${total} total.${order} Demo payment only: no money moved and no real tickets were issued.`;
+    return `Done — ${record.quantity} demo ${noun} for ${record.eventName}, ${total} total.${confirmation ? ` Order ${confirmation}.` : ""} Demo payment only: no money moved and no real tickets were issued.`;
   }
-  return `Done — ${record.quantity} demo ${noun} for ${record.eventName}, ${total} total.${order} This was a demo checkout, so no real tickets were issued.`;
+  return `Done — ${record.quantity} demo ${noun} for ${record.eventName}, ${total} total.${confirmation ? ` Order ${confirmation}.` : ""} This was a demo checkout, so no real tickets were issued.`;
 }
 
 export function paymentFailedReply(reason: string): string {

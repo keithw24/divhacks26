@@ -22,6 +22,7 @@ export function reservationAgentPrompt(reservation: ReservationRequest, timeZone
 
   return [
     "You are an AI assistant calling a restaurant to request a reservation.",
+    "Say that you are an automated assistant calling on behalf of the customer.",
     `You are calling on behalf of ${name}. You are not ${name}.`,
     "Never claim to be the customer.",
     "If asked whether you are a human, say you are an AI assistant calling on behalf of the customer.",
@@ -46,6 +47,8 @@ export function reservationAgentPrompt(reservation: ReservationRequest, timeZone
     "Never change the party size.",
     "Never fabricate customer information, a phone number, an email, a credit card, a confirmation number, an allergy, or an occasion.",
     "Never claim a reservation succeeded unless the restaurant explicitly confirms it.",
+    "Before you hang up on a successful booking, repeat the restaurant, date, time, party size, reservation name, and confirmation number if they gave you one.",
+    "If anything is still ambiguous, do not treat the reservation as confirmed.",
     "If they require a decision outside these constraints, do not agree. End the call politely and return NEEDS_USER_INPUT so the customer can authorize it.",
     "If the restaurant offers a time inside the authorized window, accept it and ask them to book it.",
     "If they offer only a time outside the window, do not accept it. Ask whether anything inside the window is available. If nothing inside the window exists, thank them and end the call.",
@@ -67,6 +70,8 @@ export function dynamicVariables(reservation: ReservationRequest, timeZone = "Am
     party_size: reservation.partySize ?? 0,
     requested_date: reservation.requestedDate ?? "",
     requested_time: reservation.requestedTime ?? "",
+    reservation_date: reservation.requestedDate ?? "",
+    preferred_time: reservation.requestedTime ?? "",
     earliest_time: reservation.flexibility?.earliestTime ?? "",
     latest_time: reservation.flexibility?.latestTime ?? "",
     alternative_times_allowed: reservation.flexibility?.alternativeTimesAllowed ?? false,

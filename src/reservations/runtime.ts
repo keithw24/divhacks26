@@ -1,4 +1,6 @@
 import { createOutboundCaller } from "../elevenlabs/calls.js";
+import { RestaurantCallService } from "../phone/service.js";
+import { createMemoryStateStore } from "../store/state.js";
 import { startWebhookServer } from "../elevenlabs/server.js";
 import type { MockScenario } from "../elevenlabs/types.js";
 import type { StateStore } from "../store/state.js";
@@ -98,9 +100,18 @@ export function createReservationRuntime(env: ReservationRuntimeEnv) {
       : env.depositPayments
         ? createGuardedReservationPayments({ ...limits, payments: env.depositPayments, mode: "mock" })
         : undefined;
+  const phone = new RestaurantCallService({
+    state: env.stateStore ?? createMemoryStateStore(),
+    caller,
+    notify: env.notify,
+    agentId: env.elevenLabsAgentId,
+    agentPhoneNumberId: env.elevenLabsAgentPhoneNumberId,
+    refuseGazetteer: env.callMode === "live" && env.allowGazetteerDial !== true,
+  });
   const orchestrator = new ReservationOrchestrator({
     directory,
     caller,
+    phone,
     interpreter,
     notify: env.notify,
     autoComplete: env.autoComplete ?? env.callMode === "mock",

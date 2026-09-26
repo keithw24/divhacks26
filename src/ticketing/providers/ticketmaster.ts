@@ -1,3 +1,4 @@
+import { logIntegration } from "../../integrations/log.js";
 import {
   TicketProviderError,
   type EventSearchQuery,
@@ -187,12 +188,14 @@ export class TicketmasterProvider implements TicketProvider {
   }
 
   private async request(url: string, init: RequestInit): Promise<unknown> {
+    const started = Date.now();
     let response: Response;
     try {
       response = await this.fetcher(url, { ...init, signal: AbortSignal.timeout(this.timeoutMs) });
     } catch {
       throw new TicketProviderError("unavailable", "request failed");
     }
+    logIntegration("TICKETMASTER", "LIVE", `${init.method ?? "GET"} completed in ${Date.now() - started}ms status=${response.status}`);
     if (response.status === 401 || response.status === 403) throw new TicketProviderError("unauthorized", String(response.status));
     if (response.status === 429) throw new TicketProviderError("rate_limited", "429");
     if (response.status === 202) throw new TicketProviderError("unavailable", "pending");

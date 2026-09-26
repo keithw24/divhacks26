@@ -1,3 +1,5 @@
+import { logIntegration } from "./integrations/log.js";
+
 export interface GeocodedPlace {
   label: string;
   latitude: number;
@@ -70,6 +72,7 @@ export async function geocodeNyc(query: string): Promise<GeocodedPlace | null> {
   url.searchParams.set("lat", String(NYC_BIAS.lat));
   url.searchParams.set("lon", String(NYC_BIAS.lon));
 
+  const started = Date.now();
   const response = await fetch(url, {
     headers: { "User-Agent": "BoroughOS-DivHacks26/0.1 (hackathon; nyc safety lookup)" },
     signal: AbortSignal.timeout(8000),
@@ -95,6 +98,7 @@ export async function geocodeNyc(query: string): Promise<GeocodedPlace | null> {
     if (!inNyc || lat == null || lon == null) continue;
     if (lat < 40.4 || lat > 41.0 || lon < -74.4 || lon > -73.6) continue;
 
+    logIntegration("GEOCODER", "LIVE", `place returned in ${Date.now() - started}ms`);
     const parts = [props.name, props.street, props.locality, props.district, props.city]
       .map((part) => (part == null ? "" : String(part)))
       .filter(Boolean);

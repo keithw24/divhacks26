@@ -31,6 +31,15 @@ export interface Memory {
   createdAt?: string;
 }
 
+export type IntegrationHealth = "LIVE" | "NOT_CONFIGURED" | "ERROR" | "MOCK" | "UNVERIFIED";
+
+export interface IntegrationStatus {
+  id: string;
+  label: string;
+  status: IntegrationHealth;
+  detail: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -102,6 +111,11 @@ export const api = {
     call<{ token: string; user: Me }>("POST", "/api/auth/phone/verify", { challenge, phone, code }),
   joinWaitlist: (challenge: string, phone?: string, name?: string) =>
     call<{ position: number }>("POST", "/api/waitlist", { challenge, phone, name }),
+  integrations: () =>
+    call<{ checkedAt: string | null; integrations: IntegrationStatus[] }>(
+      "GET",
+      "/api/integrations",
+    ),
   signOut: () => call<{ ok: true }>("POST", "/api/auth/signout"),
   me: () => call<Me>("GET", "/api/me"),
   savePreferences: (prefs: Preferences) => call<{ ok: true }>("PUT", "/api/me/preferences", prefs),

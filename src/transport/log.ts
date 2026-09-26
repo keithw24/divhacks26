@@ -1,6 +1,8 @@
+import { redactSecrets } from "../integrations/log.js";
+
 export function logTransportError(scope: string, error: unknown): void {
   const category = error instanceof Error ? error.name : "Error";
-  const detail = error instanceof Error ? error.message : "";
+  const detail = error instanceof Error ? redactSecrets(error.message) : "";
   console.error(`[transport:${scope}] ${category}${detail ? `: ${detail}` : ""}`);
 }
 

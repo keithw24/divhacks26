@@ -1,8 +1,9 @@
 import { discoverEvents, type DiscoveryContext, type GeoPoint } from "./discovery.js";
+import { executeTicketPurchase } from "./execute.js";
 import {
+  confirmCheckoutReply,
   confirmPurchaseReply,
   detailsReply,
-  EXPIRED_REPLY,
   formatMoney,
   linkOnlyReply,
   notEnoughReply,
@@ -76,7 +77,7 @@ type Resolved = { status: "found"; event: TicketEvent } | { status: "ambiguous";
 
 export class TicketingService {
   readonly store: TicketingStore;
-  private readonly executor: TicketPurchaseExecutor;
+  readonly executor: TicketPurchaseExecutor;
   private readonly trace: TicketTraceSink;
   private readonly now: () => Date;
   private readonly timeZone: string;
@@ -209,6 +210,7 @@ export class TicketingService {
     });
     if (shown.length === 1 && shown[0]) this.focus(input.spaceId, shown[0]);
     this.emit("ticket.search", { spaceId: input.spaceId, provider: this.options.provider.name, resultCount: result.events.length });
+    this.emit("TICKET_DISCOVERED", { spaceId: input.spaceId, provider: this.options.provider.name, resultCount: result.events.length });
     return searchReply({
       events: shown,
       now: this.now(),
@@ -236,7 +238,9 @@ export class TicketingService {
     let reply = priceReply(event, quote, this.options.provider.checkoutUrl(event));
     if (quantity && quote.offers.length > 0) {
       const selection = selectOffer(quote.offers, { quantity, maxUnitPrice });
-      if (selection.status === "selected") reply += ` For ${quantity}, the best match is ${formatMoney(unitPriceOf(selection.offer), selection.offer.currency)} each, ${formatMoney(totalFor(selection.offer, quantity), selection.offer.currency)} total${offerIsAllIn(selection.offer) ? "" : " before fees"}.`;
+      if (selection.status === "selected") {
+        reply += ` For ${quantity}, the best match is ${formatMoney(unitPriceOf(selection.offer), selection.offer.currency)} each, ${formatMoney(totalFor(selection.offer, quantity), selection.offer.currency)} total${offerIsAllIn(selection.offer) ? "" : " before fees"}.`;
+      }
     }
     return reply;
   }
@@ -292,43 +296,68 @@ export class TicketingService {
     const url = this.options.provider.checkoutUrl(event);
     const selection = selectOffer(quote.offers, { quantity, maxUnitPrice, requirePurchasable: mode === "provider" });
 
-    if (mode === "link" || selection.status === "no_offers") {
-      const offer = selection.status === "selected" ? selection.offer : undefined;
+    // Offer-level prices always go through pending confirmation — even in link mode.
+    // Range-only listings (no seat/offer prices) hand off the official URL without authorizing a buy.
+    if (selection.status === "no_offers") {
       const record = this.store.createPurchase({
         ...this.recordBase(input, event, quantity, "link"),
-        offerId: offer?.id ?? "",
-        unitPrice: offer ? unitPriceOf(offer) : quote.minPrice ?? 0,
-        total: offer ? totalFor(offer, quantity) : 0,
-        currency: offer?.currency ?? quote.currency ?? event.currency ?? "USD",
-        allIn: offer ? offerIsAllIn(offer) : quote.allIn,
-        ticketTotal: { amount: offer ? totalFor(offer, quantity) : 0, currency: offer?.currency ?? quote.currency ?? "USD" },
+        offerId: "",
+        unitPrice: quote.minPrice ?? 0,
+        total: 0,
+        currency: quote.currency ?? event.currency ?? "USD",
+        allIn: quote.allIn,
+        ticketTotal: { amount: 0, currency: quote.currency ?? "USD" },
         status: "LINK_ONLY",
         checkoutUrl: url,
       });
-      this.emitRecord("ticket.purchase_requested", record, { reason: selection.status === "no_offers" ? "no_offer_level_prices" : "link_mode" });
-      return linkOnlyReply({ event, offer, quantity: offer ? quantity : undefined, url, fromPrice: quote.minPrice, allIn: quote.allIn });
+      this.emitRecord("ticket.purchase_requested", record, { reason: "no_offer_level_prices" });
+      this.emitRecord("TICKET_PURCHASE_REQUESTED", record, { reason: "no_offer_level_prices" });
+      return linkOnlyReply({ event, quantity: undefined, url, fromPrice: quote.minPrice, allIn: quote.allIn });
     }
     if (selection.status === "not_enough") return notEnoughReply(quantity, event, selection.maxAvailable);
     if (selection.status === "over_budget") {
       if (selection.alternative) this.openPending(input, event, selection.alternative, quantity, totalFor(selection.alternative, quantity), mode);
       return overBudgetReply(selection.alternative, quantity, maxUnitPrice ?? 0, event, mode === "mock");
     }
+
     this.openPending(input, event, selection.offer, quantity, totalFor(selection.offer, quantity), mode);
+    if (mode === "link") return confirmCheckoutReply(selection.offer, quantity, event);
     return confirmPurchaseReply(selection.offer, quantity, event, mode === "mock");
   }
 
   private openPending(input: TicketingTurnInput, event: TicketEvent, offer: TicketOffer, quantity: number, total: number, mode: TicketPurchaseMode): TicketPurchaseRecord {
     const previous = this.store.pending(input.spaceId);
     if (previous) this.store.patch(previous.id, { status: "CANCELLED" });
+    const fees =
+      offer.allInUnitPrice != null && offer.allInUnitPrice > offer.unitPrice
+        ? Math.round((offer.allInUnitPrice - offer.unitPrice) * 100) / 100
+        : undefined;
     const record = this.store.createPurchase({
       ...this.recordBase(input, event, quantity, mode),
       offerId: offer.id,
       unitPrice: unitPriceOf(offer),
+      fees,
       total,
       currency: offer.currency,
       allIn: offerIsAllIn(offer),
       ticketTotal: { amount: total, currency: offer.currency },
       checkoutUrl: this.options.provider.checkoutUrl(event),
+      evidence: [
+        {
+          type: "TICKET_QUOTED",
+          at: this.now().toISOString(),
+          messageId: input.messageId,
+          details: {
+            eventId: event.id,
+            offerId: offer.id,
+            quantity,
+            unitPrice: unitPriceOf(offer),
+            total,
+            currency: offer.currency,
+            provider: this.options.provider.name,
+          },
+        },
+      ],
     });
     this.store.update(input.spaceId, (state) => {
       state.selectedOffer = offer;
@@ -336,6 +365,8 @@ export class TicketingService {
     });
     this.emitRecord("ticket.offer_selected", record, { priceSource: this.store.get(input.spaceId).lastQuote?.source });
     this.emitRecord("ticket.purchase_requested", record);
+    this.emitRecord("TICKET_QUOTED", record);
+    this.emitRecord("TICKET_PURCHASE_REQUESTED", record);
     return record;
   }
 
@@ -359,43 +390,51 @@ export class TicketingService {
 
   /**
    * The only path to a purchase: a pending quote in this space, a clear yes from the person who asked,
-   * before the quote expires, claimed once.
+   * after the quote was shown, before it expires, claimed once.
    */
   private async confirm(input: TicketingTurnInput): Promise<string | undefined> {
     const pending = this.store.pending(input.spaceId);
     if (!pending) return undefined;
-    if (!input.senderId || input.senderId !== pending.initiatorId) {
+    if (!input.senderId) {
       return `Only ${pending.initiatorName || "the person who asked"} can confirm that ticket purchase.`;
     }
-    if (this.now().getTime() > Date.parse(pending.expiresAt)) {
-      this.store.patch(pending.id, { status: "EXPIRED" });
-      this.store.update(input.spaceId, (state) => {
-        state.pendingPurchaseId = undefined;
-      });
-      return EXPIRED_REPLY;
-    }
-    if (input.messageId && !this.store.beginMessage(input.spaceId, input.messageId)) return "On it.";
-    const claimed = this.store.claim(pending.id);
-    if (!claimed) return "Already working on that purchase.";
-    const confirmed = this.store.patch(claimed.id, { confirmMessageId: input.messageId }) ?? claimed;
-    this.emitRecord("ticket.purchase_confirmed", confirmed);
-    this.store.update(input.spaceId, (state) => {
-      state.pendingPurchaseId = undefined;
-    });
 
     const state = this.store.get(input.spaceId);
-    const event =
-      state.selectedEvent?.id === confirmed.eventId ? state.selectedEvent : await this.options.provider.getEvent(confirmed.eventId).catch(() => undefined);
-    if (!event) {
-      this.store.patch(confirmed.id, { status: "FAILED", failureReason: "event_unavailable" });
-      this.emitRecord("ticket.purchase_failed", confirmed, { reason: "event_unavailable" });
-      return "I couldn't re-check that event, so I didn't buy anything.";
-    }
+    const result = await executeTicketPurchase(
+      {
+        spaceId: input.spaceId,
+        userId: input.senderId,
+        quoteId: pending.id,
+        messageId: input.messageId,
+      },
+      {
+        store: this.store,
+        provider: this.options.provider,
+        executor: this.executor,
+        now: this.now,
+        trace: this.trace,
+        resolveEvent: async (eventId) =>
+          state.selectedEvent?.id === eventId
+            ? state.selectedEvent
+            : this.options.provider.getEvent(eventId).catch(() => undefined),
+      },
+    );
 
-    const outcome = await this.executor.execute(confirmed, event);
+    if (!result.ok) return result.reply;
+
+    const outcome = result.outcome;
     if (outcome.outcome === "requote") {
-      this.openPending(input, event, outcome.offer, confirmed.quantity, outcome.total, confirmed.mode);
-      return requoteReply(outcome.offer, confirmed.quantity, outcome.total, event, confirmed.mode === "mock");
+      const event =
+        state.selectedEvent?.id === pending.eventId
+          ? state.selectedEvent
+          : ((await this.options.provider.getEvent(pending.eventId).catch(() => undefined)) ?? {
+              id: pending.eventId,
+              provider: pending.provider,
+              name: pending.eventName,
+              venue: pending.venue,
+            });
+      this.openPending(input, event, outcome.offer, pending.quantity, outcome.total, pending.mode);
+      return requoteReply(outcome.offer, pending.quantity, outcome.total, event, pending.mode === "mock", outcome.previousTotal);
     }
     return outcome.reply;
   }
@@ -433,7 +472,9 @@ export class TicketingService {
       return event ? { status: "found", event } : { status: "not_found" };
     }
     if (ref.type === "event") {
-      const event = state.lastSearchResults.find((item) => item.id === ref.eventId) ?? (state.selectedEvent?.id === ref.eventId ? state.selectedEvent : undefined);
+      const event =
+        state.lastSearchResults.find((item) => item.id === ref.eventId) ??
+        (state.selectedEvent?.id === ref.eventId ? state.selectedEvent : undefined);
       return event ? { status: "found", event } : { status: "not_found" };
     }
     if (ref.type === "current") {
@@ -448,10 +489,12 @@ export class TicketingService {
       }
       return { status: "not_found" };
     }
-    const found = await discoverEvents(this.options.provider, { ...request, keyword: ref.text, maxPrice: undefined }, this.discoveryContext(input)).catch((error) => {
-      this.emit("ticket.search", { spaceId: input.spaceId, provider: this.options.provider.name, reason: failureKind(error) });
-      throw new SearchFailed();
-    });
+    const found = await discoverEvents(this.options.provider, { ...request, keyword: ref.text, maxPrice: undefined }, this.discoveryContext(input)).catch(
+      (error) => {
+        this.emit("ticket.search", { spaceId: input.spaceId, provider: this.options.provider.name, reason: failureKind(error) });
+        throw new SearchFailed();
+      },
+    );
     this.emit("ticket.search", { spaceId: input.spaceId, provider: this.options.provider.name, resultCount: found.events.length });
     const first = found.events[0];
     if (!first) return { status: "not_found", label: ref.text };
@@ -465,6 +508,15 @@ export class TicketingService {
     try {
       const quote = await this.options.provider.getPrices(event);
       this.emit("ticket.price_lookup", {
+        spaceId,
+        eventId: event.id,
+        provider: this.options.provider.name,
+        unitPrice: quote.minPrice,
+        currency: quote.currency,
+        priceSource: quote.source,
+        resultCount: quote.offers.length,
+      });
+      this.emit("TICKET_QUOTED", {
         spaceId,
         eventId: event.id,
         provider: this.options.provider.name,
@@ -503,6 +555,7 @@ export class TicketingService {
       eventId: record.eventId,
       provider: record.provider,
       purchaseId: record.id,
+      quoteId: record.quoteId,
       quantity: record.quantity,
       unitPrice: record.unitPrice,
       total: record.total,
@@ -529,4 +582,68 @@ function resolvedReply(resolved: Exclude<Resolved, { status: "found" }>): string
 function failureKind(error: unknown): string {
   if (error instanceof TicketProviderError) return error.kind;
   return error instanceof Error ? error.name : "error";
+}
+
+/** Public view of a purchase for the website dashboard. Never includes secrets. */
+export function publicTicketPurchase(record: TicketPurchaseRecord) {
+  return {
+    purchaseId: record.id,
+    quoteId: record.quoteId,
+    spaceId: record.spaceId,
+    userId: record.initiatorId,
+    provider: record.provider,
+    providerEventId: record.eventId,
+    eventName: record.eventName,
+    venue: record.venue,
+    quantity: record.quantity,
+    unitPrice: record.unitPrice,
+    fees: record.fees,
+    total: record.total,
+    currency: record.currency,
+    status: record.status,
+    /** True only for COMPLETED. CHECKOUT_REQUIRED is never presented as purchased. */
+    purchased: record.status === "COMPLETED",
+    isDemo: record.isDemo,
+    checkoutUrl: record.checkoutUrl,
+    providerOrderId: record.orderId,
+    confirmationNumber: record.confirmationNumber ?? record.orderId,
+    xrplTxHash: record.paymentTransactionId ?? record.settlement?.transactionHash,
+    settlement: record.settlement
+      ? {
+          network: record.settlement.network,
+          asset: record.settlement.asset,
+          amount: record.settlement.amount,
+          validated: record.settlement.independentlyVerified === true && record.settlement.ledgerResult === "tesSUCCESS",
+          transactionHash: record.settlement.transactionHash,
+          explorerUrl: record.settlement.explorerUrl,
+          sender: record.settlement.senderAddress,
+          merchant: record.settlement.destinationAddress,
+        }
+      : undefined,
+    quotedAt: record.quotedAt,
+    confirmedAt: record.confirmedAt,
+    purchasedAt: record.completedAt,
+    evidence: record.evidence,
+    stages: ticketPurchaseStages(record.status),
+  };
+}
+
+/** Event → quote → confirmation → payment/checkout → result. */
+export function ticketPurchaseStages(status: string): { label: string; done: boolean }[] {
+  const purchased = status === "COMPLETED";
+  const checkout = status === "CHECKOUT_REQUIRED" || status === "LINK_ONLY";
+  const confirmed = ["PROCESSING", "PAYMENT_SUBMITTED", "COMPLETED", "CHECKOUT_REQUIRED", "PRICE_CHANGED", "SOLD_OUT", "FAILED"].includes(status);
+  return [
+    { label: "Event", done: true },
+    { label: "Quote", done: true },
+    { label: "Confirmation", done: confirmed || purchased || checkout },
+    {
+      label: purchased ? "Payment" : checkout ? "Checkout" : "Payment/checkout",
+      done: purchased || checkout || status === "PAYMENT_SUBMITTED",
+    },
+    {
+      label: purchased ? "Purchased" : checkout ? "Checkout ready" : "Result",
+      done: purchased || checkout || ["FAILED", "SOLD_OUT", "PRICE_CHANGED", "EXPIRED", "CANCELLED"].includes(status),
+    },
+  ];
 }

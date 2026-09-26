@@ -8,6 +8,8 @@ import { lastLocation, locationsForSpace, recordLocation, recordMessage, transcr
 import { senderDisplayName } from "./chat/invoke.js";
 import { parseLatLng } from "./chat/location.js";
 import { config } from "./config.js";
+import { liveDemoProblems } from "./integrations/live-demo.js";
+import { logIntegration } from "./integrations/log.js";
 import { createBackboardMemoryService } from "./memory/backboard.js";
 import { openAgentStateStore } from "./store/state.js";
 import { createPaymentRuntime } from "./payments/runtime.js";
@@ -20,7 +22,11 @@ import { createReservationRuntime } from "./reservations/runtime.js";
 import { geocodeNyc } from "./geocode.js";
 import { createMerchantDirectory } from "./payments/merchants.js";
 import { createTicketingRuntime } from "./ticketing/runtime.js";
+import { publicTicketPurchase } from "./ticketing/service.js";
 import { createMeetupRuntime } from "./meetup/runtime.js";
+import { ConversationContextStore } from "./orchestration/context.js";
+import { createPlacesRestaurantSearch } from "./orchestration/dining.js";
+import { CrossDomainOrchestrator } from "./orchestration/orchestrator.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
 import { createBackboardClient } from "./backboard/client.js";
@@ -28,6 +34,18 @@ import { startWebRuntime } from "./web/runtime.js";
 import { createMailer } from "./web/email.js";
 
 const UNHEARD_VOICE_MEMO = "[sent a voice memo]";
+
+const liveProblems = liveDemoProblems(config);
+if (liveProblems.length) {
+  console.error("LIVE_DEMO_MODE startup check failed:");
+  for (const problem of liveProblems) console.error(`- ${problem}`);
+  throw new Error("LIVE_DEMO_MODE refused to start");
+}
+if (config.liveDemoMode) {
+  logIntegration("DEMO", "LIVE", "mock ticket, reservation, and gazetteer fallbacks are disabled");
+}
+const reservationCallMode = config.liveDemoMode ? "live" : config.reservationCallMode;
+const ticketingProviderName = config.liveDemoMode ? "ticketmaster" : config.ticketingProvider;
 
 const transport = createTransportationServiceFromEnv({
   geminiApiKey: config.geminiApiKey,
@@ -65,7 +83,8 @@ const meetup = createMeetupRuntime({
   stateStore: agentState,
 });
 const reservations = createReservationRuntime({
-  callMode: config.reservationCallMode,
+  callMode: reservationCallMode,
+  providers: config.liveDemoMode ? [] : undefined,
   mockScenario: config.reservationMockScenario,
   allowGazetteerDial: config.reservationAllowGazetteerDial,
   geminiApiKey: config.geminiApiKey,
@@ -98,8 +117,9 @@ const reservations = createReservationRuntime({
     await send(text);
   },
 });
+const conversationContext = ConversationContextStore.open(agentState);
 const ticketing = createTicketingRuntime({
-  provider: config.ticketingProvider,
+  provider: ticketingProviderName,
   purchaseMode: config.ticketingPurchaseMode,
   ticketmasterApiKey: config.ticketmasterApiKey,
   ticketmasterPartnerApiKey: config.ticketmasterPartnerApiKey,
@@ -110,6 +130,7 @@ const ticketing = createTicketingRuntime({
     return place ? { latitude: place.latitude, longitude: place.longitude, label: place.label } : undefined;
   },
   onEventSelected: (spaceId, event) => {
+    conversationContext.noteEvent(spaceId, event);
     if (!event.venue) return;
     transport.noteDestination(spaceId, {
       name: event.venue,
@@ -129,6 +150,20 @@ const ticketing = createTicketingRuntime({
     maxUsd: config.paymentsMaxUsd,
     timeoutMs: config.paymentsTimeoutMs,
   },
+});
+const orchestration = new CrossDomainOrchestrator({
+  context: conversationContext,
+  ticketing: ticketing.service,
+  reservations: reservations.orchestrator,
+  payments: payments.service,
+  transport,
+  restaurants: createPlacesRestaurantSearch({ apiKey: config.googleMapsApiKey, strict: config.liveDemoMode }),
+  resolvePlace: async (query) => {
+    const place = await geocodeNyc(query);
+    return place ? { latitude: place.latitude, longitude: place.longitude, label: place.label } : undefined;
+  },
+  paymentMode: merchantPaymentMode,
+  timeZone: config.timezone,
 });
 const memory = config.backboardApiKey
   ? createBackboardMemoryService({
@@ -224,7 +259,7 @@ if (config.googleMapsApiKey) {
   console.info("GOOGLE_MAPS_API_KEY is set; structured Routes/Places will supplement Gemini grounding.");
 }
 console.info(
-  config.reservationCallMode === "live"
+  reservationCallMode === "live"
     ? "Reservations: live ElevenLabs outbound calls are enabled."
     : "Reservations: mock mode (no real phone calls).",
 );
@@ -255,6 +290,7 @@ if (xrpl) {
     ledger: xrpl.ledger,
     secrets: () => xrpl.secrets.knownSecrets(),
     operatorPayments: () => xrplPayments.listPublicTransactions({ limit: 20 }),
+    ticketPurchases: () => ticketing.service.store.listPurchases(20).map(publicTicketPurchase),
   });
   void startXrplDashboardServer(config.xrplDashboardPort, () => dashboard.build())
     .then((server) => console.info(`XRPL Testnet dashboard: http://127.0.0.1:${server.port}${DASHBOARD_PATH}`))
@@ -392,6 +428,7 @@ for await (const [space, message] of app.messages) {
       payments: payments.service,
       ticketing: ticketing.service,
       meetup: meetup.service,
+      orchestration,
       liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
       suggest: (input) => suggestNext(input),

@@ -427,6 +427,22 @@ export class DepositFlow {
     if (this.paying.has(reservation.id)) {
       return { handled: true, reply: `Already paying the ${paymentNoun(requirement.paymentType)}.`, acknowledgement: "👍" };
     }
+    // Held from the first check through settlement, so concurrent yeses cannot interleave.
+    this.paying.add(reservation.id);
+    try {
+      return await this.authorizeAndPay(reservation, input, requirement, payments);
+    } finally {
+      this.paying.delete(reservation.id);
+    }
+  }
+
+  private async authorizeAndPay(
+    reservation: ReservationRequest,
+    input: ReservationTurnInput,
+    requirement: ReservationPaymentRequirement,
+    payments: ReservationPaymentPort,
+  ): Promise<ReservationTurnResult> {
+    const deposit = reservation.deposit!;
     const now = this.host.now();
     if (deposit.status === "PENDING") return this.recheckPending(reservation, input, now);
     if (isExpired(requirement, now)) {
@@ -444,30 +460,24 @@ export class DepositFlow {
     }
     const verified = fresh;
 
-    this.paying.add(reservation.id);
-    let result: ReservationPaymentResult;
-    try {
-      this.transition(deposit, "PAYMENT_AUTHORIZED", `${input.senderName || "The requester"} said "${input.text.trim().slice(0, 40)}"`);
-      this.transition(deposit, "TERMS_RECHECKED", `Amount and destination re-read from ${requirement.source}; unchanged`);
-      this.host.store.save(reservation);
-      result = await payments.payRestaurantDeposit({
-        requirement,
-        authorization: {
-          spaceId: reservation.photonSpaceId,
-          senderId: input.senderId ?? "",
-          senderName: input.senderName,
-          messageId: input.messageId,
-          at: now.toISOString(),
-        },
-        initiatorId: deposit.initiatorId ?? "",
-        initiatorName: deposit.initiatorName,
-        paymentId: deposit.paymentId,
-        verified: { amountUsd: verified.requirement.amountUsd, recipient: verified.requirement.recipient },
-        metadata: { reservationId: reservation.id, restaurant: requirement.restaurantName },
-      });
-    } finally {
-      this.paying.delete(reservation.id);
-    }
+    this.transition(deposit, "PAYMENT_AUTHORIZED", `${input.senderName || "The requester"} said "${input.text.trim().slice(0, 40)}"`);
+    this.transition(deposit, "TERMS_RECHECKED", `Amount and destination re-read from ${requirement.source}; unchanged`);
+    this.host.store.save(reservation);
+    const result = await payments.payRestaurantDeposit({
+      requirement,
+      authorization: {
+        spaceId: reservation.photonSpaceId,
+        senderId: input.senderId ?? "",
+        senderName: input.senderName,
+        messageId: input.messageId,
+        at: now.toISOString(),
+      },
+      initiatorId: deposit.initiatorId ?? "",
+      initiatorName: deposit.initiatorName,
+      paymentId: deposit.paymentId,
+      verified: { amountUsd: verified.requirement.amountUsd, recipient: verified.requirement.recipient },
+      metadata: { reservationId: reservation.id, restaurant: requirement.restaurantName },
+    });
     return this.remember(reservation, input, await this.settle(reservation, input, result));
   }
 
@@ -475,28 +485,22 @@ export class DepositFlow {
   private async recheckPending(reservation: ReservationRequest, input: ReservationTurnInput, now: Date): Promise<ReservationTurnResult> {
     const deposit = reservation.deposit!;
     const requirement = deposit.requirement!;
-    this.paying.add(reservation.id);
-    let result: ReservationPaymentResult;
-    try {
-      result = await this.options.payments!.payRestaurantDeposit({
-        requirement,
-        authorization: {
-          spaceId: reservation.photonSpaceId,
-          senderId: input.senderId ?? "",
-          senderName: input.senderName,
-          messageId: input.messageId,
-          at: now.toISOString(),
-        },
-        initiatorId: deposit.initiatorId ?? "",
-        initiatorName: deposit.initiatorName,
-        paymentId: deposit.paymentId,
-        verified: { amountUsd: requirement.amountUsd, recipient: requirement.recipient },
-        metadata: { reservationId: reservation.id, restaurant: requirement.restaurantName },
-        settleOnly: true,
-      });
-    } finally {
-      this.paying.delete(reservation.id);
-    }
+    const result = await this.options.payments!.payRestaurantDeposit({
+      requirement,
+      authorization: {
+        spaceId: reservation.photonSpaceId,
+        senderId: input.senderId ?? "",
+        senderName: input.senderName,
+        messageId: input.messageId,
+        at: now.toISOString(),
+      },
+      initiatorId: deposit.initiatorId ?? "",
+      initiatorName: deposit.initiatorName,
+      paymentId: deposit.paymentId,
+      verified: { amountUsd: requirement.amountUsd, recipient: requirement.recipient },
+      metadata: { reservationId: reservation.id, restaurant: requirement.restaurantName },
+      settleOnly: true,
+    });
     return this.remember(reservation, input, await this.settle(reservation, input, result));
   }
 
