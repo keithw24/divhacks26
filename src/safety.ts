@@ -32,6 +32,8 @@ export interface BlockSafetyReport {
   hourNeighborhoodCount: number;
   peakHour: number | null;
   peakHourCount: number;
+  years: number;
+  hourNeighborhoodFelonies: number;
   neighborhoodByHour: HourBucket[];
   topOffenses: OffenseCount[];
   precincts: Array<{ precinct: number | null; borough: string | null; n: number }>;
@@ -42,6 +44,7 @@ export interface BlockSafetyReport {
 
 const BLOCK_METERS = 250;
 const NEIGHBORHOOD_METERS = 800;
+const SAMPLE_YEARS = 2;
 
 const REPORT_SQL = `
 WITH pt AS (
@@ -56,14 +59,16 @@ WITH pt AS (
     nyc_meters(pt.lat, pt.lon, c.latitude, c.longitude) AS meters
   FROM nypd_complaints c
   CROSS JOIN pt
-  WHERE c.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
+  WHERE c.occurred_at >= now() - interval '2 years'
+    AND c.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
     AND c.longitude BETWEEN pt.lon - 0.012 AND pt.lon + 0.012
 ), shoot AS (
   SELECT
     extract(hour from s.occurred_at AT TIME ZONE 'America/New_York')::int AS hour_et,
     nyc_meters(pt.lat, pt.lon, s.latitude, s.longitude) AS meters
   FROM nypd_shootings s CROSS JOIN pt
-  WHERE s.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
+  WHERE s.occurred_at >= now() - interval '2 years'
+    AND s.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
     AND s.longitude BETWEEN pt.lon - 0.012 AND pt.lon + 0.012
 ), crash AS (
   SELECT
@@ -71,7 +76,8 @@ WITH pt AS (
     nyc_meters(pt.lat, pt.lon, x.latitude, x.longitude) AS meters,
     x.ped_injured, x.cyc_injured
   FROM nyc_collisions x CROSS JOIN pt
-  WHERE x.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
+  WHERE x.occurred_at >= now() - interval '2 years'
+    AND x.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
     AND x.longitude BETWEEN pt.lon - 0.012 AND pt.lon + 0.012
 ), lamp AS (
   SELECT
@@ -79,7 +85,8 @@ WITH pt AS (
     nyc_meters(pt.lat, pt.lon, L.latitude, L.longitude) AS meters,
     L.status
   FROM nyc_311_lights L CROSS JOIN pt
-  WHERE L.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
+  WHERE L.occurred_at >= now() - interval '2 years'
+    AND L.latitude BETWEEN pt.lat - 0.012 AND pt.lat + 0.012
     AND L.longitude BETWEEN pt.lon - 0.012 AND pt.lon + 0.012
 )
 SELECT jsonb_build_object(
@@ -87,6 +94,7 @@ SELECT jsonb_build_object(
   'neighborhoodCount', (SELECT count(*) FROM nearby WHERE meters < $5),
   'hourBlockCount', (SELECT count(*) FROM nearby, pt WHERE meters < $4 AND nearby.hour_et = pt.hour_et),
   'hourNeighborhoodCount', (SELECT count(*) FROM nearby, pt WHERE meters < $5 AND nearby.hour_et = pt.hour_et),
+  'hourNeighborhoodFelonies', (SELECT count(*) FROM nearby, pt WHERE meters < $5 AND nearby.hour_et = pt.hour_et AND law_category = 'FELONY'),
   'byHour', COALESCE((
     SELECT jsonb_agg(jsonb_build_object('hourEt', hour_et, 'complaints', n, 'felonies', felonies) ORDER BY hour_et)
     FROM (
@@ -218,6 +226,8 @@ export async function lookupBlockSafety(
     longitude,
     hourEt,
     asOfEt,
+    years: SAMPLE_YEARS,
+    hourNeighborhoodFelonies: Number(payload.hourNeighborhoodFelonies ?? 0),
     blockMeters: BLOCK_METERS,
     neighborhoodMeters: NEIGHBORHOOD_METERS,
     blockCount: Number(payload.blockCount ?? 0),
