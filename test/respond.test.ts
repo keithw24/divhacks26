@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSafetyReply } from "../src/formatReport.js";
+import { formatSafetyReply, nycComparisonPhrase } from "../src/formatReport.js";
 import { parseCoordinates, locationQueryFromMessage } from "../src/geocode.js";
 import { computeBaselines, parseRequestedHour } from "../src/safety.js";
 import { wantsSafetySketch } from "../src/safetyIntent.js";
@@ -89,32 +89,25 @@ function sampleReport(overrides: Partial<Parameters<typeof formatSafetyReply>[1]
 }
 
 describe("formatSafetyReply", () => {
-  const place = {
-    label: "Columbia University, Morningside Heights",
-    latitude: 40.80775,
-    longitude: -73.96249,
-    locality: "Morningside Heights",
-  };
-
-  it("gives a short 2-year verdict, not incident lists", () => {
-    const text = formatSafetyReply(place, sampleReport({ hourEt: 11 }));
-    expect(text).toContain("Columbia University");
-    expect(text).toContain("past 2 years");
-    expect(text).toContain("relatively safe");
-    expect(text).toContain("typical NYC");
-    expect(text).toContain("neighborhood");
-    expect(text).toContain("personal-risk");
-    expect(text).not.toContain("HARRASSMENT");
-    expect(text).not.toMatch(/Shootings|Crashes|311|precinct|reports at this hour/i);
+  it("gives calm everyday advice when safer than NYC", () => {
+    const text = formatSafetyReply(
+      {
+        label: "Columbia University, Morningside Heights",
+        latitude: 40.80775,
+        longitude: -73.96249,
+        locality: "Morningside Heights",
+      },
+      sampleReport({ hourEt: 13 }),
+    );
+    expect(text).toMatch(/safer than typical NYC/i);
+    expect(text).toMatch(/everyday awareness/i);
+    expect(text).not.toMatch(/slightly cautious|super cautious|Columbia|1pm/i);
   });
 
-  it("flags extra caution when this hour is well above NYC and the area", () => {
-    const text = formatSafetyReply(
-      place,
+  it("suggests only slight caution when well above the city, not alarm", () => {
+    const text = nycComparisonPhrase(
       sampleReport({
         hourEt: 23,
-        hourNeighborhoodFelonies: 4,
-        shootings: { blockCount: 0, neighborhoodCount: 12, hourBlockCount: 0, hourNeighborhoodCount: 2 },
         baselines: {
           borough: "MANHATTAN",
           areaVsNyc: 1.8,
@@ -125,9 +118,9 @@ describe("formatSafetyReply", () => {
         },
       }),
     );
-    expect(text).toContain("extra caution");
-    expect(text).toContain("busier than typical NYC");
-    expect(text).not.toMatch(/\d+ reports/i);
+    expect(text).toMatch(/less safe than typical NYC/i);
+    expect(text).toMatch(/more caution/i);
+    expect(text).not.toMatch(/super cautious|avoid|panic|reports/i);
   });
 });
 
