@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSafetyReply, nycComparisonPhrase } from "../src/formatReport.js";
+import { formatSafetyReply } from "../src/formatReport.js";
 import { parseCoordinates, locationQueryFromMessage } from "../src/geocode.js";
 import { computeBaselines, parseRequestedHour } from "../src/safety.js";
 import { wantsSafetySketch } from "../src/safetyIntent.js";
@@ -89,38 +89,44 @@ function sampleReport(overrides: Partial<Parameters<typeof formatSafetyReply>[1]
 }
 
 describe("formatSafetyReply", () => {
-  it("gives calm everyday advice when safer than NYC", () => {
+  const now = new Date("2026-09-26T16:00:00Z");
+  const place = {
+    label: "Columbia University, Morningside Heights",
+    latitude: 40.80775,
+    longitude: -73.96249,
+    locality: "Morningside Heights",
+  };
+
+  it("renders the context card instead of a safe/unsafe verdict", () => {
     const text = formatSafetyReply(
-      {
-        label: "Columbia University, Morningside Heights",
-        latitude: 40.80775,
-        longitude: -73.96249,
-        locality: "Morningside Heights",
-      },
-      sampleReport({ hourEt: 13 }),
+      place,
+      sampleReport({
+        hourEt: 13,
+        neighborhoodCount: 2400,
+        hourNeighborhoodCount: 50,
+        cityHourComplaints: 20_000,
+        observation: { start: "2024-09-01T00:00:00Z", end: "2026-06-30T12:00:00Z", days: 667 },
+      }),
+      now,
     );
-    expect(text).toMatch(/safer than typical NYC/i);
-    expect(text).toMatch(/everyday awareness/i);
-    expect(text).not.toMatch(/slightly cautious|super cautious|Columbia|1pm/i);
+    expect(text).toMatch(/^From historical reported complaints, this area's 1–2 PM count is below its own typical hour/);
+    expect(text).toContain("50 reports over 667 days; reports through Jun 30, 2026 (88 days ago)");
+    expect(text).toMatch(/Not live conditions, and it doesn't predict personal safety\.$/);
+    expect(text).not.toMatch(/\b(safe|unsafe|dangerous|avoid)\b|safer than typical NYC|Columbia/i);
   });
 
-  it("suggests only slight caution when well above the city, not alarm", () => {
-    const text = nycComparisonPhrase(
+  it("reports too little data rather than a verdict when the sample is thin", () => {
+    const text = formatSafetyReply(
+      place,
       sampleReport({
         hourEt: 23,
-        baselines: {
-          borough: "MANHATTAN",
-          areaVsNyc: 1.8,
-          hourVsNyc: 2.4,
-          hourVsArea: 2.1,
-          areaVsBorough: 1.6,
-          hourVsBorough: 2.2,
-        },
+        hourNeighborhoodCount: 0,
+        observation: { start: "2026-06-15T00:00:00Z", end: "2026-06-30T00:00:00Z", days: 15 },
       }),
+      now,
     );
-    expect(text).toMatch(/less safe than typical NYC/i);
-    expect(text).toMatch(/more caution/i);
-    expect(text).not.toMatch(/super cautious|avoid|panic|reports/i);
+    expect(text).toMatch(/^Too few reported complaints near here at 11 PM–12 AM \(0 in 15 days/);
+    expect(text).not.toMatch(/\b(safe|unsafe|dangerous|avoid|below|above)\b/i);
   });
 });
 

@@ -252,7 +252,9 @@ function useDashboard(): State {
 }
 
 function ledgerPayments(data: Dashboard): LedgerPayment[] {
-  const byAddress = new Map(data.wallets.map((wallet) => [wallet.xrplAddress, wallet.customerName]));
+  const byAddress = new Map(
+    data.wallets.map((wallet) => [wallet.xrplAddress, wallet.customerName]),
+  );
   const fromEvidence: LedgerPayment[] = data.transactions.map((tx) => ({
     key: tx.transactionHash,
     kind: tx.recipientKind === "merchant" ? "deposit" : "person",
@@ -278,7 +280,9 @@ function ledgerPayments(data: Dashboard): LedgerPayment[] {
   const seen = new Set(fromEvidence.map((row) => row.hash));
   const approvals = new Map((data.approvals ?? []).map((row) => [row.transactionHash, row]));
   const fromOperator: LedgerPayment[] = (data.operatorPayments ?? [])
-    .filter((row) => row.type === "payment" && row.transactionHash && !seen.has(row.transactionHash))
+    .filter(
+      (row) => row.type === "payment" && row.transactionHash && !seen.has(row.transactionHash),
+    )
     .map((row) => {
       const hash = row.transactionHash as string;
       const approval = approvals.get(hash);
@@ -288,7 +292,10 @@ function ledgerPayments(data: Dashboard): LedgerPayment[] {
         kind: deposit ? "deposit" : "operator",
         senderLabel: deposit ? "Agent payment wallet" : "Operator wallet",
         senderAddress: row.sender,
-        recipientLabel: approval?.recipientName ?? byAddress.get(row.destination) ?? (deposit ? "Restaurant" : short(row.destination)),
+        recipientLabel:
+          approval?.recipientName ??
+          byAddress.get(row.destination) ??
+          (deposit ? "Restaurant" : short(row.destination)),
         recipientAddress: row.destination,
         amountXrp: String(row.amountXrp),
         drops: null,
@@ -334,7 +341,10 @@ function Pipeline({ stages }: { stages: { label: string; state: StageState; note
   return (
     <ol className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
       {stages.map((stage) => (
-        <li key={stage.label} className={cn("outline-card rounded-xl px-2.5 py-1.5 min-w-0", tone[stage.state])}>
+        <li
+          key={stage.label}
+          className={cn("outline-card rounded-xl px-2.5 py-1.5 min-w-0", tone[stage.state])}
+        >
           <div className="text-[10px] font-bold uppercase tracking-wider">{stage.label}</div>
           <div className="text-xs font-mono truncate" title={stage.note}>
             {stage.note}
@@ -345,9 +355,15 @@ function Pipeline({ stages }: { stages: { label: string; state: StageState; note
   );
 }
 
-function confirmationStage(mode: string | null, checks: Policy["checks"] | undefined): { state: StageState; note: string } {
+function confirmationStage(
+  mode: string | null,
+  checks: Policy["checks"] | undefined,
+): { state: StageState; note: string } {
   const human = checks?.find((check) => CONFIRMATION_CHECKS.includes(check.code));
-  if (human) return human.passed ? { state: "done", note: "yes, in chat" } : { state: "deny", note: "not authorized" };
+  if (human)
+    return human.passed
+      ? { state: "done", note: "yes, in chat" }
+      : { state: "deny", note: "not authorized" };
   if (mode === "confirmed") return { state: "done", note: "yes, in chat" };
   if (mode === "autonomous") return { state: "done", note: "autonomous limits" };
   return { state: "unknown", note: "not recorded" };
@@ -382,8 +398,10 @@ function paymentStages(row: LedgerPayment) {
 }
 
 function KindPill({ kind }: { kind: Kind }) {
-  if (kind === "deposit") return <Pill className="bg-primary text-primary-foreground">Restaurant deposit</Pill>;
-  if (kind === "person") return <Pill className="bg-blue text-blue-foreground">Person to person</Pill>;
+  if (kind === "deposit")
+    return <Pill className="bg-primary text-primary-foreground">Restaurant deposit</Pill>;
+  if (kind === "person")
+    return <Pill className="bg-blue text-blue-foreground">Person to person</Pill>;
   return <Pill className="bg-card text-foreground">Operator payment</Pill>;
 }
 
@@ -434,17 +452,24 @@ function PaymentCard({ row }: { row: LedgerPayment }) {
           </div>
           <div className="text-sm text-muted-foreground">
             {row.amountXrp} test XRP
-            {row.requestedUsd !== null ? ` · ${usd(row.requestedUsd)} requested` : ""} · {time(row.timestamp)}
+            {row.requestedUsd !== null ? ` · ${usd(row.requestedUsd)} requested` : ""} ·{" "}
+            {time(row.timestamp)}
           </div>
         </div>
         <div className="flex flex-wrap gap-1.5">
           <KindPill kind={row.kind} />
           {row.validatedSuccess ? (
-            <Pill className="bg-lime text-lime-foreground normal-case tracking-normal">validated · {row.engineResult}</Pill>
+            <Pill className="bg-lime text-lime-foreground normal-case tracking-normal">
+              validated · {row.engineResult}
+            </Pill>
           ) : (
-            <Pill className="bg-card text-foreground normal-case tracking-normal">{row.engineResult ?? "pending"}</Pill>
+            <Pill className="bg-card text-foreground normal-case tracking-normal">
+              {row.engineResult ?? "pending"}
+            </Pill>
           )}
-          {row.reverified ? <Pill className="bg-sky text-sky-foreground">re-checked on ledger</Pill> : null}
+          {row.reverified ? (
+            <Pill className="bg-sky text-sky-foreground">re-checked on ledger</Pill>
+          ) : null}
         </div>
       </div>
 
@@ -459,7 +484,12 @@ function PaymentCard({ row }: { row: LedgerPayment }) {
             <div className="font-bold font-sans">Transaction hash</div>
             <div className="break-all">
               {row.explorerUrl ? (
-                <a className="underline hover:text-primary" href={row.explorerUrl} target="_blank" rel="noreferrer">
+                <a
+                  className="underline hover:text-primary"
+                  href={row.explorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   {row.hash}
                 </a>
               ) : (
@@ -474,7 +504,9 @@ function PaymentCard({ row }: { row: LedgerPayment }) {
           <div>
             <div className="font-bold font-sans">Amount</div>
             {row.amountXrp} XRP{row.drops ? ` · ${row.drops} drops` : ""}
-            {row.feeDrops && isDrops(row.feeDrops) ? ` · network fee ${dropsToXrp(row.feeDrops)} XRP` : ""}
+            {row.feeDrops && isDrops(row.feeDrops)
+              ? ` · network fee ${dropsToXrp(row.feeDrops)} XRP`
+              : ""}
             {row.ledgerIndex !== null ? ` · ledger ${row.ledgerIndex}` : ""}
           </div>
           {balanceLines && balances ? (
@@ -486,7 +518,8 @@ function PaymentCard({ row }: { row: LedgerPayment }) {
               </div>
               <div className="bg-background rounded-xl p-2">
                 <div className="font-bold font-sans">Recipient balance</div>
-                {dropsToXrp(balances.recipientBefore)} → {dropsToXrp(balances.recipientAfter)} XRP (+
+                {dropsToXrp(balances.recipientBefore)} → {dropsToXrp(balances.recipientAfter)} XRP
+                (+
                 {dropsToXrp(balanceLines.recipient.toString())})
               </div>
             </div>
@@ -497,7 +530,9 @@ function PaymentCard({ row }: { row: LedgerPayment }) {
               <Checks checks={row.policy.checks} />
             </div>
           ) : (
-            <div className="font-sans text-muted-foreground">No guardrail record is linked to this hash.</div>
+            <div className="font-sans text-muted-foreground">
+              No guardrail record is linked to this hash.
+            </div>
           )}
         </div>
       </details>
@@ -517,7 +552,10 @@ function GuardrailCard({ entry, senderName }: { entry: Guardrail; senderName: st
           <div className="font-bold">
             {senderName} → {entry.recipientName} · {usd(entry.requestedUsd)}
             {tampered ? (
-              <span className="text-primary"> (payload changed to {usd(entry.attemptedUsd as number)})</span>
+              <span className="text-primary">
+                {" "}
+                (payload changed to {usd(entry.attemptedUsd as number)})
+              </span>
             ) : null}
           </div>
           <div className="text-xs text-background/70">{time(entry.timestamp)}</div>
@@ -539,7 +577,8 @@ function GuardrailCard({ entry, senderName }: { entry: Guardrail; senderName: st
               "outline-card rounded-xl px-2.5 py-1.5 min-w-0",
               stage.state === "done" && "bg-lime text-lime-foreground",
               stage.state === "deny" && "bg-primary text-primary-foreground",
-              (stage.state === "skipped" || stage.state === "unknown") && "bg-background/90 text-muted-foreground",
+              (stage.state === "skipped" || stage.state === "unknown") &&
+                "bg-background/90 text-muted-foreground",
             )}
           >
             <div className="text-[10px] font-bold uppercase tracking-wider">{stage.label}</div>
@@ -573,7 +612,12 @@ function WalletCard({ wallet }: { wallet: Wallet }) {
       </div>
       <div className="mt-2 font-mono text-xs break-all">
         {wallet.explorerUrl ? (
-          <a className="underline hover:text-primary" href={wallet.explorerUrl} target="_blank" rel="noreferrer">
+          <a
+            className="underline hover:text-primary"
+            href={wallet.explorerUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
             {wallet.xrplAddress}
           </a>
         ) : (
@@ -582,7 +626,9 @@ function WalletCard({ wallet }: { wallet: Wallet }) {
       </div>
       <div className="mt-3 text-2xl font-bold">
         {wallet.balance ? `${wallet.balance.xrp} XRP` : "—"}
-        <span className="ml-2 text-xs font-medium text-muted-foreground align-middle">test XRP</span>
+        <span className="ml-2 text-xs font-medium text-muted-foreground align-middle">
+          test XRP
+        </span>
       </div>
       <div className="text-xs text-muted-foreground mt-1">
         {wallet.balance
@@ -639,16 +685,23 @@ function TicketPurchaseCard({ row }: { row: TicketPurchase }) {
           <div className="font-bold text-pretty">{row.eventName}</div>
           <div className="text-sm text-muted-foreground">
             {row.quantity} × {usd(row.unitPrice)}
-            {row.fees != null ? ` + ${usd(row.fees)} fees` : ""} · {usd(row.total)} total · {row.provider}
+            {row.fees != null ? ` + ${usd(row.fees)} fees` : ""} · {usd(row.total)} total ·{" "}
+            {row.provider}
           </div>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {row.purchased ? (
-            <Pill className="bg-lime text-lime-foreground normal-case tracking-normal">{statusLabel}</Pill>
+            <Pill className="bg-lime text-lime-foreground normal-case tracking-normal">
+              {statusLabel}
+            </Pill>
           ) : row.status === "CHECKOUT_REQUIRED" ? (
-            <Pill className="bg-sky text-sky-foreground normal-case tracking-normal">CHECKOUT_REQUIRED · not purchased</Pill>
+            <Pill className="bg-sky text-sky-foreground normal-case tracking-normal">
+              CHECKOUT_REQUIRED · not purchased
+            </Pill>
           ) : (
-            <Pill className="bg-card text-foreground normal-case tracking-normal">{statusLabel}</Pill>
+            <Pill className="bg-card text-foreground normal-case tracking-normal">
+              {statusLabel}
+            </Pill>
           )}
           {row.isDemo ? <Pill className="bg-primary text-primary-foreground">demo</Pill> : null}
         </div>
@@ -675,7 +728,12 @@ function TicketPurchaseCard({ row }: { row: TicketPurchase }) {
         {row.status === "CHECKOUT_REQUIRED" && row.checkoutUrl ? (
           <div className="break-all">
             checkout ·{" "}
-            <a className="underline hover:text-primary" href={row.checkoutUrl} target="_blank" rel="noreferrer">
+            <a
+              className="underline hover:text-primary"
+              href={row.checkoutUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
               {row.checkoutUrl}
             </a>
           </div>
@@ -692,7 +750,12 @@ function TicketPurchaseCard({ row }: { row: TicketPurchase }) {
               <div className="break-all">
                 tx ·{" "}
                 {row.settlement.explorerUrl ? (
-                  <a className="underline hover:text-primary" href={row.settlement.explorerUrl} target="_blank" rel="noreferrer">
+                  <a
+                    className="underline hover:text-primary"
+                    href={row.settlement.explorerUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     {row.settlement.transactionHash}
                   </a>
                 ) : (
@@ -746,29 +809,39 @@ export function XrplTestnetSection() {
       <div className="flex flex-wrap gap-2 items-center">
         <Pill className="bg-primary text-primary-foreground">XRPL Testnet · no real money</Pill>
         {data ? (
-          <Pill className={data.ledger === "connected" ? "bg-lime text-lime-foreground" : "bg-card text-foreground"}>
+          <Pill
+            className={
+              data.ledger === "connected"
+                ? "bg-lime text-lime-foreground"
+                : "bg-card text-foreground"
+            }
+          >
             ledger {data.ledger}
           </Pill>
         ) : null}
         {data ? (
-          <span className="text-xs text-muted-foreground font-mono">updated {time(data.generatedAt)}</span>
+          <span className="text-xs text-muted-foreground font-mono">
+            updated {time(data.generatedAt)}
+          </span>
         ) : null}
       </div>
 
       <StageLegend />
 
       {state.status === "loading" ? (
-        <div className="text-sm text-muted-foreground">Connecting to the live XRPL Testnet feed…</div>
+        <div className="text-sm text-muted-foreground">
+          Connecting to the live XRPL Testnet feed…
+        </div>
       ) : null}
 
       {state.status === "offline" ? (
         <div className="bg-card outline-card rounded-2xl p-5 text-sm">
           <div className="font-bold">Live feed not connected</div>
           <div className="text-muted-foreground mt-1 text-pretty">
-            This panel reads the agent's local XRPL Testnet feed and shows nothing it can't load from
-            there. Run the agent in <span className="font-mono">ripple_test</span> payments mode (or{" "}
-            <span className="font-mono">npm run xrpl:dashboard</span>) on this machine to see wallets,
-            validated payments, restaurant deposits, and blocked attempts.
+            This panel reads the agent's local XRPL Testnet feed and shows nothing it can't load
+            from there. Run the agent in <span className="font-mono">ripple_test</span> payments
+            mode (or <span className="font-mono">npm run xrpl:dashboard</span>) on this machine to
+            see wallets, validated payments, restaurant deposits, and blocked attempts.
           </div>
         </div>
       ) : null}
@@ -777,8 +850,16 @@ export function XrplTestnetSection() {
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <Stat value={data.wallets.length} label="Customer wallets" className="bg-card" />
-            <Stat value={payments.length} label="Ledger payments" className="bg-lime text-lime-foreground" />
-            <Stat value={deposits} label="Restaurant deposits" className="bg-sky text-sky-foreground" />
+            <Stat
+              value={payments.length}
+              label="Ledger payments"
+              className="bg-lime text-lime-foreground"
+            />
+            <Stat
+              value={deposits}
+              label="Restaurant deposits"
+              className="bg-sky text-sky-foreground"
+            />
             <Stat
               value={data.guardrails.length}
               label="Blocked before signing"
@@ -797,7 +878,10 @@ export function XrplTestnetSection() {
                 ))}
               </div>
             ) : (
-              <Empty>No customer wallets yet. One is created from the Testnet faucet the first time a customer pays or is paid.</Empty>
+              <Empty>
+                No customer wallets yet. One is created from the Testnet faucet the first time a
+                customer pays or is paid.
+              </Empty>
             )}
           </div>
 
@@ -812,7 +896,10 @@ export function XrplTestnetSection() {
                 ))}
               </div>
             ) : (
-              <Empty>No ledger payments yet. Confirm a payment or a restaurant deposit in iMessage and it shows up here within a few seconds.</Empty>
+              <Empty>
+                No ledger payments yet. Confirm a payment or a restaurant deposit in iMessage and it
+                shows up here within a few seconds.
+              </Empty>
             )}
           </div>
 
@@ -827,12 +914,17 @@ export function XrplTestnetSection() {
                 ))}
               </div>
             ) : (
-              <Empty>No ticket purchases yet. Ask @agent what&apos;s on, get a quote, say yes — the trail shows up here.</Empty>
+              <Empty>
+                No ticket purchases yet. Ask @agent what&apos;s on, get a quote, say yes — the trail
+                shows up here.
+              </Empty>
             )}
           </div>
 
           <div>
-            <Heading sub="The guardrail said DENY, so nothing was signed or sent.">Blocked before signing</Heading>
+            <Heading sub="The guardrail said DENY, so nothing was signed or sent.">
+              Blocked before signing
+            </Heading>
             {data.guardrails.length ? (
               <div className="space-y-3">
                 {data.guardrails.map((entry) => (
@@ -840,8 +932,8 @@ export function XrplTestnetSection() {
                     key={entry.paymentId}
                     entry={entry}
                     senderName={
-                      data.wallets.find((wallet) => wallet.customerId === entry.senderCustomerId)?.customerName ??
-                      publicName(entry.senderCustomerId)
+                      data.wallets.find((wallet) => wallet.customerId === entry.senderCustomerId)
+                        ?.customerName ?? publicName(entry.senderCustomerId)
                     }
                   />
                 ))}
@@ -856,13 +948,21 @@ export function XrplTestnetSection() {
               <Heading sub="Test XRP from the public XRPL Testnet faucet.">Faucet funding</Heading>
               <ul className="space-y-1.5 text-xs font-mono">
                 {faucet.map((row) => (
-                  <li key={row.id} className="bg-card outline-card rounded-xl px-3 py-2 flex flex-wrap gap-x-3 gap-y-1">
+                  <li
+                    key={row.id}
+                    className="bg-card outline-card rounded-xl px-3 py-2 flex flex-wrap gap-x-3 gap-y-1"
+                  >
                     <span className="font-bold font-sans">{row.amountXrp} XRP</span>
                     <span>→ {short(row.destination)}</span>
                     <span className="text-muted-foreground">{row.status}</span>
                     {row.transactionHash ? (
                       row.explorerUrl ? (
-                        <a className="underline hover:text-primary" href={row.explorerUrl} target="_blank" rel="noreferrer">
+                        <a
+                          className="underline hover:text-primary"
+                          href={row.explorerUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
                           {short(row.transactionHash)}
                         </a>
                       ) : (
@@ -876,8 +976,8 @@ export function XrplTestnetSection() {
           ) : null}
 
           <div className="text-xs text-muted-foreground font-mono text-pretty">
-            Explorer links open testnet.xrpl.org. Payments marked "re-checked on ledger" were looked up
-            again on XRPL Testnet just now. No seeds or private keys are part of this feed.
+            Explorer links open testnet.xrpl.org. Payments marked "re-checked on ledger" were looked
+            up again on XRPL Testnet just now. No seeds or private keys are part of this feed.
           </div>
         </>
       ) : null}

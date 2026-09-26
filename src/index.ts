@@ -32,6 +32,8 @@ import { createBackboardClient } from "./backboard/client.js";
 import { startWebRuntime } from "./web/runtime.js";
 import { createMailer } from "./web/email.js";
 import { readSocialContext } from "./agent/social.js";
+import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
+import { getPool } from "./safety.js";
 import { shouldSpeak } from "./voice/decide.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled } from "./voice/index.js";
 
@@ -371,8 +373,22 @@ if (textFlag !== -1) {
   await startChatWith(app, number).catch((err) => console.error(`Could not text ${number}:`, err.details ?? err.message));
 }
 
+// Two agents on one Photon project (e.g. a laptop and the droplet) would both answer every message.
+const claims = createMessageClaimer({
+  query:
+    config.chatProvider === "imessage" && config.databaseUrl && config.messageClaims
+      ? (sql, params) => getPool(config.databaseUrl).query(sql, params)
+      : undefined,
+});
+console.info(`agent instance ${INSTANCE_ID} (message claims: ${config.chatProvider === "imessage" && config.databaseUrl && config.messageClaims ? "database" : "this process only"})`);
+
 for await (const [space, message] of app.messages) {
   if (message.direction !== "inbound" || message.sender?.kind === "agent") continue;
+  if (!(await claims.claim(message.id))) {
+    console.info(`inbound.skipped ${JSON.stringify({ reason: "already_claimed", instance: INSTANCE_ID })}`);
+    continue;
+  }
+  console.info(`inbound.claimed ${JSON.stringify({ instance: INSTANCE_ID })}`);
 
   const isGroup =
     config.chatProvider === "terminal"
