@@ -48,8 +48,9 @@ export const config = {
   /** "match" = answer voice memos with a voice memo; "always"; "off". */
   voiceReplies: env("VOICE_REPLIES", "match") as "match" | "always" | "off",
   /**
-   * mock submits nothing. ripple_test submits XRP on XRPL Testnet at PAYMENTS_XRP_PER_USD.
-   * Any other value stays on mock. There is no mainnet or real-money mode.
+   * mock submits nothing. nessie records a fake Capital One purchase.
+   * ripple_test submits XRP on XRPL Testnet. nessie_ripple does both.
+   * There is no mainnet or real-money mode.
    */
   paymentsMode: paymentsMode(env("PAYMENTS_MODE", "mock")),
   paymentsMaxUsd: positiveNumber(env("PAYMENTS_MAX_USD", "500"), 500),
@@ -80,6 +81,21 @@ export const config = {
   ticketingDefaultCity: env("TICKETING_DEFAULT_CITY", "New York"),
   /** Demo checkout payee, resolved through PAYMENTS_MERCHANTS_JSON like reservation deposits. */
   ticketingMerchantName: env("TICKETING_MERCHANT_NAME", "Demo Box Office"),
+  nessieApiKey: env("NESSIE_API_KEY"),
+  nessieBaseUrl: env("NESSIE_BASE_URL", "http://api.nessieisreal.com"),
+  nessieCustomerId: env("NESSIE_CUSTOMER_ID"),
+  nessieAccountId: env("NESSIE_ACCOUNT_ID"),
+  // Website API (sign-in codes over iMessage, onboarding). WEB_API_PORT=off disables it.
+  webApiPort: env("WEB_API_PORT") || env("PORT", "8788"),
+  webApiHost: env("WEB_API_HOST", "0.0.0.0"),
+  webAllowedOrigins: env("WEB_ALLOWED_ORIGINS", "http://localhost:5174,http://localhost:8080")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+  webMaxUsers: positiveNumber(env("WEB_MAX_USERS", "100"), 100),
+  webAuthSecret: env("WEB_AUTH_SECRET"),
+  webStatePath: env("WEB_STATE_PATH", "data/web-users.json"),
+  agentNumber: env("AGENT_NUMBER", "+14155951440"),
 };
 
 function ticketPurchaseMode(value: string): "mock" | "provider" | "link" | undefined {
@@ -88,8 +104,10 @@ function ticketPurchaseMode(value: string): "mock" | "provider" | "link" | undef
   return undefined;
 }
 
-function paymentsMode(value: string): "mock" | "ripple_test" {
-  if (value === "ripple_test") return "ripple_test";
+export type PaymentsMode = "mock" | "ripple_test" | "nessie" | "nessie_ripple";
+
+function paymentsMode(value: string): PaymentsMode {
+  if (value === "ripple_test" || value === "nessie" || value === "nessie_ripple") return value;
   if (value && value !== "mock") {
     console.warn(`PAYMENTS_MODE=${value} is not supported; using mock. Real-money payments are disabled.`);
   }

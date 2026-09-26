@@ -10,6 +10,8 @@ export type PaymentMessage =
     }
   | { kind: "confirm" }
   | { kind: "cancel" }
+  | { kind: "query_max" }
+  | { kind: "set_max"; amount: AmountParse }
   | {
       kind: "change";
       amount?: AmountParse;
@@ -62,6 +64,8 @@ export function classifyPaymentMessage(text: string): PaymentMessage {
   const lower = cleaned.toLowerCase();
   if (CONFIRM.has(lower)) return { kind: "confirm" };
   if (CANCEL.has(lower)) return { kind: "cancel" };
+  const limit = parseLimit(cleaned);
+  if (limit) return limit;
   const change = parseChange(cleaned);
   if (change) return change;
   const request = parseRequest(cleaned);
@@ -72,7 +76,7 @@ export function classifyPaymentMessage(text: string): PaymentMessage {
 /** New payment requests and edits take the turn before reservation/transport. Bare yes/no do not. */
 export function paymentInterrupts(text: string): boolean {
   const kind = classifyPaymentMessage(text).kind;
-  return kind === "request" || kind === "change";
+  return kind === "request" || kind === "change" || kind === "set_max" || kind === "query_max";
 }
 
 export function shouldAskModel(text: string): boolean {
@@ -114,6 +118,24 @@ function splitRecipientAmount(head: string): { recipient: string | null; amountR
     return { recipient: recipient || null, amountRaw };
   }
   return null;
+}
+
+function parseLimit(text: string): PaymentMessage | null {
+  if (
+    /^(?:what(?:'s| is)|show(?: me)?|tell me)\s+(?:my\s+)?(?:payment|payments|send|sending|transaction|transactions)\s+(?:max|limit|cap)$/i.test(
+      text,
+    )
+  ) {
+    return { kind: "query_max" };
+  }
+  const match =
+    text.match(
+      /^(?:please\s+)?(?:(?:set|cap|limit)\s+(?:my\s+)?(?:payment|payments|send|sends|sending|transaction|transactions)\s+(?:max|limit|cap)\s+(?:to|at)\s+|dont let me send more than\s+|don't let me send more than\s+|my\s+(?:payment|payments|send|sending|transaction|transactions)\s+(?:max|limit|cap)\s+(?:is|to)\s+)(.+)$/i,
+    ) ??
+    text.match(/^(?:please\s+)?(?:set|cap|limit)\s+my\s+(?:max|limit|cap)\s+(?:to|at)\s+(.+)$/i) ??
+    text.match(/^(?:please\s+)?(?:set|cap|limit)\s+my\s+(?:payments?|sends?|sending|transactions?)\s+(?:to|at)\s+(.+)$/i);
+  if (!match?.[1]) return null;
+  return { kind: "set_max", amount: parseAmount(match[1].trim()) };
 }
 
 function parseChange(text: string): PaymentMessage | null {

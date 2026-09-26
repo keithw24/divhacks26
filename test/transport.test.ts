@@ -122,6 +122,13 @@ describe("transport intent", () => {
     expect(extractTransportIntent("is columbia safe at 11pm").isTransport).toBe(false);
     expect(extractTransportIntent("is it safe there").isTransport).toBe(false);
   });
+
+  it("treats directions home as a trip, including walk home", () => {
+    expect(extractTransportIntent("directions home").isTransport).toBe(true);
+    expect(extractTransportIntent("directions home").destinationQuery).toBe("home");
+    expect(extractTransportIntent("how do I get home").isTransport).toBe(true);
+    expect(extractTransportIntent("walk me home").destinationQuery).toBe("home");
+  });
 });
 
 describe("transportation service", () => {
@@ -609,5 +616,49 @@ describe("Gemini-only transportation path", () => {
     expect(seenDest).toMatch(/Washington Square/);
     expect(seenModes).toContain("WALK");
     expect(result.reply).toMatch(/walk/i);
+  });
+
+  it("trades a short walk for transit when going home in a less-safe hour", async () => {
+    const service = createTransportationService({
+      resolver: gazetteerResolver(),
+      routing: routingFrom({ TRANSIT: transitRoute, WALK: walkShort }),
+      safetyLookup: async () =>
+        ({
+          baselines: { hourVsNyc: 1.9, areaVsNyc: 1.4 },
+        }) as never,
+    });
+    service.noteCoordinates("home-1", { latitude: columbia.latitude!, longitude: columbia.longitude! });
+
+    const result = await service.handle({
+      spaceId: "home-1",
+      text: "directions home",
+      preferences: { defaultOrigin: "Times Square" },
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.reply).toMatch(/1 train|116 St-Columbia University/);
+    expect(result.reply).toMatch(/less safe than typical NYC/);
+    expect(result.reply).not.toMatch(/I’d walk rather than wait/);
+  });
+
+  it("keeps the short walk home when the hour looks like typical NYC", async () => {
+    const service = createTransportationService({
+      resolver: gazetteerResolver(),
+      routing: routingFrom({ TRANSIT: transitRoute, WALK: walkShort }),
+      safetyLookup: async () =>
+        ({
+          baselines: { hourVsNyc: 1.0, areaVsNyc: 0.9 },
+        }) as never,
+    });
+    service.noteCoordinates("home-2", { latitude: columbia.latitude!, longitude: columbia.longitude! });
+
+    const result = await service.handle({
+      spaceId: "home-2",
+      text: "directions home",
+      preferences: { defaultOrigin: "Times Square" },
+    });
+
+    expect(result.reply).toMatch(/I’d walk rather than wait for the subway/);
+    expect(result.reply).not.toMatch(/less safe than typical NYC/);
   });
 });

@@ -60,6 +60,14 @@ export interface TurnDeps {
     messageId?: string;
     phase: "priority" | "fallback";
   }): Promise<ReservationHandlerResult>;
+  handleMeetup?(input: {
+    spaceId: string;
+    senderId?: string;
+    senderName?: string;
+    text: string;
+    isGroup: boolean;
+    messageId?: string;
+  }): Promise<ReservationHandlerResult>;
 }
 
 export interface ReservationHandlerResult {
@@ -76,6 +84,7 @@ export type TurnOutcome =
   | "payment"
   | "reservation"
   | "ticketing"
+  | "meetup"
   | "transport"
   | "gemini"
   | "failed";
@@ -167,6 +176,24 @@ export async function runConversationTurn(
           await deliverOnce(actions, answer);
           delivered = true;
           if (reservation.afterReply) await reservation.afterReply();
+          return;
+        }
+      }
+      if (deps.handleMeetup) {
+        const meetup = await deps.handleMeetup({
+          spaceId: input.spaceId,
+          senderId: input.senderId,
+          senderName: input.senderName,
+          text: question,
+          isGroup: input.isGroup,
+          messageId: input.messageId,
+        });
+        if (meetup.handled && meetup.reply) {
+          outcome = "meetup";
+          answer = meetup.reply;
+          if (actions.react) await actions.react(meetup.acknowledgement ?? "👍").catch(() => undefined);
+          await deliverOnce(actions, answer);
+          delivered = true;
           return;
         }
       }

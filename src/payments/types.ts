@@ -49,6 +49,9 @@ export interface PaymentSendInput {
   amountUsd: number;
   memo?: string;
   idempotencyKey: string;
+  recipientName?: string;
+  /** Effective cap for this submit. Must not exceed the process default. */
+  maxUsd?: number;
 }
 
 export interface PaymentResult {
@@ -59,6 +62,8 @@ export interface PaymentResult {
   submittedAsset?: string;
   submittedAmount?: string;
   submittedDrops?: string;
+  balanceUsd?: number;
+  nessiePurchaseId?: string;
 }
 
 /**

@@ -191,7 +191,7 @@ describe("ripple test provider", () => {
       text: "yes",
       messageId: "yes",
     });
-    expect(reply.reply).toBe("I couldn't send the $1 payment. Nothing was charged.");
+    expect(reply.reply).toBe("Transaction rejected. I couldn't send the $1 payment. Nothing was charged.");
     expect(service.payments.active("space")?.status).toBe("FAILED");
   });
 
@@ -211,7 +211,9 @@ describe("ripple test provider", () => {
       text: "yes",
       messageId: "yes",
     });
-    expect(reply.reply).toBe("Sent $1 to Keith for coffee. Test tx: ABCDEF12.");
+    expect(reply.reply).toBe(
+      "Sent $1 to Keith for coffee. XRPL Testnet: ABCDEF12. https://testnet.xrpl.org/transactions/ABCDEF1234567890HASH",
+    );
     expect(service.payments.active("space")?.submittedDrops).toBe("1000000");
     expect(ledger.submits).toBe(1);
   });

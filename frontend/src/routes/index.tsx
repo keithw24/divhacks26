@@ -1,6 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { AgentTag, ChatWindow, Incoming, Outgoing } from "@/components/site/chat";
+import { useHasSession } from "@/components/site/shell";
 import { XrplTestnetSection } from "@/components/site/xrpl-testnet";
+import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -41,7 +44,13 @@ function SectionTitle({ kicker, title, sub }: { kicker?: string; title: string; 
   );
 }
 
-function FlowStep({ label, tone }: { label: string; tone: "ink" | "primary" | "sky" | "lime" | "blue" | "paper" }) {
+function FlowStep({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "ink" | "primary" | "sky" | "lime" | "blue" | "paper";
+}) {
   const tones = {
     ink: "bg-foreground text-background",
     primary: "bg-primary text-primary-foreground",
@@ -51,9 +60,50 @@ function FlowStep({ label, tone }: { label: string; tone: "ink" | "primary" | "s
     paper: "bg-card text-foreground",
   } as const;
   return (
-    <div className={`outline-card rounded-full px-5 py-2 font-bold text-sm text-center ${tones[tone]}`}>
+    <div
+      className={`outline-card rounded-full px-5 py-2 font-bold text-sm text-center ${tones[tone]}`}
+    >
       {label}
     </div>
+  );
+}
+
+/** "63 of 100 spots left", live from the agent. Hidden if the agent can't be reached. */
+function SpotsMeter({ className = "" }: { className?: string }) {
+  const { data } = useQuery({
+    queryKey: ["stats"],
+    queryFn: api.stats,
+    retry: false,
+    staleTime: 30_000,
+  });
+  if (!data) return null;
+  const left = Math.max(0, data.spotsTotal - data.spotsTaken);
+  const pct = Math.min(100, (data.spotsTaken / data.spotsTotal) * 100);
+  return (
+    <div className={`max-w-xs mx-auto ${className}`}>
+      <div className="flex justify-between text-xs font-bold uppercase tracking-wider">
+        <span>{left === 0 ? "Beta is full" : `${left} of ${data.spotsTotal} beta spots left`}</span>
+      </div>
+      <div
+        className="mt-2 h-3 rounded-full bg-card outline-card overflow-hidden"
+        role="progressbar"
+        aria-valuenow={data.spotsTaken}
+        aria-valuemin={0}
+        aria-valuemax={data.spotsTotal}
+        aria-label="Beta spots taken"
+      >
+        <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function StartLink({ className, children }: { className: string; children: React.ReactNode }) {
+  const signedIn = useHasSession();
+  return (
+    <Link to={signedIn ? "/dashboard" : "/signin"} className={className}>
+      {signedIn ? "Open your dashboard" : children}
+    </Link>
   );
 }
 
@@ -72,17 +122,25 @@ function Index() {
           <span className="font-bold tracking-tight text-lg">Murmur</span>
         </div>
         <div className="hidden md:flex items-center gap-6 text-sm font-medium">
-          <a className="hover:text-primary" href="#how">How it works</a>
-          <a className="hover:text-primary" href="#xrpl">XRPL Testnet</a>
-          <a className="hover:text-primary" href="#integrations">Integrations</a>
-          <a className="hover:text-primary" href="#architecture">Architecture</a>
+          <a className="hover:text-primary" href="#how">
+            How it works
+          </a>
+          <a className="hover:text-primary" href="#safety">
+            Safety
+          </a>
+          <a className="hover:text-primary" href="#xrpl">
+            XRPL Testnet
+          </a>
+          <a className="hover:text-primary" href="#integrations">
+            Integrations
+          </a>
+          <a className="hover:text-primary" href="#architecture">
+            Architecture
+          </a>
         </div>
-        <a
-          className="bg-primary text-primary-foreground px-4 py-2 rounded-full text-sm font-bold outline-card shadow-[var(--shadow-hard)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
-          href="#demo"
-        >
-          Try @agent
-        </a>
+        <StartLink className="bg-primary text-primary-foreground px-4 py-2 rounded-full text-sm font-bold outline-card shadow-[var(--shadow-hard)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
+          Get @agent
+        </StartLink>
       </nav>
 
       {/* HERO */}
@@ -101,20 +159,21 @@ function Index() {
           </h1>
           <p className="max-w-[58ch] mx-auto mt-6 text-lg md:text-xl text-pretty text-muted-foreground animate-rise [animation-delay:160ms]">
             Murmur is an action layer for iMessage. It understands the conversation, remembers the
-            people in it, and turns what the group wants into real actions — calls, payments,
-            plans — right in the same thread. Not another chatbot to open.
+            people in it, and turns what the group wants into real actions — calls, payments, plans
+            — right in the same thread. Not another chatbot to open.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3 animate-rise [animation-delay:240ms]">
+            <StartLink className="bg-foreground text-background px-6 py-3 rounded-full font-bold outline-card shadow-[var(--shadow-hard-primary)]">
+              Get your beta spot
+            </StartLink>
             <a
-              className="bg-foreground text-background px-6 py-3 rounded-full font-bold outline-card shadow-[var(--shadow-hard-primary)]"
+              className="bg-sky text-sky-foreground px-6 py-3 rounded-full font-bold outline-card"
               href="#demo"
             >
               Walk through the demo
             </a>
-            <a className="bg-sky text-sky-foreground px-6 py-3 rounded-full font-bold outline-card" href="#call">
-              See the phone call
-            </a>
           </div>
+          <SpotsMeter className="mt-8 animate-rise [animation-delay:320ms]" />
         </div>
       </section>
 
@@ -129,9 +188,7 @@ function Index() {
               <AgentTag /> on it — you're both downtown and Priya's off shellfish, so I'm looking
               there first.
             </Outgoing>
-            <Outgoing variant="sky">
-              Three spots open at 8. Want me to narrow it down?
-            </Outgoing>
+            <Outgoing variant="sky">Three spots open at 8. Want me to narrow it down?</Outgoing>
           </ChatWindow>
         </div>
         <div className="max-w-4xl mx-auto mt-10">
@@ -143,15 +200,21 @@ function Index() {
           <div className="mt-6 grid md:grid-cols-3 gap-3">
             <div className="bg-card outline-card rounded-2xl p-4">
               <div className="font-bold">Directed at the assistant</div>
-              <div className="text-sm text-muted-foreground mt-1">A message with @agent is a request it should answer.</div>
+              <div className="text-sm text-muted-foreground mt-1">
+                A message with @agent is a request it should answer.
+              </div>
             </div>
             <div className="bg-card outline-card rounded-2xl p-4">
               <div className="font-bold">A direct conversation</div>
-              <div className="text-sm text-muted-foreground mt-1">One-on-one chats with the assistant work the same way.</div>
+              <div className="text-sm text-muted-foreground mt-1">
+                One-on-one chats with the assistant work the same way.
+              </div>
             </div>
             <div className="bg-card outline-card rounded-2xl p-4">
               <div className="font-bold">Everything else</div>
-              <div className="text-sm text-muted-foreground mt-1">Normal group messages provide context without triggering a reply.</div>
+              <div className="text-sm text-muted-foreground mt-1">
+                Normal group messages provide context without triggering a reply.
+              </div>
             </div>
           </div>
         </div>
@@ -170,17 +233,25 @@ function Index() {
             <Incoming tone="lime">Then head to Times Square?</Incoming>
             <Incoming tone="sky">@agent how should we get there?</Incoming>
             <Outgoing>
-              <AgentTag /> Starting from Columbia and heading to Times Square — want the subway or
-              a ride? I'll pull options for how you all prefer to travel.
+              <AgentTag /> Starting from Columbia and heading to Times Square — want the subway or a
+              ride? I'll pull options for how you all prefer to travel.
             </Outgoing>
           </ChatWindow>
           <div className="space-y-3">
             <div className="bg-card outline-card rounded-2xl p-4">
-              <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Resolved from the chat</div>
+              <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                Resolved from the chat
+              </div>
               <div className="mt-2 flex flex-wrap gap-2 text-sm font-bold">
-                <span className="bg-sky text-sky-foreground outline-card rounded-full px-3 py-1">“there” = Times Square</span>
-                <span className="bg-lime text-lime-foreground outline-card rounded-full px-3 py-1">start = Columbia</span>
-                <span className="bg-blue text-blue-foreground outline-card rounded-full px-3 py-1">3 people</span>
+                <span className="bg-sky text-sky-foreground outline-card rounded-full px-3 py-1">
+                  “there” = Times Square
+                </span>
+                <span className="bg-lime text-lime-foreground outline-card rounded-full px-3 py-1">
+                  start = Columbia
+                </span>
+                <span className="bg-blue text-blue-foreground outline-card rounded-full px-3 py-1">
+                  3 people
+                </span>
               </div>
             </div>
             <p className="text-muted-foreground text-pretty">
@@ -206,7 +277,10 @@ function Index() {
             ["group likes Italian", "bg-blue text-blue-foreground"],
             ["we picked Carbone last time", "bg-foreground text-background"],
           ].map(([label, tone]) => (
-            <span key={label} className={`${tone} outline-card px-4 py-2 rounded-full text-sm font-bold`}>
+            <span
+              key={label}
+              className={`${tone} outline-card px-4 py-2 rounded-full text-sm font-bold`}
+            >
               {label}
             </span>
           ))}
@@ -273,6 +347,106 @@ function Index() {
         </div>
       </section>
 
+      {/* SAFETY (Tiger Data) */}
+      <section id="safety" className="px-5 py-12 max-w-4xl mx-auto">
+        <SectionTitle
+          kicker="Stay aware"
+          title="“Is this walk okay at midnight?”"
+          sub="@agent checks public NYPD complaint data stored in Tiger Data around the block you're on, at the hour you're asking about, and tells you how it compares to that area's usual pattern."
+        />
+        <div className="mt-6 grid md:grid-cols-2 gap-6 items-center">
+          <ChatWindow title="Group · Walking home">
+            <Incoming tone="blue">
+              <AgentTag /> is it okay to walk through Washington Square at midnight?
+            </Incoming>
+            <Outgoing>
+              Historically quieter than its peak: fewer reports around midnight than around 4pm near
+              the park. Stick to the lit paths on the west side.
+            </Outgoing>
+            <Outgoing variant="sky">Historical NYPD reports, not a live safety score.</Outgoing>
+          </ChatWindow>
+          <div className="space-y-3">
+            {[
+              [
+                "Time-aware",
+                "Counts are compared by hour of day from a Tiger Data hypertable, so 2pm and 2am get different answers.",
+              ],
+              [
+                "Block-level",
+                "It looks at the streets around a specific point, never labels a whole neighborhood.",
+              ],
+              [
+                "Honest by design",
+                "No “safe/unsafe” score and no demographic data. It's context from public reports, clearly labeled.",
+              ],
+            ].map(([title, body]) => (
+              <div key={title} className="bg-card outline-card rounded-2xl p-4">
+                <div className="font-bold">{title}</div>
+                <div className="text-sm text-muted-foreground mt-1">{body}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* VOICE MEMOS (ElevenLabs) */}
+      <section id="voice" className="px-5 py-12 max-w-4xl mx-auto">
+        <SectionTitle
+          kicker="Talk or text"
+          title="Send a voice memo. Get one back."
+          sub="Hold the mic button in iMessage and just ask. ElevenLabs transcribes it, @agent answers in text (with links), then replies out loud as a voice memo."
+        />
+        <div className="mt-6 max-w-md">
+          <ChatWindow title="Direct · @agent">
+            <div className="flex justify-end">
+              <div
+                className="bg-primary text-primary-foreground px-4 py-3 rounded-[18px] rounded-tr-md flex items-center gap-3"
+                aria-label="Voice memo, 0:06"
+              >
+                <span className="size-6 rounded-full bg-primary-foreground/25 grid place-items-center text-xs">
+                  ▶
+                </span>
+                <span className="flex items-end gap-[3px] h-5" aria-hidden="true">
+                  {[6, 12, 18, 10, 16, 8, 14, 20, 9, 13, 7, 11].map((h, i) => (
+                    <span
+                      key={i}
+                      className="w-[3px] rounded-full bg-primary-foreground/80"
+                      style={{ height: h }}
+                    />
+                  ))}
+                </span>
+                <span className="text-xs font-bold">0:06</span>
+              </div>
+            </div>
+            <Incoming tone="lime">
+              1. Caffe Reggio, 5 min walk: espresso and cannoli. 2. The Stand, 10 min: comedy
+              tonight.
+            </Incoming>
+            <div className="flex gap-2">
+              <div className="size-7 rounded-full shrink-0 bg-lime" />
+              <div
+                className="bg-bubble px-4 py-3 rounded-[18px] rounded-tl-md flex items-center gap-3"
+                aria-label="Voice reply, 0:14"
+              >
+                <span className="size-6 rounded-full bg-foreground text-background grid place-items-center text-xs">
+                  ▶
+                </span>
+                <span className="flex items-end gap-[3px] h-5" aria-hidden="true">
+                  {[10, 16, 8, 20, 12, 6, 14, 18, 9, 15, 7, 12, 10, 16].map((h, i) => (
+                    <span
+                      key={i}
+                      className="w-[3px] rounded-full bg-foreground/70"
+                      style={{ height: h }}
+                    />
+                  ))}
+                </span>
+                <span className="text-xs font-bold">0:14</span>
+              </div>
+            </div>
+          </ChatWindow>
+        </div>
+      </section>
+
       {/* 5. RESTAURANT PLANNING */}
       <section className="px-5 py-12 max-w-4xl mx-auto">
         <SectionTitle
@@ -284,8 +458,8 @@ function Index() {
           <ChatWindow title="Group · Booking">
             <Incoming tone="lime">@agent book Carbone for the 7 of us around 8</Incoming>
             <Outgoing>
-              <AgentTag /> Got the place, party size and time. I still need a name and phone
-              number for the reservation.
+              <AgentTag /> Got the place, party size and time. I still need a name and phone number
+              for the reservation.
             </Outgoing>
             <Incoming tone="blue">Rohan, 555-0142</Incoming>
           </ChatWindow>
@@ -315,7 +489,9 @@ function Index() {
               Reservation confirmed
             </span>
             <div className="font-bold text-xl mt-3">Carbone · Saturday 8:00 PM</div>
-            <div className="text-muted-foreground text-sm mt-1">7 people · confirmed by the restaurant on the call</div>
+            <div className="text-muted-foreground text-sm mt-1">
+              7 people · confirmed by the restaurant on the call
+            </div>
             <div className="text-xs text-muted-foreground mt-3 font-mono">
               example result card · nothing is reported as booked until the restaurant says so
             </div>
@@ -323,14 +499,18 @@ function Index() {
         </div>
 
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2 text-xs">
-          {["Group chat", "Missing details confirmed", "ElevenLabs call", "Restaurant's answer", "Back into iMessage"].map(
-            (s, i, a) => (
-              <span key={s} className="flex items-center gap-2">
-                <span className="bg-card outline-card rounded-full px-3 py-1 font-bold">{s}</span>
-                {i < a.length - 1 ? <span className="font-bold">→</span> : null}
-              </span>
-            ),
-          )}
+          {[
+            "Group chat",
+            "Missing details confirmed",
+            "ElevenLabs call",
+            "Restaurant's answer",
+            "Back into iMessage",
+          ].map((s, i, a) => (
+            <span key={s} className="flex items-center gap-2">
+              <span className="bg-card outline-card rounded-full px-3 py-1 font-bold">{s}</span>
+              {i < a.length - 1 ? <span className="font-bold">→</span> : null}
+            </span>
+          ))}
         </div>
       </section>
 
@@ -365,7 +545,9 @@ function Index() {
                 ["Reply in the same iMessage chat", "bg-foreground text-background"],
               ].map(([label, tone], i) => (
                 <li key={label} className="flex items-center gap-3">
-                  <span className={`size-7 shrink-0 rounded-full outline-card grid place-items-center font-bold text-xs ${tone}`}>
+                  <span
+                    className={`size-7 shrink-0 rounded-full outline-card grid place-items-center font-bold text-xs ${tone}`}
+                  >
                     {i + 1}
                   </span>
                   <span className="font-medium">{label}</span>
@@ -402,18 +584,43 @@ function Index() {
           </div>
           <ol className="space-y-3">
             {[
-              ["“@agent where should we get dinner?”", "Conversation context + Backboard preferences", "bg-sky text-sky-foreground"],
-              ["“Carbone sounds good. Can you book it?”", "ElevenLabs calls the restaurant", "bg-primary text-primary-foreground"],
-              ["“They need a deposit.”", "Assistant explains the required payment", "bg-card text-foreground"],
-              ["“Pay it.”", "Asks for explicit confirmation → Ripple transaction", "bg-blue text-blue-foreground"],
-              ["“How do we get there?”", "Gemini + Maps location context", "bg-lime text-lime-foreground"],
+              [
+                "“@agent where should we get dinner?”",
+                "Conversation context + Backboard preferences",
+                "bg-sky text-sky-foreground",
+              ],
+              [
+                "“Carbone sounds good. Can you book it?”",
+                "ElevenLabs calls the restaurant",
+                "bg-primary text-primary-foreground",
+              ],
+              [
+                "“They need a deposit.”",
+                "Assistant explains the required payment",
+                "bg-card text-foreground",
+              ],
+              [
+                "“Pay it.”",
+                "Asks for explicit confirmation → Ripple transaction",
+                "bg-blue text-blue-foreground",
+              ],
+              [
+                "“How do we get there?”",
+                "Gemini + Maps location context",
+                "bg-lime text-lime-foreground",
+              ],
             ].map(([msg, what, tone]) => (
-              <li key={msg} className="grid md:grid-cols-[1fr_auto_1fr] gap-2 md:gap-4 items-center">
+              <li
+                key={msg}
+                className="grid md:grid-cols-[1fr_auto_1fr] gap-2 md:gap-4 items-center"
+              >
                 <div className="bg-background text-foreground rounded-[18px] rounded-tl-md px-4 py-2 text-sm font-medium">
                   {msg}
                 </div>
                 <span className="hidden md:block font-bold text-lg">→</span>
-                <div className={`${tone} outline-card rounded-full px-4 py-2 text-sm font-bold`}>{what}</div>
+                <div className={`${tone} outline-card rounded-full px-4 py-2 text-sm font-bold`}>
+                  {what}
+                </div>
               </li>
             ))}
           </ol>
@@ -453,7 +660,9 @@ function Index() {
         <div className="mt-6 grid md:grid-cols-2 gap-3">
           <div className="bg-blue text-blue-foreground outline-card rounded-2xl p-5">
             <div className="font-display text-2xl tracking-tight">Photon</div>
-            <div className="text-sm opacity-90 mt-1 font-bold uppercase tracking-wider">iMessage infrastructure</div>
+            <div className="text-sm opacity-90 mt-1 font-bold uppercase tracking-wider">
+              iMessage infrastructure
+            </div>
             <ul className="mt-3 text-sm space-y-1 opacity-90">
               <li>Receives iMessage conversations</li>
               <li>Identifies spaces and group chats</li>
@@ -462,7 +671,9 @@ function Index() {
           </div>
           <div className="bg-lime text-lime-foreground outline-card rounded-2xl p-5">
             <div className="font-display text-2xl tracking-tight">Gemini</div>
-            <div className="text-sm opacity-80 mt-1 font-bold uppercase tracking-wider">Intelligence and reasoning</div>
+            <div className="text-sm opacity-80 mt-1 font-bold uppercase tracking-wider">
+              Intelligence and reasoning
+            </div>
             <ul className="mt-3 text-sm space-y-1 opacity-80">
               <li>Interprets natural-language requests</li>
               <li>Reasons over recent conversation context</li>
@@ -471,7 +682,9 @@ function Index() {
           </div>
           <div className="bg-sky text-sky-foreground outline-card rounded-2xl p-5">
             <div className="font-display text-2xl tracking-tight">Backboard</div>
-            <div className="text-sm opacity-80 mt-1 font-bold uppercase tracking-wider">Persistent user memory</div>
+            <div className="text-sm opacity-80 mt-1 font-bold uppercase tracking-wider">
+              Persistent user memory
+            </div>
             <ul className="mt-3 text-sm space-y-1 opacity-80">
               <li>Separate memory per person</li>
               <li>Retrieves useful prior information</li>
@@ -480,7 +693,9 @@ function Index() {
           </div>
           <div className="bg-primary text-primary-foreground outline-card rounded-2xl p-5">
             <div className="font-display text-2xl tracking-tight">Google Maps</div>
-            <div className="text-sm opacity-90 mt-1 font-bold uppercase tracking-wider">Real-world location context</div>
+            <div className="text-sm opacity-90 mt-1 font-bold uppercase tracking-wider">
+              Real-world location context
+            </div>
             <ul className="mt-3 text-sm space-y-1 opacity-90">
               <li>Place lookup and nearby locations</li>
               <li>Transportation context</li>
@@ -489,15 +704,31 @@ function Index() {
           </div>
           <div className="bg-foreground text-background outline-card rounded-2xl p-5">
             <div className="font-display text-2xl tracking-tight">ElevenLabs</div>
-            <div className="text-sm opacity-70 mt-1 font-bold uppercase tracking-wider">Voice and phone interaction</div>
+            <div className="text-sm opacity-70 mt-1 font-bold uppercase tracking-wider">
+              Voice and phone interaction
+            </div>
             <ul className="mt-3 text-sm space-y-1 opacity-80">
               <li>Gives the agent a natural speaking voice</li>
               <li>Conducts the reservation call with restaurant staff</li>
+              <li>Transcribes voice memos and replies with one</li>
+            </ul>
+          </div>
+          <div className="bg-card text-foreground outline-card rounded-2xl p-5">
+            <div className="font-display text-2xl tracking-tight">Tiger Data</div>
+            <div className="text-sm opacity-70 mt-1 font-bold uppercase tracking-wider">
+              Time-series city data
+            </div>
+            <ul className="mt-3 text-sm space-y-1 opacity-80">
+              <li>NYPD complaint history in a Postgres hypertable</li>
+              <li>Hour-of-day comparisons around a location</li>
+              <li>City event feeds for “what's on near us”</li>
             </ul>
           </div>
           <div className="bg-card text-foreground outline-card rounded-2xl p-5 shadow-[var(--shadow-hard)]">
             <div className="font-display text-2xl tracking-tight">Ripple</div>
-            <div className="text-sm opacity-70 mt-1 font-bold uppercase tracking-wider">Payments and transactions</div>
+            <div className="text-sm opacity-70 mt-1 font-bold uppercase tracking-wider">
+              Payments and transactions
+            </div>
             <ul className="mt-3 text-sm space-y-1 opacity-80">
               <li>Executes test transactions</li>
               <li>Turns conversational payment requests into actions</li>
@@ -532,6 +763,12 @@ function Index() {
                 <div className="bg-background outline-card rounded-xl p-2 text-center text-xs font-bold ml-4">
                   ↳ Maps grounding
                   <div className="font-normal text-muted-foreground">places / location context</div>
+                </div>
+                <div className="bg-background outline-card rounded-xl p-2 text-center text-xs font-bold ml-4">
+                  ↳ Tiger Data
+                  <div className="font-normal text-muted-foreground">
+                    NYPD history / city events
+                  </div>
                 </div>
               </div>
               <div className="bg-foreground text-background outline-card rounded-xl p-3 text-sm font-bold">
@@ -589,12 +826,10 @@ function Index() {
         <h2 className="font-display text-5xl md:text-7xl tracking-tight text-balance">
           Add @agent to your group.
         </h2>
-        <a
-          className="inline-block mt-6 bg-primary text-primary-foreground px-8 py-4 rounded-full font-bold text-lg outline-card shadow-[var(--shadow-hard-lg)]"
-          href="#how"
-        >
-          See how it works
-        </a>
+        <StartLink className="inline-block mt-6 bg-primary text-primary-foreground px-8 py-4 rounded-full font-bold text-lg outline-card shadow-[var(--shadow-hard-lg)]">
+          Get your beta spot
+        </StartLink>
+        <SpotsMeter className="mt-6" />
         <p className="mt-8 text-xs uppercase tracking-[0.15em] opacity-60">
           Murmur · conversations shown are demo examples, not real bookings
         </p>

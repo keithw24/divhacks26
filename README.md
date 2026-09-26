@@ -91,6 +91,12 @@ npm run dev
 Send a text message to the iMessage line connected to the Photon project. A
 working round-trip produces a 👍 tapback, typing indicator, and BoroughOS reply.
 
+## Deploy to DigitalOcean
+
+The production stack runs the Photon worker/API, Keith's frontend, and Caddy on
+one DigitalOcean Droplet. Agent JSON state and TLS certificates use persistent
+Docker volumes. Follow the [DigitalOcean deployment guide](docs/digitalocean-deployment.md).
+
 ### Current boundary
 
 - Photon/Spectrum owns conversation transport.
@@ -502,11 +508,17 @@ In `ripple_test`, a chat payment between people settles between customer wallets
 
 Reservation deposits (merchant payments) still use the `XRPL_TESTNET_SEED` provider described below.
 
+`nessie` records a completed **purchase** on Capital One's Nessie hackathon API (fake USD, fake merchants). That is not a real bank debit. `nessie_ripple` writes that Nessie purchase first, then submits the same dollar amount as test XRP on XRPL Testnet (peg `PAYMENTS_XRP_PER_USD`). The XRPL memo includes `nessie:<purchaseId>` so the two records match. Fund a Testnet sender with `npm run payments:fund-testnet`.
+
 ### Environment
 
 | Variable | Default | Used for |
 | --- | --- | --- |
-| `PAYMENTS_MODE` | `mock` | `mock` or `ripple_test`. Anything else stays on mock |
+| `PAYMENTS_MODE` | `mock` | `mock`, `nessie`, `ripple_test`, or `nessie_ripple` |
+| `NESSIE_API_KEY` | | Capital One Nessie hackathon key. Never commit it |
+| `NESSIE_BASE_URL` | `http://api.nessieisreal.com` | Nessie host |
+| `NESSIE_CUSTOMER_ID` | | Optional existing Nessie customer |
+| `NESSIE_ACCOUNT_ID` | | Optional existing Nessie checking account |
 | `PAYMENTS_MAX_USD` | `500` | Reject larger requests before confirmation |
 | `PAYMENTS_DAILY_MAX_USD` | `1000` | Deterministic daily cap for the autonomous policy engine |
 | `XRPL_AUTO_PROVISION_TESTNET` | `false` | Fund a registered customer from the Testnet faucet when they have no wallet. Unknown names are not provisioned |

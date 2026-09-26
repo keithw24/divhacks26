@@ -19,19 +19,42 @@ export function successText(input: {
   amountUsd: number;
   memo: string | null;
   transactionId?: string;
+  submittedAsset?: string;
+  nessiePurchaseId?: string;
 }): string {
   const base = `Sent ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)}.`;
-  if (!input.transactionId) return base;
-  const shown = input.transactionId.length > 12 ? input.transactionId.slice(0, 8) : input.transactionId;
-  return `${base} Test tx: ${shown}.`;
+  const bits: string[] = [base];
+  if (input.nessiePurchaseId) {
+    const shown = input.nessiePurchaseId.length > 12 ? input.nessiePurchaseId.slice(0, 8) : input.nessiePurchaseId;
+    bits.push(`Nessie sim: ${shown}.`);
+  } else if (input.submittedAsset === "USD" && input.transactionId) {
+    const shown = input.transactionId.length > 12 ? input.transactionId.slice(0, 8) : input.transactionId;
+    bits.push(`Nessie sim: ${shown}.`);
+  }
+  if (input.submittedAsset === "XRP" && input.transactionId) {
+    bits.push(`XRPL Testnet: ${input.transactionId.slice(0, 8)}. https://testnet.xrpl.org/transactions/${input.transactionId}`);
+  } else if (!input.nessiePurchaseId && input.transactionId && input.submittedAsset !== "USD") {
+    const shown = input.transactionId.length > 12 ? input.transactionId.slice(0, 8) : input.transactionId;
+    bits.push(`Test tx: ${shown}.`);
+  }
+  return bits.join(" ");
 }
 
 export function alreadySentText(input: { recipientName: string; amountUsd: number; memo: string | null }): string {
   return `Already sent ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)}.`;
 }
 
+/** User-visible line when a send is blocked or the provider fails closed. */
+export function rejectedText(reason: string): string {
+  const detail = reason
+    .trim()
+    .replace(/^transaction rejected\.?\s*/i, "")
+    .replace(/\.+$/, "");
+  return `Transaction rejected. ${detail}.`;
+}
+
 export function failureText(amountUsd: number): string {
-  return `I couldn't send the ${formatUsd(amountUsd)} payment. Nothing was charged.`;
+  return rejectedText(`I couldn't send the ${formatUsd(amountUsd)} payment. Nothing was charged`);
 }
 
 export function overMaxText(maxUsd: number): string {

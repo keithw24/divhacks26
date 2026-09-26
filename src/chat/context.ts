@@ -8,6 +8,7 @@ import type { LatLng } from "./location.js";
 interface ChatContext {
   lines: { at: Date; who: string; text: string }[];
   location?: LatLng & { at: Date; who: string };
+  locations: Record<string, LatLng & { at: Date; who: string }>;
 }
 
 const MAX_LINES = 40;
@@ -18,7 +19,7 @@ const chats = new Map<string, ChatContext>();
 
 function get(spaceId: string): ChatContext {
   let ctx = chats.get(spaceId);
-  if (!ctx) chats.set(spaceId, (ctx = { lines: [] }));
+  if (!ctx) chats.set(spaceId, (ctx = { lines: [], locations: {} }));
   return ctx;
 }
 
@@ -29,17 +30,35 @@ export function recordMessage(spaceId: string, who: string, text: string) {
   ctx.lines = ctx.lines.filter((l) => l.at.getTime() >= cutoff).slice(-MAX_LINES);
 }
 
-export function recordLocation(spaceId: string, who: string, loc: LatLng) {
-  get(spaceId).location = { ...loc, at: new Date(), who };
-}
-
 /** Recent transcript (oldest first), excluding the message currently being answered. */
 export function transcript(spaceId: string): { at: Date; who: string; text: string }[] {
   return get(spaceId).lines.slice(0, -1);
+}
+
+export function recordLocation(spaceId: string, who: string, loc: LatLng) {
+  const ctx = get(spaceId);
+  const entry = { ...loc, at: new Date(), who };
+  ctx.location = entry;
+  ctx.locations[who] = entry;
 }
 
 export function lastLocation(spaceId: string) {
   const loc = get(spaceId).location;
   if (!loc || Date.now() - loc.at.getTime() > LOCATION_MAX_AGE_MS) return undefined;
   return loc;
+}
+
+/** Fresh location pins keyed by Photon sender id, for group leave times. */
+export function locationsForSpace(spaceId: string) {
+  const cutoff = Date.now() - LOCATION_MAX_AGE_MS;
+  return Object.entries(get(spaceId).locations)
+    .filter(([, loc]) => loc.at.getTime() >= cutoff)
+    .map(([senderId, loc]) => ({
+      senderId,
+      displayName: loc.who === senderId ? undefined : loc.who,
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+      label: "shared location",
+      at: loc.at.toISOString(),
+    }));
 }

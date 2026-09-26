@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type { MeetupPersistence, MeetupPlan, PersonLocation } from "../meetup/types.js";
 
 export interface Participant {
   id: string;
@@ -49,6 +50,8 @@ export interface AgentState {
   reservations: ReservationPersistence;
   /** In-progress payments. Survives a process restart. Scoped by Photon space id. */
   payments: PaymentPersistence;
+  /** Group meetup leave times. Scoped by Photon space id. */
+  meetups: MeetupPersistence;
 }
 
 /** Enough to match a webhook back to a Photon space after restart. */
@@ -76,10 +79,16 @@ export interface PaymentPersistence {
   recentPeople: Record<string, string[]>;
   messageReplies: Record<string, string>;
   inflightMessages: string[];
+  /** Per Photon sender id. Missing means the process default (`PAYMENTS_MAX_USD`). */
+  maxUsdByUser?: Record<string, number>;
 }
 
 export function emptyPaymentBook(): PaymentPersistence {
-  return { records: {}, activeBySpace: {}, recentPeople: {}, messageReplies: {}, inflightMessages: [] };
+  return { records: {}, activeBySpace: {}, recentPeople: {}, messageReplies: {}, inflightMessages: [], maxUsdByUser: {} };
+}
+
+export function emptyMeetupBook(): MeetupPersistence {
+  return { records: {}, activeBySpace: {}, locationsBySpace: {} };
 }
 
 export function emptyState(): AgentState {
@@ -90,6 +99,7 @@ export function emptyState(): AgentState {
     ingestedMessageIds: {},
     reservations: emptyReservationBook(),
     payments: emptyPaymentBook(),
+    meetups: emptyMeetupBook(),
   };
 }
 
@@ -145,6 +155,7 @@ function readStateFile(filePath: string): AgentState {
       ingestedMessageIds: parsed.ingestedMessageIds ?? {},
       reservations: readReservationBook(parsed.reservations),
       payments: readPaymentBook(parsed.payments),
+      meetups: readMeetupBook(parsed.meetups),
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -187,7 +198,39 @@ function readPaymentBook(value: unknown): PaymentPersistence {
   const inflightMessages = Array.isArray(record.inflightMessages)
     ? record.inflightMessages.filter((item): item is string => typeof item === "string")
     : [];
-  return { records, activeBySpace, recentPeople, messageReplies, inflightMessages };
+  const maxUsdByUser: Record<string, number> = {};
+  if (record.maxUsdByUser && typeof record.maxUsdByUser === "object") {
+    for (const [userId, amount] of Object.entries(record.maxUsdByUser)) {
+      if (typeof amount === "number" && Number.isFinite(amount) && amount > 0) maxUsdByUser[userId] = amount;
+    }
+  }
+  return { records, activeBySpace, recentPeople, messageReplies, inflightMessages, maxUsdByUser };
+}
+
+function readMeetupBook(value: unknown): MeetupPersistence {
+  const record = value && typeof value === "object" ? (value as Partial<MeetupPersistence>) : {};
+  const records: Record<string, MeetupPlan> = {};
+  if (record.records && typeof record.records === "object") {
+    for (const [id, plan] of Object.entries(record.records)) {
+      if (plan && typeof plan === "object" && typeof plan.id === "string" && typeof plan.photonSpaceId === "string") {
+        records[id] = plan;
+      }
+    }
+  }
+  const locationsBySpace: MeetupPersistence["locationsBySpace"] = {};
+  if (record.locationsBySpace && typeof record.locationsBySpace === "object") {
+    for (const [spaceId, people] of Object.entries(record.locationsBySpace)) {
+      if (!people || typeof people !== "object") continue;
+      const next: Record<string, PersonLocation> = {};
+      for (const [senderId, loc] of Object.entries(people)) {
+        if (!loc || typeof loc !== "object") continue;
+        if (typeof loc.latitude !== "number" || typeof loc.longitude !== "number") continue;
+        next[senderId] = loc;
+      }
+      locationsBySpace[spaceId] = next;
+    }
+  }
+  return { records, activeBySpace: stringMap(record.activeBySpace), locationsBySpace };
 }
 
 function stringMap(value: unknown): Record<string, string> {

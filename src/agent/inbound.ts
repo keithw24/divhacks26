@@ -13,6 +13,7 @@ import { BackboardRequestError } from "../backboard/client.js";
 import { createBackboardMemoryService, type MemoryService } from "../memory/backboard.js";
 import type { Participant, StateStore } from "../store/state.js";
 import { ingestionKey } from "../store/state.js";
+import type { MeetupTurnInput, MeetupTurnResult, PersonLocation } from "../meetup/types.js";
 import type { TransportationRequest, TransportationResult } from "../transport/service.js";
 
 export interface InboundMessage {
@@ -85,6 +86,17 @@ export interface InboundDeps {
       location?: { latitude: number; longitude: number };
     }): Promise<ReservationHandlerResult>;
   };
+  meetup?: {
+    observe(input: {
+      spaceId: string;
+      senderId: string;
+      senderName?: string;
+      text: string;
+      live?: PersonLocation;
+    }): void;
+    handleTurn(input: MeetupTurnInput): Promise<MeetupTurnResult>;
+  };
+  liveLocations?: (spaceId: string) => MeetupTurnInput["liveLocations"];
 }
 
 export async function handleInboundMessage(
@@ -107,6 +119,14 @@ export async function handleInboundMessage(
 
   deps.reservations?.observe(message.spaceId, message.text);
   deps.payments?.observe(message.spaceId, message.text);
+  const liveForSender = deps.liveLocations?.(message.spaceId)?.find((loc) => loc.senderId === senderId);
+  deps.meetup?.observe({
+    spaceId: message.spaceId,
+    senderId,
+    senderName: message.senderName,
+    text: message.text,
+    live: liveForSender,
+  });
 
   if (deps.autoReply) {
     await restorePlaceContext(deps, message.spaceId).catch((error) => {
@@ -230,6 +250,24 @@ export async function handleInboundMessage(
               location: deps.location ? { latitude: deps.location.latitude, longitude: deps.location.longitude } : undefined,
             })
         : undefined,
+      handleMeetup: deps.meetup
+        ? (request) =>
+            deps.meetup!.handleTurn({
+              spaceId: message.spaceId,
+              senderId,
+              senderName: message.senderName,
+              text: question,
+              isGroup: message.isGroup,
+              messageId: message.messageId,
+              participants: group.participants,
+              liveLocations: (deps.liveLocations?.(message.spaceId) ?? []).map((loc) => ({
+                ...loc,
+                displayName:
+                  loc.displayName ||
+                  group.participants.find((person) => person.id === loc.senderId)?.displayName,
+              })),
+            })
+        : undefined,
     },
   );
 
@@ -237,6 +275,7 @@ export async function handleInboundMessage(
     outcome === "payment" ||
     outcome === "reservation" ||
     outcome === "ticketing" ||
+    outcome === "meetup" ||
     outcome === "transport" ||
     outcome === "gemini" ||
     outcome === "failed";

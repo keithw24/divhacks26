@@ -10,6 +10,8 @@ export interface RoutePreferences {
   /** Home or usual starting point from memory, used only when the trip has no origin. */
   defaultOrigin?: string;
   notes?: string[];
+  /** Trade walking time for transit when Tiger says this hour/area is not typical NYC. */
+  preferSaferSlower?: boolean;
 }
 
 export function applyRoutePreferences(
@@ -49,7 +51,17 @@ export function applyRoutePreferences(
     if (busRoutes.length > 0 && rest.length > 0) next = rest;
   }
 
-  if (prefs.preferTransit) {
+  if (prefs.preferSaferSlower) {
+    const transit = next.filter((route) => route.mode === "TRANSIT");
+    const others = next.filter((route) => route.mode !== "TRANSIT");
+    if (transit.length > 0) {
+      next = [...transit, ...others];
+      note =
+        "This hour looks a bit less safe than typical NYC, so I’d take transit even if it takes longer than walking.";
+    }
+  }
+
+  if (prefs.preferTransit && !prefs.preferSaferSlower) {
     const transit = next.filter((route) => route.mode === "TRANSIT");
     const others = next.filter((route) => route.mode !== "TRANSIT");
     if (transit.length > 0) next = [...transit, ...others];

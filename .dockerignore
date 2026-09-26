@@ -1,0 +1,17 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+.venv
+venv
+node_modules
+dist
+data
+frontend/node_modules
+frontend/.output
+frontend/dist
+coverage
+*.log
+__pycache__
+*.pyc

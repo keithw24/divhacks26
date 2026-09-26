@@ -13,6 +13,10 @@ vi.mock("../src/agent/safetySummary.js", () => ({
   summarizeSafety: vi.fn(async () => "Safer than NYC average"),
 }));
 vi.mock("../src/geocode.js", () => ({ geocodeNyc: vi.fn(async () => null) }));
+vi.mock("../src/navigation/hazards.js", () => ({
+  lookupNavHazards: vi.fn(async () => []),
+  nightHourEt: vi.fn(() => 12),
+}));
 
 import { renderResponse, rankRecommendations } from "../src/agent/compose.js";
 import { parseIntent } from "../src/agent/intent.js";
@@ -115,5 +119,31 @@ describe("skill dispatcher", () => {
     vi.mocked(getSafety).mockResolvedValue({ status: "ok", data: { peakHour: 16 } as never, sources: [], warnings: [] });
     const fallback = vi.fn(async () => "gemini fallback");
     await expect(orchestrate({ question: "what should we do now?", transcript: [], location, fallback })).resolves.toBe("gemini fallback");
+  });
+
+  it("routes home on transit when Tiger says the hour is less safe than typical NYC", async () => {
+    const home = { label: "Times Square", latitude: 40.758, longitude: -73.9855 };
+    vi.mocked(parseIntent).mockResolvedValue({
+      ...intentBase,
+      needs: ["route", "safety"],
+      destination: home,
+      travelMode: "WALK",
+    });
+    vi.mocked(getSafety).mockResolvedValue({
+      status: "ok",
+      data: { baselines: { hourVsNyc: 1.8, areaVsNyc: 1.5 } } as never,
+      sources: [],
+      warnings: [],
+    });
+    vi.mocked(getRoute).mockResolvedValue({
+      status: "ok",
+      data: { mode: "TRANSIT", summary: "22 min transit", directionsUrl: "https://maps.test" },
+      sources: [],
+      warnings: [],
+    });
+
+    await orchestrate({ question: "directions home", transcript: [], location });
+
+    expect(getRoute).toHaveBeenCalledWith(expect.objectContaining({ travelMode: "TRANSIT", destination: home }));
   });
 });

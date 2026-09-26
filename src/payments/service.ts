@@ -6,6 +6,7 @@ import {
   formatUsd,
   missingDestinationText,
   overMaxText,
+  rejectedText,
   successText,
   unknownCustomerText,
   unlinkedSenderText,
@@ -14,6 +15,7 @@ import {
   xrplSuccessText,
   xrplUnconfirmedText,
 } from "./format.js";
+import { assertAmountMatchesUtterance, assertSendableUsd, guardedPaymentProvider } from "./guardrails.js";
 import { classifyPaymentMessage, shouldAskModel, type PaymentMessage } from "./intent.js";
 import { extractPersonMentions, isPronoun, type RecipientDirectory } from "./recipients.js";
 import { PaymentStore } from "./state.js";
@@ -53,10 +55,10 @@ export class PaymentService implements DepositPaymentPort {
   private readonly settlement?: CustomerSettlementPort;
 
   constructor(options: PaymentServiceOptions) {
-    this.provider = options.provider;
+    this.maxUsd = options.maxUsd ?? 500;
+    this.provider = guardedPaymentProvider(options.provider, () => this.maxUsd);
     this.directory = options.directory;
     this.store = options.store ?? new PaymentStore();
-    this.maxUsd = options.maxUsd ?? 500;
     this.timeoutMs = options.timeoutMs ?? 20_000;
     this.interpreter = options.interpreter;
     this.settlement = options.settlement;
@@ -97,6 +99,8 @@ export class PaymentService implements DepositPaymentPort {
     ) {
       return { handled: false };
     }
+    if (classified.kind === "set_max") return this.setUserMax(input, classified);
+    if (classified.kind === "query_max") return this.queryUserMax(input);
     if (classified.kind === "request") return this.startRequest(input, classified);
     if (classified.kind === "none" && this.interpreter && shouldAskModel(input.text)) {
       return this.startFromModel(input);
@@ -131,6 +135,10 @@ export class PaymentService implements DepositPaymentPort {
     }
     if (extracted.intent !== "SEND_PAYMENT") return { handled: false };
     const amount = extracted.amountUsd == null ? null : parseAmount(String(extracted.amountUsd));
+    logPayment("payment_model_extract", {
+      spaceId: input.spaceId,
+      amountUsd: amount?.ok ? amount.value : null,
+    });
     return this.openPending(input, {
       recipientName: extracted.recipientName,
       amount,
@@ -142,9 +150,11 @@ export class PaymentService implements DepositPaymentPort {
     input: PaymentTurnInput,
     fields: { recipientName: string | null; amount: AmountParse | null; memo: string | null },
   ): PaymentTurnResult {
-    const amountReply = this.amountReply(fields.amount);
+    const amountReply = this.amountReply(fields.amount, input);
     if (amountReply) return this.finish(input, amountReply);
     if (!fields.amount || !fields.amount.ok) return this.finish(input, "I didn't catch the amount.");
+    const quoted = assertAmountMatchesUtterance(input.text, fields.amount.value);
+    if (!quoted.ok) return this.finish(input, quoted.reply);
 
     const resolved = this.resolveRecipient(input.spaceId, fields.recipientName, input.recentTexts);
     if (!resolved.ok) return this.finish(input, resolved.reply);
@@ -196,6 +206,22 @@ export class PaymentService implements DepositPaymentPort {
     if (active.status === "PROCESSING") return this.finish(input, progressText(active));
     if (active.status !== "AWAITING_CONFIRMATION") return { handled: false };
 
+    const capBlock = this.capReply(active.amountUsd, input);
+    if (capBlock) {
+      this.store.markResult(active.id, "FAILED", { providerStatus: "guardrail" });
+      return this.finish(input, capBlock.startsWith("Transaction rejected") ? capBlock : rejectedText(capBlock));
+    }
+    const sendable = assertSendableUsd(active.amountUsd, this.maxFor(input));
+    if (!sendable.ok) {
+      this.store.markResult(active.id, "FAILED", { providerStatus: "guardrail" });
+      return this.finish(input, rejectedText(sendable.reply));
+    }
+    const stillThere = this.resolveRecipient(input.spaceId, active.recipientName, input.recentTexts);
+    if (!stillThere.ok || stillThere.recipient.rippleDestination !== active.destination) {
+      this.store.markResult(active.id, "FAILED", { providerStatus: "guardrail" });
+      return this.finish(input, rejectedText("I couldn't verify the destination. Nothing was charged"));
+    }
+
     if (input.messageId && !this.store.beginMessage(input.spaceId, input.messageId)) {
       return { handled: true, reply: progressText(active), acknowledgement: "👍" };
     }
@@ -213,10 +239,12 @@ export class PaymentService implements DepositPaymentPort {
     try {
       result = await withTimeout(
         this.provider.sendPayment({
-          destination: claimed.destination,
-          amountUsd: claimed.amountUsd,
+          destination: stillThere.recipient.rippleDestination,
+          amountUsd: sendable.value,
           memo: claimed.memo ?? undefined,
           idempotencyKey: claimed.idempotencyKey,
+          recipientName: claimed.recipientName,
+          maxUsd: this.maxFor(input),
         }),
         this.timeoutMs,
       );
@@ -244,6 +272,8 @@ export class PaymentService implements DepositPaymentPort {
           amountUsd: claimed.amountUsd,
           memo: claimed.memo,
           transactionId: result.transactionId,
+          submittedAsset: result.submittedAsset,
+          nessiePurchaseId: result.nessiePurchaseId,
         }),
       );
     }
@@ -253,7 +283,11 @@ export class PaymentService implements DepositPaymentPort {
       paymentId: claimed.id,
       spaceId: claimed.photonSpaceId,
       status: result.status || "unknown",
+      reason: result.error,
     });
+    if (result.status === "guardrail") {
+      return this.finish(input, rejectedText(result.error || "The payment did not pass checks"));
+    }
     return this.finish(input, failureText(claimed.amountUsd));
   }
 
@@ -469,9 +503,13 @@ export class PaymentService implements DepositPaymentPort {
     let memo = active.memo;
 
     if (classified.amount) {
-      const amountReply = this.amountReply(classified.amount);
+      const amountReply = this.amountReply(classified.amount, input);
       if (amountReply) return this.finish(input, amountReply);
-      if (classified.amount.ok) amountUsd = classified.amount.value;
+      if (classified.amount.ok) {
+        const quoted = assertAmountMatchesUtterance(input.text, classified.amount.value);
+        if (!quoted.ok) return this.finish(input, quoted.reply);
+        amountUsd = classified.amount.value;
+      }
     }
     if (classified.recipientName) {
       const resolved = this.resolveRecipient(input.spaceId, classified.recipientName, input.recentTexts);
@@ -496,14 +534,72 @@ export class PaymentService implements DepositPaymentPort {
     return this.finish(input, confirmationText(updated));
   }
 
-  private amountReply(amount: AmountParse | null): string | null {
+  private setUserMax(
+    input: PaymentTurnInput,
+    classified: Extract<PaymentMessage, { kind: "set_max" }>,
+  ): PaymentTurnResult {
+    if (!input.senderId) {
+      return this.finish(input, "I need to know who you are to set a personal payment max.");
+    }
+    const parsed = classified.amount;
+    if (!parsed.ok) {
+      if (parsed.reason === "zero" || parsed.reason === "negative") {
+        return this.finish(input, "I can only set a positive payment max.");
+      }
+      return this.finish(input, "I didn't catch the amount.");
+    }
+    if (parsed.value > this.maxUsd) {
+      return this.finish(input, `I can only set a payment max up to ${formatUsd(this.maxUsd)}.`);
+    }
+    this.store.setMaxUsd(input.senderId, parsed.value);
+    const parts = [`Got it. I won't send more than ${formatUsd(parsed.value)} for you.`];
+    const active = this.store.active(input.spaceId);
+    if (
+      active &&
+      active.initiatorId === input.senderId &&
+      active.status === "AWAITING_CONFIRMATION" &&
+      active.amountUsd > parsed.value
+    ) {
+      this.store.cancel(active);
+      parts.push(
+        rejectedText(`The pending ${formatUsd(active.amountUsd)} send was over your new max. Nothing was sent`),
+      );
+    }
+    return this.finish(input, parts.join(" "));
+  }
+
+  private queryUserMax(input: PaymentTurnInput): PaymentTurnResult {
+    if (!input.senderId) {
+      return this.finish(input, "I need to know who you are to look up a personal payment max.");
+    }
+    const cap = this.maxFor(input);
+    const custom = this.store.hasCustomMax(input.senderId);
+    const suffix = custom ? "" : " (the default)";
+    return this.finish(input, `Your payment max is ${formatUsd(cap)}${suffix}.`);
+  }
+
+  private maxFor(input: PaymentTurnInput): number {
+    const userId = input.senderId?.trim();
+    if (!userId) return this.maxUsd;
+    return this.store.maxUsdFor(userId, this.maxUsd);
+  }
+
+  private amountReply(amount: AmountParse | null, input: PaymentTurnInput): string | null {
     if (!amount) return "I didn't catch the amount.";
     if (!amount.ok) {
       if (amount.reason === "zero" || amount.reason === "negative") return "I can only send a positive amount.";
       return "I didn't catch the amount.";
     }
-    if (amount.value > this.maxUsd) return overMaxText(this.maxUsd);
-    return null;
+    return this.capReply(amount.value, input);
+  }
+
+  private capReply(amountUsd: number, input: PaymentTurnInput): string | null {
+    const cap = this.maxFor(input);
+    if (amountUsd <= cap) return null;
+    if (input.senderId && this.store.hasCustomMax(input.senderId)) {
+      return rejectedText(`I can only send up to ${formatUsd(cap)} at a time — that's your payment max`);
+    }
+    return overMaxText(cap);
   }
 
   private resolveRecipient(
@@ -568,7 +664,8 @@ function progressText(payment: PaymentRecord): string {
 }
 
 function isConfirmed(result: PaymentResult): result is PaymentResult & { transactionId: string } {
-  return result.success === true && result.status === "tesSUCCESS" && typeof result.transactionId === "string" && result.transactionId.length > 0;
+  const statusOk = result.status === "tesSUCCESS" || result.status === "completed";
+  return result.success === true && statusOk && typeof result.transactionId === "string" && result.transactionId.length > 0;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

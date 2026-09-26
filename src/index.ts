@@ -4,7 +4,7 @@ import { terminal } from "spectrum-ts/providers/terminal";
 import { handleInboundMessage } from "./agent/inbound.js";
 import { suggestNext } from "./agent/suggest.js";
 import { errorCategory } from "./agent/turn.js";
-import { lastLocation, recordLocation, recordMessage, transcript } from "./chat/context.js";
+import { lastLocation, locationsForSpace, recordLocation, recordMessage, transcript } from "./chat/context.js";
 import { senderDisplayName } from "./chat/invoke.js";
 import { parseLatLng } from "./chat/location.js";
 import { config } from "./config.js";
@@ -20,8 +20,11 @@ import { createReservationRuntime } from "./reservations/runtime.js";
 import { geocodeNyc } from "./geocode.js";
 import { createMerchantDirectory } from "./payments/merchants.js";
 import { createTicketingRuntime } from "./ticketing/runtime.js";
+import { createMeetupRuntime } from "./meetup/runtime.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
+import { createBackboardClient } from "./backboard/client.js";
+import { startWebRuntime } from "./web/runtime.js";
 
 const UNHEARD_VOICE_MEMO = "[sent a voice memo]";
 
@@ -29,11 +32,15 @@ const transport = createTransportationServiceFromEnv({
   geminiApiKey: config.geminiApiKey,
   geminiModel: config.geminiModel,
   googleMapsApiKey: config.googleMapsApiKey,
+  databaseUrl: config.databaseUrl,
 });
 const spaceSenders = new Map<string, (text: string) => Promise<unknown>>();
 const agentState = openAgentStateStore(config.agentStatePath);
 const xrpl = config.paymentsMode === "ripple_test" ? createLiveRippleGuard() : undefined;
 const customerSenders = parseCustomerSenders(config.xrplCustomerSendersJson);
+// Merchant payees must be real Testnet addresses whenever the provider submits to XRPL.
+const merchantPaymentMode =
+  config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple" ? "ripple_test" : "mock";
 const payments = createPaymentRuntime({
   settlement: xrpl ? new CustomerWalletSettlement(xrpl.guard.executor, customerSenders) : undefined,
   mode: config.paymentsMode,
@@ -45,6 +52,15 @@ const payments = createPaymentRuntime({
   recipientsJson: config.paymentsRecipientsJson,
   geminiApiKey: config.geminiApiKey,
   geminiModel: config.geminiModel,
+  stateStore: agentState,
+  nessieApiKey: config.nessieApiKey,
+  nessieBaseUrl: config.nessieBaseUrl,
+  nessieCustomerId: config.nessieCustomerId,
+  nessieAccountId: config.nessieAccountId,
+});
+const meetup = createMeetupRuntime({
+  googleMapsApiKey: config.googleMapsApiKey,
+  timeZone: config.timezone,
   stateStore: agentState,
 });
 const reservations = createReservationRuntime({
@@ -63,7 +79,7 @@ const reservations = createReservationRuntime({
   stateStore: agentState,
   depositsJson: config.reservationDepositsJson,
   merchantsJson: config.paymentsMerchantsJson,
-  paymentMode: config.paymentsMode,
+  paymentMode: merchantPaymentMode,
   depositPayments: payments.service,
   paymentsMaxUsd: config.paymentsMaxUsd,
   paymentsDailyMaxUsd: config.paymentsDailyMaxUsd,
@@ -105,8 +121,8 @@ const ticketing = createTicketingRuntime({
   },
   payments: {
     provider: payments.provider,
-    mode: config.paymentsMode,
-    merchants: createMerchantDirectory({ mode: config.paymentsMode, json: config.paymentsMerchantsJson }),
+    mode: merchantPaymentMode,
+    merchants: createMerchantDirectory({ mode: merchantPaymentMode, json: config.paymentsMerchantsJson }),
     merchantName: config.ticketingMerchantName,
     xrpPerUsd: config.paymentsXrpPerUsd,
     maxUsd: config.paymentsMaxUsd,
@@ -242,17 +258,58 @@ if (xrpl) {
   void startXrplDashboardServer(config.xrplDashboardPort, () => dashboard.build())
     .then((server) => console.info(`XRPL Testnet dashboard: http://127.0.0.1:${server.port}${DASHBOARD_PATH}`))
     .catch((error) => console.warn(`XRPL dashboard did not start: ${errorCategory(error)}`));
-} else {
-  console.info("Payments: mock mode (no Ripple transaction is submitted).");
+} else if (config.paymentsMode === "nessie_ripple") {
+  console.info("Payments: XRPL Testnet. Dollar amounts are converted to test XRP. No real money moves.");
+  if (!config.xrplTestnetSeed) {
+    console.warn("PAYMENTS_MODE includes ripple_test but XRPL_TESTNET_SEED is missing. Confirmed ledger payments will fail closed.");
+  }
 }
 if (config.autonomousPaymentsEnabled) {
   console.info(
     `Autonomous XRPL Testnet payments are enabled up to $${config.autonomousMaxUsd}. Photon transfers still wait for a human yes.`,
   );
 }
-void reservations.listen(config.reservationWebhookPort).catch((error) => {
-  console.error(`reservation webhook failed to listen: ${errorCategory(error)}`);
-});
+if (config.paymentsMode === "nessie" || config.paymentsMode === "nessie_ripple") {
+  console.info(
+    config.nessieApiKey
+      ? "Payments: Nessie mock bank (Capital One hackathon API). No real money moves."
+      : "PAYMENTS_MODE includes Nessie but NESSIE_API_KEY is missing. Confirmed Nessie payments will fail closed.",
+  );
+}
+if (config.paymentsMode === "mock") {
+  console.info("Payments: mock mode (no Nessie or Ripple transaction is submitted).");
+}
+const web =
+  config.webApiPort === "off"
+    ? undefined
+    : startWebRuntime({
+        port: Number(config.webApiPort) || 8788,
+        host: config.webApiHost,
+        statePath: config.webStatePath,
+        maxUsers: config.webMaxUsers,
+        allowedOrigins: config.webAllowedOrigins,
+        secret: config.webAuthSecret,
+        agentName: config.agentName,
+        agentNumber: config.agentNumber,
+        async sendText(phone, text) {
+          if (config.chatProvider !== "imessage") {
+            // Local development without iMessage: print instead of sending (includes login codes).
+            console.info(`[dev] text to ${phone.slice(0, 2)}•••${phone.slice(-4)}: ${text}`);
+            return;
+          }
+          const space = await imessage(app as never).space.create(phone);
+          await space.send(text);
+        },
+        memory,
+        backboard: config.backboardApiKey ? createBackboardClient({ apiKey: config.backboardApiKey }) : undefined,
+        agentState,
+        handleElevenLabsWebhook: (body, signature) => reservations.orchestrator.handleWebhook(body, signature),
+      });
+if (!web) {
+  void reservations.listen(config.reservationWebhookPort).catch((error) => {
+    console.error(`reservation webhook failed to listen: ${errorCategory(error)}`);
+  });
+}
 
 const textFlag = process.argv.indexOf("--text");
 if (textFlag !== -1) {
@@ -324,6 +381,8 @@ for await (const [space, message] of app.messages) {
       reservations: reservations.orchestrator,
       payments: payments.service,
       ticketing: ticketing.service,
+      meetup: meetup.service,
+      liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
       suggest: (input) => suggestNext(input),
       transcript: () => transcript(space.id),
@@ -331,7 +390,8 @@ for await (const [space, message] of app.messages) {
       recordChatMessage: recordMessage,
       recordAssistant: (replyText) => {
         recordMessage(space.id, config.agentName, replyText);
-        if (wantsVoiceReply(config.voiceReplies, isVoice)) {
+        // A signed-up user's own voice setting from the website wins over the global default.
+        if (wantsVoiceReply(web?.voicePreference(who) ?? config.voiceReplies, isVoice)) {
           void sendVoiceReply(space, replyText).catch((err) => {
             console.error(`voice reply failed: ${errorCategory(err)} ${err instanceof Error ? err.message : ""}`);
           });

@@ -8,9 +8,11 @@
     "node": ">=20"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/index.ts",
     "dev:watch": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
+    "start:prod": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:maps-live": "tsx test/live/maps-live.ts",
@@ -18,7 +20,7 @@
     "test:photon-memory-live": "tsx test/live/photon-memory-live.ts",
     "test:ripple-live": "tsx test/live/ripple-live.ts",
     "demo:ripple": "tsx src/payments/ripple-demo.ts",
-    "faucet": "tsx src/payments/faucet.ts",
+    "faucet": "tsx src/payments/faucet-cli.ts",
     "xrpl:dashboard": "tsx src/payments/xrpl-dashboard.ts",
     "xrpl:status": "tsx src/payments/xrpl/cli.ts status",
     "xrpl:test-payment": "tsx src/payments/xrpl/cli.ts test-payment",
@@ -27,6 +29,7 @@
     "xrpl:api": "tsx src/payments/xrpl/cli.ts api",
     "test:xrpl-live": "tsx test/live/xrpl-smoke-live.ts",
     "test:reservation-deposit-live": "tsx test/live/reservation-deposit-live.ts",
+    "payments:fund-testnet": "tsx scripts/fund-xrpl-testnet.ts",
     "transport:demo": "tsx src/transport/demo.ts",
     "demo:reservation": "tsx src/reservations/demo.ts",
     "transport:gemini-live": "tsx src/transport/gemini-live.ts"
