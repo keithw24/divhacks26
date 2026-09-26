@@ -40,7 +40,7 @@ python scripts/ingest_nypd.py
 psql "$DATABASE_URL" -f sql/002_queries.sql
 ```
 
-Default ingest is **20k** recent YTD rows so a free service stays small. Raise `INGEST_LIMIT` in `.env` (or set `0` to page until the API is empty). Switch `NYPD_DATASET=qgea-i56i` only if you have room for historic data.
+Default for full safety stats is **`INGEST_YEARS=2`**: historic `qgea-i56i` plus YTD `5uac-w243`, filtered to `cmplnt_fr_dt` in the last two years (`INGEST_LIMIT=0`). That is roughly 0.8–1.2M rows and can take 15–40 minutes. Omit `INGEST_YEARS` and keep `INGEST_LIMIT=20000` only if you want a tiny sample on a tight free-tier disk.
 
 ## Source
 
