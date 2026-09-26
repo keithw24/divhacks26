@@ -28,10 +28,12 @@ import { ConversationContextStore } from "./orchestration/context.js";
 import { createPlacesRestaurantSearch } from "./orchestration/dining.js";
 import { CrossDomainOrchestrator } from "./orchestration/orchestrator.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
-import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
 import { createBackboardClient } from "./backboard/client.js";
 import { startWebRuntime } from "./web/runtime.js";
 import { createMailer } from "./web/email.js";
+import { readSocialContext } from "./agent/social.js";
+import { shouldSpeak } from "./voice/decide.js";
+import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled } from "./voice/index.js";
 
 const UNHEARD_VOICE_MEMO = "[sent a voice memo]";
 
@@ -190,6 +192,9 @@ async function connect() {
   return Spectrum({ providers: [terminal.config()] });
 }
 
+/** Sounds heard in the last voice memo per message id (tone cues for the social read). */
+const heardAudioEvents = new Map<string, string[]>();
+
 /** Turn any inbound message into text for the transcript, capturing shared locations on the way. */
 async function readMessage(spaceId: string, who: string, message: Message): Promise<string | null> {
   const content = message.content;
@@ -217,11 +222,12 @@ async function readMessage(spaceId: string, who: string, message: Message): Prom
     }
     case "voice": {
       // Transcribed with ElevenLabs when configured; otherwise just noted in the transcript.
-      const said = await transcribeVoiceMemo(content).catch((err) => {
+      const heard = await transcribeVoiceMemo(content).catch((err) => {
         console.error(`voice transcription failed: ${errorCategory(err)} ${err instanceof Error ? err.message : ""}`);
         return null;
       });
-      return said ?? UNHEARD_VOICE_MEMO;
+      if (heard?.audioEvents.length) heardAudioEvents.set(message.id, heard.audioEvents);
+      return heard?.text ?? UNHEARD_VOICE_MEMO;
     }
     default:
       return null;
@@ -388,6 +394,8 @@ for await (const [space, message] of app.messages) {
   }
   const canInvoke = message.content.type === "text" || (isVoice && text !== UNHEARD_VOICE_MEMO);
   const location = lastLocation(space.id);
+  const audioEvents = heardAudioEvents.get(message.id);
+  heardAudioEvents.delete(message.id);
   spaceSenders.set(space.id, (replyText) => space.send(replyText));
   await handleInboundMessage(
     {
@@ -401,6 +409,8 @@ for await (const [space, message] of app.messages) {
       canInvoke,
       direction: "inbound",
       senderKind: message.sender?.kind,
+      isVoice,
+      audioEvents,
     },
     {
       reply: (replyText) => message.reply(replyText),
@@ -435,15 +445,32 @@ for await (const [space, message] of app.messages) {
       transcript: () => transcript(space.id),
       location,
       recordChatMessage: recordMessage,
-      recordAssistant: (replyText) => {
+      recordAssistant: (replyText, meta) => {
         recordMessage(space.id, config.agentName, replyText);
         // A signed-up user's own voice setting from the website wins over the global default.
-        if (wantsVoiceReply(web?.voicePreference(who) ?? config.voiceReplies, isVoice)) {
-          void sendVoiceReply(space, replyText).catch((err) => {
+        const speak = shouldSpeak({
+          mode: web?.voicePreference(who) ?? config.voiceReplies,
+          enabled: voiceEnabled(),
+          inboundWasVoice: isVoice,
+          social: meta?.social,
+          outcome: meta?.outcome,
+        });
+        if (speak) {
+          void sendVoiceReply(space, replyText, meta?.social).catch((err) => {
             console.error(`voice reply failed: ${errorCategory(err)} ${err instanceof Error ? err.message : ""}`);
           });
         }
       },
+      readSocial: config.geminiApiKey ? (input) => readSocialContext(input) : undefined,
+      speakLast: voiceEnabled()
+        ? async (social) => {
+            const last = [...transcript(space.id)].reverse().find((line) => line.who === config.agentName);
+            if (!last) return false;
+            await sendVoiceReply(space, last.text, social);
+            return true;
+          }
+        : undefined,
+      timeZone: config.timezone,
       noteCoordinates: () => {
         if (location) transport.noteCoordinates(space.id, location);
       },

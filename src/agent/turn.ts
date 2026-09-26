@@ -1,4 +1,5 @@
 import type { SuggestInput } from "./suggest.js";
+import { ackFor, reactionFor, type SocialRead } from "./social.js";
 import { paymentInterrupts } from "../payments/intent.js";
 import type { TransportationRequest, TransportationResult } from "../transport/service.js";
 
@@ -23,6 +24,8 @@ export interface TurnInput {
   /** Text the agent should answer. Null when a group message was not addressed to the agent. */
   question: string | null;
   messageId?: string;
+  /** Inferred mood and group dynamic for this turn. Shapes the tapback. */
+  social?: SocialRead;
 }
 
 export interface TurnDeps {
@@ -31,7 +34,7 @@ export interface TurnDeps {
   suggest(input: SuggestInput): Promise<string>;
   transcript(): SuggestInput["transcript"];
   location?: SuggestInput["location"];
-  recordAssistant(text: string): void;
+  recordAssistant(text: string, outcome?: TurnOutcome): void;
   noteCoordinates?(): void;
   handleReservation?(input: {
     spaceId: string;
@@ -60,6 +63,8 @@ export interface TurnDeps {
     messageId?: string;
     phase: "priority" | "fallback";
   }): Promise<ReservationHandlerResult>;
+  /** Friend-style reply for venting with nothing to look up. */
+  support?(): Promise<string>;
   handleMeetup?(input: {
     spaceId: string;
     senderId?: string;
@@ -94,10 +99,12 @@ export type TurnOutcome =
   | "ignored"
   | "unaddressed"
   | "silent"
+  | "voice"
   | "payment"
   | "reservation"
   | "ticketing"
   | "meetup"
+  | "support"
   | "transport"
   | "orchestration"
   | "gemini"
@@ -105,6 +112,11 @@ export type TurnOutcome =
 
 export function errorCategory(error: unknown): string {
   return error instanceof Error ? error.name : "Error";
+}
+
+/** Tapback when there is one. Undefined means "no tapback" (e.g. someone swearing in frustration). */
+async function reactTo(actions: Pick<TurnActions, "react">, emoji: string | undefined): Promise<void> {
+  if (emoji && actions.react) await actions.react(emoji).catch(() => undefined);
 }
 
 /** Send once. A skipped threaded reply falls back to a normal space send. */
@@ -147,7 +159,7 @@ export async function runConversationTurn(
         if (payment.handled && payment.reply) {
           outcome = "payment";
           answer = payment.reply;
-          if (actions.react) await actions.react(payment.acknowledgement ?? "👍").catch(() => undefined);
+          await reactTo(actions, ackFor(input.social, payment.acknowledgement ?? "👍"));
           await deliverOnce(actions, answer);
           delivered = true;
           if (payment.afterReply) await payment.afterReply();
@@ -187,7 +199,7 @@ export async function runConversationTurn(
         if (!result.handled || !result.reply) return false;
         outcome = "ticketing";
         answer = result.reply;
-        if (actions.react) await actions.react(result.acknowledgement ?? "👍").catch(() => undefined);
+        await reactTo(actions, ackFor(input.social, result.acknowledgement ?? "👍"));
         await deliverOnce(actions, answer);
         delivered = true;
         if (result.afterReply) await result.afterReply();
@@ -206,7 +218,7 @@ export async function runConversationTurn(
         if (reservation.handled && reservation.reply) {
           outcome = "reservation";
           answer = reservation.reply;
-          if (actions.react) await actions.react(reservation.acknowledgement ?? "👍").catch(() => undefined);
+          await reactTo(actions, ackFor(input.social, reservation.acknowledgement ?? "👍"));
           await deliverOnce(actions, answer);
           delivered = true;
           if (reservation.afterReply) await reservation.afterReply();
@@ -225,7 +237,7 @@ export async function runConversationTurn(
         if (meetup.handled && meetup.reply) {
           outcome = "meetup";
           answer = meetup.reply;
-          if (actions.react) await actions.react(meetup.acknowledgement ?? "👍").catch(() => undefined);
+          await reactTo(actions, ackFor(input.social, meetup.acknowledgement ?? "👍"));
           await deliverOnce(actions, answer);
           delivered = true;
           return;
@@ -242,7 +254,7 @@ export async function runConversationTurn(
         if (payment.handled && payment.reply) {
           outcome = "payment";
           answer = payment.reply;
-          if (actions.react) await actions.react(payment.acknowledgement ?? "👍").catch(() => undefined);
+          await reactTo(actions, ackFor(input.social, payment.acknowledgement ?? "👍"));
           await deliverOnce(actions, answer);
           delivered = true;
           if (payment.afterReply) await payment.afterReply();
@@ -250,6 +262,15 @@ export async function runConversationTurn(
         }
       }
       if (await ticketing("fallback")) return;
+
+      if (deps.support && input.social?.needsSupport) {
+        outcome = "support";
+        answer = await deps.support();
+        await reactTo(actions, reactionFor(input.social));
+        await deliverOnce(actions, answer);
+        delivered = true;
+        return;
+      }
 
       const transportation = await deps.handleTransport({
         spaceId: input.spaceId,
@@ -261,7 +282,7 @@ export async function runConversationTurn(
       if (transportation.handled && transportation.reply) {
         outcome = "transport";
         answer = transportation.reply;
-        if (actions.react) await actions.react(transportation.acknowledgement).catch(() => undefined);
+        await reactTo(actions, ackFor(input.social, transportation.acknowledgement));
       } else {
         outcome = "gemini";
         answer = await deps.suggest({
@@ -271,13 +292,13 @@ export async function runConversationTurn(
           transcript: deps.transcript(),
           location: deps.location,
         });
-        if (actions.react) await actions.react("👍").catch(() => undefined);
+        await reactTo(actions, reactionFor(input.social));
       }
 
       await deliverOnce(actions, answer);
       delivered = true;
     });
-    if (delivered) deps.recordAssistant(answer);
+    if (delivered) deps.recordAssistant(answer, outcome);
     return outcome;
   } catch (error) {
     console.error(`reply failed: ${errorCategory(error)}`);

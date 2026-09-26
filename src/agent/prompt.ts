@@ -6,13 +6,23 @@ Do not blend contradictory memories. A newer statement in the chat replaces the 
 Use memory to change the recommendation itself: honor diet, walking, and transit constraints when they still match the current request.
 In a group, do not reveal private remembered facts or where they came from. Give the useful result. Never mention another person's unrelated memory.`;
 
+const TONE_RULES = `Read the SOCIAL CONTEXT if present and let it shape how you say things, not the facts:
+- Mirror their style: terse sender gets a terse reply; no emoji unless they use them.
+- Stressed, anxious or urgent: lead with the single best option, keep it short and steady, skip the follow-up question.
+- Excited or playful: match the energy a little. Sad or tired: be warm and low-effort to act on.
+- Group disagreeing: offer an option that fits each side and name the trade-off plainly, without calling anyone out.
+- Someone left out: make sure the option honors the constraint they stated.
+- Never name the emotion you inferred ("you seem stressed") unless they said it themselves.
+- Emotional memories may shape suggestions; never mention them, especially in a group.`;
+
 export function systemPrompt(
   isGroup: boolean,
-  modeOrOptions: "safety" | "hangout" | { personalized?: boolean; mode?: "safety" | "hangout" } = "hangout",
+  modeOrOptions: "safety" | "hangout" | { personalized?: boolean; mode?: "safety" | "hangout"; toned?: boolean } = "hangout",
 ): string {
   const mode = typeof modeOrOptions === "string" ? modeOrOptions : (modeOrOptions.mode ?? "hangout");
   const personalized = typeof modeOrOptions === "object" && Boolean(modeOrOptions.personalized);
-  const memoryRules = personalized ? `\n\n${MEMORY_RULES}` : "";
+  const toned = typeof modeOrOptions === "object" && Boolean(modeOrOptions.toned);
+  const memoryRules = (personalized ? `\n\n${MEMORY_RULES}` : "") + (toned ? `\n\n${TONE_RULES}` : "");
 
   if (mode === "safety") {
     return `You are ${config.agentName}, texting someone in New York City about area safety.

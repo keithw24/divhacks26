@@ -9,6 +9,7 @@ import { currentHourEt, lookupBlockSafety, parseRequestedHour } from "../safety.
 import { wantsSafetySketch } from "../safetyIntent.js";
 import { orchestrate } from "./orchestrate.js";
 import { systemPrompt } from "./prompt.js";
+import { isNotable, rankingHint, socialContextLines, withOpener, type SocialRead } from "./social.js";
 
 function gemini() {
   if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is not set (see .env.example)");
@@ -30,6 +31,8 @@ export interface SuggestInput {
   memoryOverrides?: string[];
   decisionLines?: string[];
   groupLines?: { senderId: string; senderName?: string; text: string }[];
+  /** How the sender and group are feeling and texting right now. */
+  social?: SocialRead;
 }
 
 const clock = (d: Date) =>
@@ -93,6 +96,7 @@ export function buildContext(input: SuggestInput): string {
     );
   }
 
+  lines.push(...socialContextLines(input.social));
   lines.push("", `${input.asker} asks: ${input.question}`);
   return lines.join("\n");
 }
@@ -118,6 +122,7 @@ export function modelInstructions(input: SuggestInput): { system: string; user: 
   return {
     system: systemPrompt(input.isGroup, {
       personalized: input.personalized,
+      toned: isNotable(input.social),
       mode: wantsSafetySketch(input.question) ? "safety" : "hangout",
     }),
     user: buildContext(input),
@@ -261,12 +266,18 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
     who: line.senderName || line.senderId,
     text: line.text,
   }));
-  return orchestrate({
+  // The Gemini fallback already writes in the right tone; templated skill answers get a short opener.
+  let modelWrote = false;
+  const answer = await orchestrate({
     question: input.question,
     transcript: fromGroup.length ? fromGroup : input.transcript,
     location: input.location,
     now: input.now,
-    fallback: () => suggestWithGemini(input),
-    memoryContext: untrustedMemory(input),
+    fallback: () => {
+      modelWrote = true;
+      return suggestWithGemini(input);
+    },
+    memoryContext: [untrustedMemory(input), rankingHint(input.social)].filter(Boolean).join("\n") || undefined,
   });
+  return modelWrote ? answer : withOpener(answer, input.social);
 }

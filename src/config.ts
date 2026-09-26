@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { parseCallTimeoutMs } from "./reservations/timeout.js";
+import { parseVoiceMode } from "./voice/decide.js";
 
 const env = (name: string, fallback = "") => process.env[name]?.trim() || fallback;
 
@@ -45,8 +46,11 @@ export const config = {
   elevenLabsVoiceId: env("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb"),
   elevenLabsTtsModel: env("ELEVENLABS_TTS_MODEL", "eleven_multilingual_v2"),
   elevenLabsSttModel: env("ELEVENLABS_STT_MODEL", "scribe_v2"),
-  /** "match" = answer voice memos with a voice memo; "always"; "off". */
-  voiceReplies: env("VOICE_REPLIES", "match") as "match" | "always" | "off",
+  /**
+   * "match" = answer voice memos (or "say that out loud") with a voice memo;
+   * "smart" = match, plus when someone is on the move or needs a route now; "always"; "off".
+   */
+  voiceReplies: parseVoiceMode(env("VOICE_REPLIES", "smart")),
   /**
    * mock submits nothing. nessie records a fake Capital One purchase.
    * ripple_test submits XRP on XRPL Testnet. nessie_ripple does both.

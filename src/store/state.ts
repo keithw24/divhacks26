@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { MeetupPersistence, MeetupPlan, PersonLocation } from "../meetup/types.js";
 import { emptyPhoneCallBook, type PhoneCallBook, type PhoneCallRecord } from "../phone/types.js";
+import type { CheckIn } from "../agent/checkin.js";
 
 export interface Participant {
   id: string;
@@ -57,6 +58,8 @@ export interface AgentState {
   orchestration?: Record<string, unknown>;
   /** Outbound restaurant calls waiting on ElevenLabs. Keyed by Photon space id. */
   phoneCalls?: PhoneCallBook;
+  /** Gentle follow-ups keyed `${spaceId}:${senderId}` (1:1 chats only). */
+  checkIns?: Record<string, CheckIn>;
 }
 
 /** Enough to match a webhook back to a Photon space after restart. */
@@ -165,6 +168,7 @@ function readStateFile(filePath: string): AgentState {
       meetups: readMeetupBook(parsed.meetups),
       orchestration: parsed.orchestration && typeof parsed.orchestration === "object" ? parsed.orchestration : {},
       phoneCalls: readPhoneCallBook(parsed.phoneCalls),
+      checkIns: parsed.checkIns && typeof parsed.checkIns === "object" ? parsed.checkIns : {},
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
