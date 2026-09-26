@@ -26,6 +26,9 @@ export interface SpaceTravelContext {
   spaceId: string;
   origin?: PlaceLocation;
   destination?: PlaceLocation;
+  /** Named place from chat that has not been resolved yet. */
+  pendingOrigin?: string;
+  pendingDestination?: string;
   lastMode?: TravelMode;
   partySize?: number;
   recentPlaces: PlaceLocation[];
@@ -48,6 +51,8 @@ export interface TransportIntent {
   destinationFromThere?: boolean;
   modes: TravelMode[];
   compareModes: boolean;
+  /** User asked for the fastest option, so answer with a comparison instead of asking which mode. */
+  wantsFastest?: boolean;
   partySize?: number;
   rawPlaceMentions: string[];
 }
@@ -122,6 +127,7 @@ export interface PhraseDirectionsInput {
   modes: TravelMode[];
   partySize?: number;
   bias?: LatLng;
+  preferenceNotes?: string[];
 }
 
 export interface PlaceResolver {

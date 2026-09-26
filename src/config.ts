@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { parseCallTimeoutMs } from "./reservations/timeout.js";
 
 const env = (name: string, fallback = "") => process.env[name]?.trim() || fallback;
 
@@ -17,13 +18,39 @@ export const config = {
   // GEMINI_API_KEY is canonical. GOOGLE_API_KEY is accepted only as a legacy alias.
   geminiApiKey: env("GEMINI_API_KEY") || env("GOOGLE_API_KEY"),
   geminiModel: env("GEMINI_MODEL", "gemini-3.5-flash-lite"),
-  timezone: env("TIMEZONE", "America/New_York"),
-  databaseUrl: env("DATABASE_URL"),
   googleMapsApiKey: env("GOOGLE_MAPS_API_KEY"),
   tavilyApiKey: env("TAVILY_API_KEY"),
   parksEventsDataset: env("PARKS_EVENTS_DATASET", "w3wp-dpdi"),
   permittedEventsDataset: env("PERMITTED_EVENTS_DATASET", "tvpp-9vvx"),
+  timezone: env("TIMEZONE", "America/New_York"),
+  databaseUrl: env("DATABASE_URL"),
+  backboardApiKey: env("BACKBOARD_API_KEY"),
+  backboardMemoryMode: memoryMode(env("BACKBOARD_MEMORY_MODE", "Auto")),
+  backboardMemoryPro: env("BACKBOARD_MEMORY_PRO", "false").toLowerCase() === "true",
+  backboardVerboseMemory: env("BACKBOARD_VERBOSE_MEMORY", "false").toLowerCase() === "true",
+  agentStatePath: env("AGENT_STATE_PATH", "data/agent-state.json"),
+  /** mock never dials. live places a real ElevenLabs outbound call after confirmation. */
+  reservationCallMode: (env("RESERVATION_CALL_MODE", "mock") === "live" ? "live" : "mock") as "live" | "mock",
+  reservationMockScenario: env("RESERVATION_MOCK_SCENARIO", "alternative_within_window"),
+  reservationAllowGazetteerDial: env("RESERVATION_ALLOW_GAZETTEER_DIAL") === "true",
+  reservationWebhookPort: Number(env("RESERVATION_WEBHOOK_PORT", "8787")) || 8787,
+  reservationCallTimeoutMs: parseCallTimeoutMs(process.env.RESERVATION_CALL_TIMEOUT_MS),
+  elevenLabsApiKey: env("ELEVENLABS_API_KEY"),
+  elevenLabsAgentId: env("ELEVENLABS_AGENT_ID"),
+  elevenLabsAgentPhoneNumberId: env("ELEVENLABS_AGENT_PHONE_NUMBER_ID") || env("ELEVENLABS_PHONE_NUMBER_ID"),
+  elevenLabsWebhookSecret: env("ELEVENLABS_WEBHOOK_SECRET") || env("WEBHOOK_SECRET"),
+  // ElevenLabs voice: transcribe inbound voice memos, optionally answer with a voice memo.
+  elevenLabsVoiceId: env("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb"),
+  elevenLabsTtsModel: env("ELEVENLABS_TTS_MODEL", "eleven_multilingual_v2"),
+  elevenLabsSttModel: env("ELEVENLABS_STT_MODEL", "scribe_v2"),
+  /** "match" = answer voice memos with a voice memo; "always"; "off". */
+  voiceReplies: env("VOICE_REPLIES", "match") as "match" | "always" | "off",
 };
+
+function memoryMode(value: string): "Auto" | "Readonly" | "off" {
+  if (value === "Readonly" || value === "off" || value === "Auto") return value;
+  return "Auto";
+}
 
 export function loadConfig() {
   return config;

@@ -20,6 +20,7 @@ export interface TurnInput {
   isGroup: boolean;
   /** Text the agent should answer. Null when a group message was not addressed to the agent. */
   question: string | null;
+  messageId?: string;
 }
 
 export interface TurnDeps {
@@ -30,9 +31,23 @@ export interface TurnDeps {
   location?: SuggestInput["location"];
   recordAssistant(text: string): void;
   noteCoordinates?(): void;
+  handleReservation?(input: {
+    spaceId: string;
+    senderId?: string;
+    text: string;
+    transcript: SuggestInput["transcript"];
+    messageId?: string;
+  }): Promise<ReservationHandlerResult>;
 }
 
-export type TurnOutcome = "ignored" | "unaddressed" | "silent" | "transport" | "gemini" | "failed";
+export interface ReservationHandlerResult {
+  handled: boolean;
+  reply?: string;
+  acknowledgement?: string;
+  afterReply?: () => Promise<void>;
+}
+
+export type TurnOutcome = "ignored" | "unaddressed" | "silent" | "reservation" | "transport" | "gemini" | "failed";
 
 export function errorCategory(error: unknown): string {
   return error instanceof Error ? error.name : "Error";
@@ -45,7 +60,8 @@ export async function deliverOnce(actions: Pick<TurnActions, "reply" | "send">, 
 }
 
 /**
- * Photon inbound turn. Transportation runs first; everything else goes to Gemini.
+ * Photon inbound turn. Reservation handling runs first when a handler is configured.
+ * Transportation runs next; everything else goes to Gemini.
  * Provider work stays inside responding(). One failure returns a short reply and does not throw.
  */
 export async function runConversationTurn(
@@ -63,6 +79,25 @@ export async function runConversationTurn(
     let answer = "";
     await actions.responding(async () => {
       deps.noteCoordinates?.();
+      if (deps.handleReservation) {
+        const reservation = await deps.handleReservation({
+          spaceId: input.spaceId,
+          senderId: input.senderId,
+          text: input.question ?? "",
+          transcript: deps.transcript(),
+          messageId: input.messageId,
+        });
+        if (reservation.handled && reservation.reply) {
+          outcome = "reservation";
+          answer = reservation.reply;
+          if (actions.react) await actions.react(reservation.acknowledgement ?? "👍").catch(() => undefined);
+          await deliverOnce(actions, answer);
+          delivered = true;
+          if (reservation.afterReply) await reservation.afterReply();
+          return;
+        }
+      }
+
       const transportation = await deps.handleTransport({
         spaceId: input.spaceId,
         senderId: input.senderId,

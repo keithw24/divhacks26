@@ -16,13 +16,52 @@ interface GeminiMapsConfig {
   model?: string;
 }
 
+export const DIRECTIONS_AUTHORIZATION_RULE =
+  "When the user asks for directions, transportation advice, route comparison, or how to get somewhere, treat the request as authorization to perform all available route and transportation lookups. Do not ask whether the user wants you to check routes, Maps, transit status, stations, travel times, or related information. Perform those actions automatically and return the best available answer. Ask a clarification only when a required origin or destination cannot be determined from the current message, conversation context, or available memory.";
+
 const TRANSPORT_RULES = [
   "Use Google Maps grounding for factual location and transportation information.",
   "Do not supply specific travel times, routes, stations, transfers, distances, or service information unless supported by the grounded Maps results.",
   "If the available Maps information is insufficient, say so rather than guessing.",
+  "Answer immediately. Do not ask permission to search Maps, check routes, check transit, compare modes, find stations, or look up travel times.",
+  "Do not append offers such as \"want me to\", \"should I check\", \"I can check\", or \"want directions\".",
   "Keep the reply to 2-6 short iMessage lines. No JSON. No markdown headings.",
   "Immediately after the answer, mention Google Maps source titles when they exist.",
 ].join(" ");
+
+export function directionsModelInstructions(input: PhraseDirectionsInput): { system: string; user: string } {
+  const optionalFacts =
+    input.routes.length > 0
+      ? `Optional structured route facts from Google Routes API (use only if present): ${JSON.stringify(
+          input.routes.map((route) => ({
+            mode: route.mode,
+            durationSeconds: route.durationSeconds,
+            distanceMeters: route.distanceMeters,
+            summary: route.summary,
+            steps: route.steps,
+          })),
+        )}`
+      : "No structured Routes API facts were provided. Rely only on Google Maps grounding.";
+
+  return {
+    system: `${DIRECTIONS_AUTHORIZATION_RULE} ${TRANSPORT_RULES}`,
+    user: [
+      "You are an NYC local answering a transportation question over iMessage.",
+      "Return the best route answer now. Do not ask a follow-up.",
+      `Question: ${input.question}`,
+      `Origin: ${input.origin ? JSON.stringify(input.origin) : "unknown"}`,
+      `Destination: ${input.destination ? JSON.stringify(input.destination) : "unknown"}`,
+      `Requested modes: ${input.modes.join(", ") || "WALK, TRANSIT"}`,
+      `Party size: ${input.partySize ?? "unknown"}`,
+      ...(input.preferenceNotes?.length
+        ? [
+            `Route constraints from this person's known preferences. Follow them when they do not conflict with the current question. Do not quote them as private history: ${input.preferenceNotes.join(" ")}`,
+          ]
+        : []),
+      optionalFacts,
+    ].join("\n"),
+  };
+}
 
 function extractJsonObject(text: string): unknown {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -46,11 +85,12 @@ export function createGeminiMapsClient(config: GeminiMapsConfig): GeminiMapsClie
   const ai = getGeminiClient(config.apiKey);
   const model = config.model ?? "gemini-3.8-flash";
 
-  async function generate(prompt: string, bias?: LatLng): Promise<GeminiGroundedText> {
+  async function generate(prompt: string, bias?: LatLng, system?: string): Promise<GeminiGroundedText> {
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
       config: {
+        ...(system ? { systemInstruction: system } : {}),
         tools: [{ googleMaps: {} }],
         ...(bias
           ? {
@@ -128,41 +168,18 @@ export function createGeminiMapsClient(config: GeminiMapsConfig): GeminiMapsClie
         [
           "Answer this nearby-places question for someone texting in iMessage.",
           TRANSPORT_RULES,
+          "Answer now. Do not ask permission to look the place up.",
           `User location: ${origin.name}${origin.address ? ` (${origin.address})` : ""}`,
           `Question: ${query}`,
         ].join("\n"),
         biasFromPlace(origin),
+        DIRECTIONS_AUTHORIZATION_RULE,
       );
     },
 
     async phraseDirections(input: PhraseDirectionsInput): Promise<GeminiGroundedText> {
-      const bias = input.bias ?? biasFromPlace(input.origin);
-      const optionalFacts =
-        input.routes.length > 0
-          ? `Optional structured route facts from Google Routes API (use only if present): ${JSON.stringify(
-              input.routes.map((route) => ({
-                mode: route.mode,
-                durationSeconds: route.durationSeconds,
-                distanceMeters: route.distanceMeters,
-                summary: route.summary,
-                steps: route.steps,
-              })),
-            )}`
-          : "No structured Routes API facts were provided. Rely only on Google Maps grounding.";
-
-      return generate(
-        [
-          "You are an NYC local answering a transportation question over iMessage.",
-          TRANSPORT_RULES,
-          `Question: ${input.question}`,
-          `Origin: ${input.origin ? JSON.stringify(input.origin) : "unknown"}`,
-          `Destination: ${input.destination ? JSON.stringify(input.destination) : "unknown"}`,
-          `Requested modes: ${input.modes.join(", ") || "WALK, TRANSIT"}`,
-          `Party size: ${input.partySize ?? "unknown"}`,
-          optionalFacts,
-        ].join("\n"),
-        bias,
-      );
+      const instructions = directionsModelInstructions(input);
+      return generate(instructions.user, input.bias ?? biasFromPlace(input.origin), instructions.system);
     },
   };
 }

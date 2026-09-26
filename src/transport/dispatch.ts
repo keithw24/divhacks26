@@ -27,6 +27,7 @@ export async function processPhotonTextMessage(
     transcript?: SuggestInput["transcript"];
     location?: SuggestInput["location"];
     recordAssistant?: (text: string) => void;
+    handleReservation?: Parameters<typeof runConversationTurn>[2]["handleReservation"];
   },
 ): Promise<TurnOutcome> {
   return runConversationTurn(
@@ -50,6 +51,7 @@ export async function processPhotonTextMessage(
       transcript: () => options.transcript ?? [],
       location: options.location,
       recordAssistant: options.recordAssistant ?? (() => undefined),
+      handleReservation: options.handleReservation,
     },
   );
 }

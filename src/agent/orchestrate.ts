@@ -17,6 +17,8 @@ export interface OrchestratorInput {
   now?: Date;
   /** Answer to use when the skills can't: no resolvable location, or nothing verified came back. */
   fallback?: () => Promise<string>;
+  /** Fenced long-term memory. Not part of the group transcript. */
+  memoryContext?: string;
 }
 
 function sharedLocation(input: OrchestratorInput): Location | undefined {
@@ -92,6 +94,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     input.question,
     candidates,
     input.transcript.map(({ who, text }) => ({ who, text })),
+    input.memoryContext,
   );
 
   let explicitDestination = intent.destination;
