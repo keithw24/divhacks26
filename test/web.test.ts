@@ -97,6 +97,35 @@ describe("two-factor sign-in", () => {
     expect(await ctx.auth.startPhone(same, "9175550101")).toEqual({ ok: true });
   });
 
+  it("attaches a verified email to an account created before email sign-in", async () => {
+    const ctx = setup();
+    ctx.store.update((s) => {
+      s.users["+19177824515"] = { phone: "+19177824515", createdAt: "2026-09-26T00:00:00Z" } as never;
+    });
+    // An old session for that account (no email yet) no longer counts as signed in.
+    ctx.store.update((s) => {
+      s.sessions["legacy-hash"] = { phone: "+19177824515", expiresAt: Number.MAX_SAFE_INTEGER };
+    });
+    const legacy = ctx.store.read().sessions["legacy-hash"];
+    expect(legacy).toBeTruthy();
+    const { user } = await signIn(ctx, "keith@example.com", "9177824515");
+    expect(user.email).toBe("keith@example.com");
+    expect(ctx.auth.stats().spotsTaken).toBe(1);
+    // From now on that phone is paired with that email.
+    ctx.advance(RESEND_COOLDOWN_MS);
+    const other = await verifiedEmail(ctx, "other@example.com");
+    expect(await ctx.auth.startPhone(other, "9177824515")).toEqual({ error: "account_mismatch" });
+  });
+
+  it("treats sessions of accounts without an email as signed out", async () => {
+    const ctx = setup();
+    const { token } = await signIn(ctx, "a@example.com", "9177824515");
+    ctx.store.update((s) => {
+      delete (s.users["+19177824515"] as { email?: string }).email;
+    });
+    expect(ctx.auth.session(token)).toBeNull();
+  });
+
   it("never stores codes, proofs or session tokens in plain text", async () => {
     const ctx = setup();
     const { token } = await signIn(ctx, "a@example.com", "9177824515");

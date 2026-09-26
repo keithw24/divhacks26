@@ -115,7 +115,8 @@ export function createAuth(opts: AuthOptions) {
   function pairingError(s: WebState, email: string, phone: string): "account_mismatch" | "full" | null {
     const byPhone = s.users[phone];
     const byEmail = userByEmail(s, email);
-    if (byPhone && byPhone.email !== email) return "account_mismatch";
+    // Accounts from before email sign-in have no email yet; the verified one gets attached below.
+    if (byPhone?.email && byPhone.email !== email) return "account_mismatch";
     if (byEmail && byEmail.phone !== phone) return "account_mismatch";
     if (!byPhone && Object.keys(s.users).length >= opts.maxUsers) return "full";
     return null;
@@ -172,6 +173,7 @@ export function createAuth(opts: AuthOptions) {
         if (error) return { error };
         delete s.challenges[sha256(challenge as string)];
         s.users[phone] ??= { phone, email, createdAt: new Date(now()).toISOString() };
+        s.users[phone].email ||= email;
         const token = randomBytes(32).toString("base64url");
         s.sessions[sha256(token)] = { phone, expiresAt: now() + SESSION_TTL_MS };
         return { token, user: structuredClone(s.users[phone]) };
@@ -184,7 +186,9 @@ export function createAuth(opts: AuthOptions) {
       const s = opts.store.read();
       const found = s.sessions[sha256(token)];
       if (!found || found.expiresAt < now()) return null;
-      return s.users[found.phone] ?? null;
+      const user = s.users[found.phone];
+      // Sessions from before email sign-in don't count: signing in again attaches the email.
+      return user?.email ? user : null;
     },
 
     signOut(token: string) {
