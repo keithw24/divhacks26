@@ -10,6 +10,7 @@ import { parseLatLng } from "./chat/location.js";
 import { config } from "./config.js";
 import { createBackboardMemoryService } from "./memory/backboard.js";
 import { openAgentStateStore } from "./store/state.js";
+import { createPaymentRuntime } from "./payments/runtime.js";
 import { createReservationRuntime } from "./reservations/runtime.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
@@ -46,6 +47,18 @@ const reservations = createReservationRuntime({
     }
     await send(text);
   },
+});
+const payments = createPaymentRuntime({
+  mode: config.paymentsMode,
+  maxUsd: config.paymentsMaxUsd,
+  xrpPerUsd: config.paymentsXrpPerUsd,
+  timeoutMs: config.paymentsTimeoutMs,
+  serverUrl: config.xrplTestnetUrl,
+  seed: config.xrplTestnetSeed,
+  recipientsJson: config.paymentsRecipientsJson,
+  geminiApiKey: config.geminiApiKey,
+  geminiModel: config.geminiModel,
+  stateStore: agentState,
 });
 const memory = config.backboardApiKey
   ? createBackboardMemoryService({
@@ -145,6 +158,14 @@ console.info(
     ? "Reservations: live ElevenLabs outbound calls are enabled."
     : "Reservations: mock mode (no real phone calls).",
 );
+if (config.paymentsMode === "ripple_test") {
+  console.info("Payments: XRPL Testnet. Dollar amounts are converted to test XRP. No real money moves.");
+  if (!config.xrplTestnetSeed) {
+    console.warn("PAYMENTS_MODE=ripple_test but XRPL_TESTNET_SEED is missing. Confirmed payments will fail closed.");
+  }
+} else {
+  console.info("Payments: mock mode (no Ripple transaction is submitted).");
+}
 void reservations.listen(config.reservationWebhookPort).catch((error) => {
   console.error(`reservation webhook failed to listen: ${errorCategory(error)}`);
 });
@@ -208,8 +229,10 @@ for await (const [space, message] of app.messages) {
         config.googleMapsApiKey,
         config.elevenLabsApiKey,
         config.elevenLabsWebhookSecret,
+        config.xrplTestnetSeed,
       ].filter(Boolean),
       reservations: reservations.orchestrator,
+      payments: payments.service,
       transport,
       suggest: (input) => suggestNext(input),
       transcript: () => transcript(space.id),

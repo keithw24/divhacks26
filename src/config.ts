@@ -45,7 +45,32 @@ export const config = {
   elevenLabsSttModel: env("ELEVENLABS_STT_MODEL", "scribe_v2"),
   /** "match" = answer voice memos with a voice memo; "always"; "off". */
   voiceReplies: env("VOICE_REPLIES", "match") as "match" | "always" | "off",
+  /**
+   * mock submits nothing. ripple_test submits XRP on XRPL Testnet at PAYMENTS_XRP_PER_USD.
+   * Any other value stays on mock. There is no mainnet or real-money mode.
+   */
+  paymentsMode: paymentsMode(env("PAYMENTS_MODE", "mock")),
+  paymentsMaxUsd: positiveNumber(env("PAYMENTS_MAX_USD", "500"), 500),
+  paymentsTimeoutMs: positiveNumber(env("PAYMENTS_TIMEOUT_MS", "20000"), 20_000),
+  paymentsXrpPerUsd: positiveNumber(env("PAYMENTS_XRP_PER_USD", "1"), 1),
+  xrplTestnetUrl: env("XRPL_TESTNET_URL", "wss://s.altnet.rippletest.net:51233"),
+  xrplTestnetSeed: env("XRPL_TESTNET_SEED"),
+  paymentsRecipientsJson: env("PAYMENTS_RECIPIENTS_JSON"),
 };
+
+function paymentsMode(value: string): "mock" | "ripple_test" {
+  if (value === "ripple_test") return "ripple_test";
+  if (value && value !== "mock") {
+    console.warn(`PAYMENTS_MODE=${value} is not supported; using mock. Real-money payments are disabled.`);
+  }
+  return "mock";
+}
+
+function positiveNumber(value: string, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
 
 function memoryMode(value: string): "Auto" | "Readonly" | "off" {
   if (value === "Readonly" || value === "off" || value === "Auto") return value;

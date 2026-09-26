@@ -74,9 +74,8 @@ export function parseAmount(raw: string): AmountParse {
     text = text.slice(1).trim();
   }
   if (text.startsWith("$")) text = text.slice(1).trim();
-  if (!text || /^(?:nan|infinity|\+infinity)$/.test(text) || /e/.test(text)) {
-    return { ok: false, reason: "malformed" };
-  }
+  if (!text || /^(?:nan|infinity|\+infinity)$/.test(text)) return { ok: false, reason: "malformed" };
+  if (/\d/.test(text) && /e/i.test(text)) return { ok: false, reason: "malformed" };
 
   let value: number;
   if (/^\d+(?:\.\d+)?$/.test(text)) {

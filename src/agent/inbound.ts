@@ -62,6 +62,17 @@ export interface InboundDeps {
       messageId?: string;
     }): Promise<ReservationHandlerResult>;
   };
+  payments?: {
+    observe(spaceId: string, text: string): void;
+    handleTurn(input: {
+      spaceId: string;
+      senderId?: string;
+      senderName?: string;
+      text: string;
+      messageId?: string;
+      recentTexts?: string[];
+    }): Promise<ReservationHandlerResult>;
+  };
 }
 
 export async function handleInboundMessage(
@@ -83,6 +94,7 @@ export async function handleInboundMessage(
   });
 
   deps.reservations?.observe(message.spaceId, message.text);
+  deps.payments?.observe(message.spaceId, message.text);
 
   if (deps.autoReply) {
     await restorePlaceContext(deps, message.spaceId).catch((error) => {
@@ -123,6 +135,7 @@ export async function handleInboundMessage(
     {
       spaceId: message.spaceId,
       senderId,
+      senderName: message.senderName,
       senderKind: message.senderKind,
       direction: "inbound",
       isGroup: message.isGroup,
@@ -179,10 +192,24 @@ export async function handleInboundMessage(
               messageId: message.messageId,
             })
         : undefined,
+      handlePayment: deps.payments
+        ? (request) =>
+            deps.payments!.handleTurn({
+              spaceId: request.spaceId,
+              senderId: request.senderId,
+              senderName: message.senderName,
+              text: request.text,
+              messageId: message.messageId,
+              recentTexts: group.recentMessages
+                .filter((line) => line.id !== message.messageId)
+                .map((line) => line.text),
+            })
+        : undefined,
     },
   );
 
-  const responseSent = outcome === "reservation" || outcome === "transport" || outcome === "gemini" || outcome === "failed";
+  const responseSent =
+    outcome === "payment" || outcome === "reservation" || outcome === "transport" || outcome === "gemini" || outcome === "failed";
   const event: AgentTurnLog = {
     spaceId: message.spaceId,
     senderId,

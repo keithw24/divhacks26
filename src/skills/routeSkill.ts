@@ -33,11 +33,13 @@ export async function getRoute(input: RouteInput): Promise<SkillResult<RouteResu
   };
 
   if (!input.apiKey) {
+    console.info("duration_source=none");
+    console.error("[route] GOOGLE_MAPS_API_KEY is not set");
     return {
       status: "partial",
       data: fallback,
       sources: [{ name: "Google Maps", url: directionsUrl }],
-      warnings: ["Routes API is not configured; exact travel time is unavailable."],
+      warnings: [],
     };
   }
 
@@ -87,12 +89,13 @@ export async function getRoute(input: RouteInput): Promise<SkillResult<RouteResu
       warnings: [],
     };
   } catch (error) {
+    console.info("duration_source=none");
     console.error("route skill failed:", error);
     return {
       status: "partial",
       data: fallback,
       sources: [{ name: "Google Maps", url: directionsUrl }],
-      warnings: ["Exact route timing is unavailable; use the live Maps link."],
+      warnings: [],
     };
   }
 }

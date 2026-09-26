@@ -1,20 +1,26 @@
 import { ConversationMemory } from "./context.js";
 import {
+  composeDirectionsReply,
+  directionsTextIsUsable,
   formatClarification,
   formatGroundedDirections,
   formatNearbyReply,
-  formatRouteReply,
+  groundedRouteSummary,
   groundedTextMatchesRoutes,
+  routeDistanceLabel,
+  routeDurationLabel,
+  stripLeakedFailures,
   stripOptionalFollowUps,
 } from "./format.js";
 import { extractMentionedPlaces, extractTransportIntent } from "./intent.js";
 import { displayName, hasCoordinates, lookupGazetteer } from "./locations.js";
-import { logTransportError } from "./log.js";
+import { logDurationSource, logTransportError } from "./log.js";
 import { collectRoutes } from "./routing.js";
 import { applyRoutePreferences, type RoutePreferences } from "./preferences.js";
 import {
   UNGROUNDED_FALLBACK,
   USER_FALLBACK,
+  type DurationSource,
   type GeminiMapsClient,
   type LatLng,
   type MapsSource,
@@ -23,6 +29,7 @@ import {
   type RouteResult,
   type RoutingProvider,
   type TravelMode,
+  type TravelTimeEstimate,
 } from "./types.js";
 
 export interface TransportationRequest {
@@ -199,7 +206,6 @@ export class TransportationService {
     }
     this.memory.setMode(spaceId, modes[0]);
     const collected = await collectRoutes(this.routing, origin.place, destination.place, modes);
-    const failed = collected.failed;
     const adjusted = applyRoutePreferences(collected.routes, request.preferences);
     let routes = adjusted.routes;
     if (intent.wantsFastest) {
@@ -209,21 +215,48 @@ export class TransportationService {
       );
     }
     const preferenceNote = adjusted.note;
-    const routeReply = () =>
-      formatRouteReply({
-        origin: origin.place!,
-        destination: destination.place!,
-        routes,
-        partySize: intent.partySize ?? ctx.partySize,
-        sources: destination.sources,
-        extraNote: preferenceNote,
-        preferFastest: intent.wantsFastest,
-      });
+    const preferenceNotes = preferenceLines(request.preferences);
+    const conversation = ctx.recentMessages.slice(-6).map((turn) => turn.text);
+    const hasGoogleDuration = routes.some((route) => typeof route.durationSeconds === "number");
+    let durationSource: DurationSource | null = hasGoogleDuration ? "google_routes" : null;
+    let estimate: TravelTimeEstimate | null = null;
 
-    if (this.routing && routes.length === 0) {
-      if (failed) logTransportError("routing", new Error("route lookup failed"));
-      return this.done({ handled: true, acknowledgement: "👀", reply: USER_FALLBACK });
+    if (!hasGoogleDuration && this.gemini?.estimateTravelTime) {
+      try {
+        estimate = await this.gemini.estimateTravelTime({
+          origin: origin.place,
+          destination: destination.place,
+          modes,
+          preferenceNotes,
+          conversation,
+          groundedRoute: groundedRouteSummary(routes) ?? undefined,
+        });
+        if (estimate) durationSource = "gemini_estimate";
+      } catch (error) {
+        logTransportError("gemini.estimateTravelTime", error);
+      }
     }
+
+    if (collected.failed && routes.length === 0) {
+      logTransportError("routing", new Error("route lookup failed"));
+    }
+    logDurationSource(durationSource ?? "none");
+
+    const routeSummary = groundedRouteSummary(routes);
+    const composed = composeDirectionsReply({
+      origin: origin.place,
+      destination: destination.place,
+      routes,
+      approximatePhrase: durationSource === "gemini_estimate" ? estimate?.phrase : undefined,
+      partySize: intent.partySize ?? ctx.partySize,
+      sources: destination.sources,
+      extraNote: preferenceNote,
+      preferFastest: intent.wantsFastest,
+    });
+    const extraMinutes =
+      durationSource === "gemini_estimate" && estimate
+        ? minutesBetween(estimate.lowMinutes, estimate.highMinutes)
+        : [];
 
     if (this.gemini) {
       try {
@@ -235,13 +268,25 @@ export class TransportationService {
           modes,
           partySize: intent.partySize ?? ctx.partySize,
           bias: hasCoordinates(origin.place) ? origin.place : undefined,
-          preferenceNotes: request.preferences?.notes,
+          preferenceNotes,
+          conversation,
+          routeSummary,
+          durationLabel: hasGoogleDuration ? routeDurationLabel(routes) : estimate?.phrase ?? null,
+          distanceLabel: routeDistanceLabel(routes),
+          durationSource,
         });
-        const groundedText = withoutUnsupportedRouteClaims(stripOptionalFollowUps(grounded.text.trim()), routes);
+        const groundedText = stripLeakedFailures(
+          withoutUnsupportedRouteClaims(stripOptionalFollowUps(grounded.text.trim()), routes, extraMinutes),
+        ).trim();
         const usable =
           grounded.grounded &&
-          groundedText &&
-          groundedTextMatchesRoutes(groundedText, routes);
+          directionsTextIsUsable(groundedText, {
+            routes,
+            durationSource,
+            estimate,
+            originName: displayName(origin.place),
+            destinationName: displayName(destination.place),
+          });
         if (usable) {
           return this.done(
             {
@@ -250,55 +295,42 @@ export class TransportationService {
               reply: formatGroundedDirections(groundedText, [...(destination.sources ?? []), ...grounded.sources]),
               usedGemini: true,
             },
-            routes.length > 0 ? routeReply() : undefined,
+            composed,
           );
         }
-        if (routes.length > 0) {
+        if (routes.length > 0 || durationSource === "gemini_estimate") {
           return this.done({
             handled: true,
             acknowledgement: "👍",
-            reply: routeReply(),
+            reply: composed,
             usedGemini: true,
           });
         }
-        if (grounded.grounded && grounded.sources.length > 0) {
-          const safeSummary =
-            `Origin: ${displayName(origin.place)}. Destination: ${displayName(destination.place)}. ` +
-            "Google Maps found both places, but I couldn’t verify route details.";
-          return this.done({
-            handled: true,
-            acknowledgement: "👀",
-            reply: formatGroundedDirections(safeSummary, grounded.sources),
-          });
+        if (!grounded.grounded) {
+          logTransportError("gemini.ungrounded", new Error("Maps grounding metadata missing"));
+          return this.done({ handled: true, acknowledgement: "👀", reply: UNGROUNDED_FALLBACK, usedGemini: true });
         }
-        logTransportError("gemini.ungrounded", new Error("Maps grounding metadata missing"));
-        return this.done({ handled: true, acknowledgement: "👀", reply: UNGROUNDED_FALLBACK, usedGemini: true });
+        return this.done({
+          handled: true,
+          acknowledgement: "👍",
+          reply: formatGroundedDirections(composed, [...(destination.sources ?? []), ...grounded.sources]),
+          usedGemini: true,
+        });
       } catch (error) {
         logTransportError("gemini.phraseDirections", error);
-        if (routes.length > 0) {
-          return this.done({
-            handled: true,
-            acknowledgement: "👍",
-            reply: routeReply(),
-            usedGemini: true,
-          });
-        }
-        return this.done({ handled: true, acknowledgement: "👀", reply: USER_FALLBACK, usedGemini: true });
+        return this.done({
+          handled: true,
+          acknowledgement: "👍",
+          reply: composed,
+          usedGemini: true,
+        });
       }
-    }
-
-    if (failed && routes.length === 0) {
-      return this.done({ handled: true, acknowledgement: "👀", reply: USER_FALLBACK });
-    }
-
-    if (routes.length === 0) {
-      return this.done({ handled: true, acknowledgement: "👀", reply: USER_FALLBACK });
     }
 
     return this.done({
       handled: true,
       acknowledgement: "👍",
-      reply: routeReply(),
+      reply: composed,
     });
   }
 
@@ -336,10 +368,10 @@ export class TransportationService {
 
   private done(result: TransportationResult, fallback?: string): TransportationResult {
     if (!result.reply) return result;
-    const cleaned = stripOptionalFollowUps(result.reply).trim();
+    const cleaned = stripLeakedFailures(stripOptionalFollowUps(result.reply)).trim();
     if (cleaned) return { ...result, reply: cleaned };
     if (fallback) {
-      const safe = stripOptionalFollowUps(fallback).trim();
+      const safe = stripLeakedFailures(stripOptionalFollowUps(fallback)).trim();
       if (safe) return { ...result, reply: safe };
     }
     return { ...result, reply: USER_FALLBACK };
@@ -439,13 +471,28 @@ function modesFor(
   return ["WALK", "TRANSIT"];
 }
 
+function preferenceLines(prefs?: RoutePreferences): string[] {
+  if (!prefs) return [];
+  const lines = [...(prefs.notes ?? [])];
+  if (prefs.avoidBus && !lines.some((line) => /\bbus\b/i.test(line))) lines.push("Avoid the bus.");
+  return lines;
+}
+
+function minutesBetween(low: number, high: number): number[] {
+  const minutes: number[] = [];
+  const end = Math.min(high, low + 30);
+  for (let value = low; value <= end; value += 1) minutes.push(value);
+  return minutes;
+}
+
 /** Gemini-only replies may name the trip. They may not add lines, fares, or times no route payload supports. */
-function withoutUnsupportedRouteClaims(text: string, routes: RouteResult[]): string {
-  if (!text || routes.length > 0) return text;
+function withoutUnsupportedRouteClaims(text: string, routes: RouteResult[], extraMinutes: number[] = []): string {
+  if (!text) return text;
+  if (routes.length > 0) return text;
   return text
     .split(/(?<=[.!?])\s+/)
     .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence && groundedTextMatchesRoutes(sentence, []))
+    .filter((sentence) => sentence && groundedTextMatchesRoutes(sentence, [], { extraMinutes }))
     .join(" ");
 }
 

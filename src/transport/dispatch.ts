@@ -7,6 +7,7 @@ export interface PhotonTextMessage {
   senderId?: string;
   senderKind?: string;
   direction?: "inbound" | "outbound";
+  senderName?: string;
   text: string;
   isGroup?: boolean;
 }
@@ -15,7 +16,8 @@ export interface PhotonActions extends TurnActions {}
 
 /**
  * Testable inbound path used by the Photon listener.
- * Transportation is handled first. Other messages go to the Gemini suggest path.
+ * Payment requests run first, then reservations, then a pending payment confirmation,
+ * then transportation. Other messages go to the Gemini suggest path.
  */
 export async function processPhotonTextMessage(
   message: PhotonTextMessage,
@@ -28,12 +30,14 @@ export async function processPhotonTextMessage(
     location?: SuggestInput["location"];
     recordAssistant?: (text: string) => void;
     handleReservation?: Parameters<typeof runConversationTurn>[2]["handleReservation"];
+    handlePayment?: Parameters<typeof runConversationTurn>[2]["handlePayment"];
   },
 ): Promise<TurnOutcome> {
   return runConversationTurn(
     {
       spaceId: message.spaceId,
       senderId: message.senderId,
+      senderName: message.senderName,
       senderKind: message.senderKind,
       direction: message.direction ?? "inbound",
       isGroup: message.isGroup ?? false,
@@ -52,6 +56,7 @@ export async function processPhotonTextMessage(
       location: options.location,
       recordAssistant: options.recordAssistant ?? (() => undefined),
       handleReservation: options.handleReservation,
+      handlePayment: options.handlePayment,
     },
   );
 }

@@ -144,6 +144,14 @@ export function extractTransportIntent(text: string): TransportIntent {
 
   if (!destinationQuery) destinationQuery = trailingDestination(raw);
 
+  const mentionsRide = /\b(?:uber|lyft|taxi|cab)\b/i.test(raw);
+  if (mentionsRide && /\bhow much\b/i.test(raw) && destinationQuery) {
+    const cleaned = stripFiller(destinationQuery.replace(/\s+cost\w*$/i, ""));
+    if (isUsefulPlace(cleaned)) destinationQuery = cleaned;
+  }
+  const rideHail = mentionsRide && /\b(?:get|grab|call|order|need)\s+(?:me|us)\b/i.test(raw) && Boolean(destinationQuery);
+  const fareQuestion = mentionsRide && /\bhow much\b/i.test(raw) && Boolean(destinationQuery);
+
   const originFromHere = /\bfrom here\b/i.test(raw) || /\bnear me\b/i.test(raw);
   const destinationFromThere = /\b(there|that (?:place|restaurant|spot)|the place)\b/i.test(raw);
 
@@ -168,7 +176,14 @@ export function extractTransportIntent(text: string): TransportIntent {
 
   const isTransport =
     !happening &&
-    (directions || nearby || walkCheck || compare || (followUp && (destinationFromThere || walkCheck)) || placeFollowUp);
+    (directions ||
+      nearby ||
+      walkCheck ||
+      compare ||
+      rideHail ||
+      fareQuestion ||
+      (followUp && (destinationFromThere || walkCheck)) ||
+      placeFollowUp);
 
   let kind: TransportIntent["kind"];
   if (nearby) kind = "nearby";

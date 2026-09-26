@@ -365,7 +365,7 @@ Photon can collect a reservation and, after an explicit yes, ask ElevenLabs to c
 ```
 iMessage
   → Photon listener
-  → existing turn (reservation, then transportation, then Gemini)
+  → existing turn (payment request, then reservation, then payment confirmation, then transportation, then Gemini)
   → reservation state for that space
   → Gemini slot extraction when a key is set (text only, not audio)
   → Google Places phone lookup when GOOGLE_MAPS_API_KEY is set
@@ -470,3 +470,78 @@ A second copy of the same Photon confirmation does not start a second call. A se
 - Destinations outside NYC are labeled; the agent will not invent a route.
 - Event, food, and safety requests use the unified skill orchestrator; transportation requests use the dedicated context-aware handler.
 - Participant memory is retrieved only for group requests that are clearly about the group (everyone, dinner for us, and similar). A one-person directions question does not pull other people's memories.
+
+## Conversational payments
+
+Photon can send a test payment after an explicit yes. The listener, reservations, transportation, and Gemini suggestions stay in place. A payment request is another branch of the same turn.
+
+```
+iMessage
+  → Photon listener
+  → existing turn
+  → payment intent (deterministic parse, Gemini only to fill fields)
+  → recipient directory for this process
+  → pending payment stored on that Photon space
+  → user confirms
+  → mock provider, or XRPL Testnet
+  → the same Photon space
+```
+
+"Send Keith $20 for the Uber" asks "Send Keith $20 for the Uber?" and does not move anything. "Yes" from the same person submits. "No" drops the pending payment. "Actually make it $15" updates the pending payment and waits for a new yes. The yes that applied to $20 is not reused.
+
+Gemini may extract a recipient, amount, and memo. It never chooses a wallet and never submits. Amount checks, the directory lookup, the confirmation gate, and the provider call are ordinary TypeScript.
+
+### What the sandbox actually records
+
+Chat amounts are US dollars. XRPL Testnet does not settle bank dollars. In `ripple_test`, the app converts USD to testnet XRP at `PAYMENTS_XRP_PER_USD` (default **1 USD = 1 testnet XRP**) and submits that as drops (1 XRP = 1,000,000 drops). Testnet XRP has no monetary value. This is not a market rate, not RLUSD, and not a mainnet payment. A reply says "Sent" only after the ledger result is `tesSUCCESS` and includes a transaction hash. Timeouts and unknown results are failures: "Nothing was charged."
+
+`mock` (the default) runs the same pending and confirmation flow and returns a fake transaction id. It does not open a socket.
+
+### Environment
+
+| Variable | Default | Used for |
+| --- | --- | --- |
+| `PAYMENTS_MODE` | `mock` | `mock` or `ripple_test`. Anything else stays on mock |
+| `PAYMENTS_MAX_USD` | `500` | Reject larger requests before confirmation |
+| `PAYMENTS_XRP_PER_USD` | `1` | Demo peg used only in `ripple_test` |
+| `PAYMENTS_TIMEOUT_MS` | `20000` | Give up without claiming success |
+| `XRPL_TESTNET_URL` | `wss://s.altnet.rippletest.net:51233` | Official Testnet websocket. Other hosts are refused |
+| `XRPL_TESTNET_SEED` | | Testnet sender family seed. Never commit it |
+| `PAYMENTS_RECIPIENTS_JSON` | | Optional map of display name to classic address |
+
+There is no real-money mode. A missing seed in `ripple_test` fails the payment closed instead of pretending it succeeded.
+
+### Recipients
+
+`src/payments/recipients.ts` maps Keith, Ben, and Sarah to XRPL classic addresses. Those built-in addresses are public placeholders for mock mode. They are not funded secrets. `PAYMENTS_RECIPIENTS_JSON` overrides them with funded Testnet addresses when you have some. An unknown name gets "I don't have a payment destination for Keith yet." The app does not invent an address.
+
+"Send him $10" uses the latest message in **that** Photon space that names a person. Two different people in that message is ambiguous and is not sent. Another space's messages are not consulted.
+
+The directory is the seam for a later Backboard contact, Photon participant, or handle lookup.
+
+### Confirmation, idempotency, and groups
+
+The pending record is `AWAITING_CONFIRMATION` until the initiating Photon sender says yes, yep, yeah, confirm, send it, do it, or pay it. The store then moves it to `PROCESSING` before the provider is called, then `SUCCEEDED` or `FAILED`. A second yes, a retried Photon delivery of the same message id, or a late network response cannot submit that payment again. The payment id is also the provider idempotency key. On Testnet it is stored as an `InvoiceID` and a memo, and a matching validated `tesSUCCESS` is reused instead of submitted twice.
+
+Cancel (no, cancel, never mind, don't, stop) clears the pending payment.
+
+In a group, only `sender.id` of the person who asked can confirm, change, or cancel. Someone else's "yes" does not send.
+
+Payment state is stored on the agent state file next to reservations (`AGENT_STATE_PATH`, default `data/agent-state.json`), keyed by `space.id`. A yes in another space does not see it. A new process loads the pending payment and can still confirm it once.
+
+### Tests
+
+```bash
+npm test
+npm run typecheck
+```
+
+Payment tests mock the provider. `npm test` does not contact Ripple.
+
+Opt-in Testnet check. It refuses any URL that is not XRPL Testnet, and it refuses a server whose network id is not Testnet (`1`). With no `XRPL_TESTNET_SEED` it funds temporary accounts from the official Testnet faucet and does not print secrets. It prints the payment id, destination address, requested USD, XRP amount and drops submitted, transaction hash, and final status.
+
+```bash
+npm run test:ripple-live
+```
+
+Do not point `XRPL_TESTNET_URL` at mainnet. The script and the provider both refuse that.

@@ -76,6 +76,25 @@ export interface RouteResult {
   steps: RouteStep[];
 }
 
+/** Where the travel time in a directions reply came from. Null means no duration. */
+export type DurationSource = "google_routes" | "gemini_estimate";
+
+export interface TravelTimeEstimate {
+  lowMinutes: number;
+  highMinutes: number;
+  /** Approximate wording, such as "about 20–25 minutes". */
+  phrase: string;
+}
+
+export interface TravelTimeEstimateInput {
+  origin: PlaceLocation;
+  destination: PlaceLocation;
+  modes: TravelMode[];
+  preferenceNotes?: string[];
+  conversation?: string[];
+  groundedRoute?: string;
+}
+
 export interface RoutingProvider {
   getRoute(
     origin: PlaceLocation,
@@ -117,6 +136,8 @@ export interface GeminiMapsClient {
   resolvePlaces(query: string, bias?: LatLng): Promise<PlaceResolveResult>;
   nearby(origin: PlaceLocation, query: string): Promise<GeminiGroundedText>;
   phraseDirections(input: PhraseDirectionsInput): Promise<GeminiGroundedText>;
+  /** Approximate range used only when Google Routes did not return a duration. */
+  estimateTravelTime?(input: TravelTimeEstimateInput): Promise<TravelTimeEstimate | null>;
 }
 
 export interface PhraseDirectionsInput {
@@ -128,6 +149,12 @@ export interface PhraseDirectionsInput {
   partySize?: number;
   bias?: LatLng;
   preferenceNotes?: string[];
+  conversation?: string[];
+  /** Grounded route sentence, when one exists. Null means do not invent steps. */
+  routeSummary?: string | null;
+  durationLabel?: string | null;
+  distanceLabel?: string | null;
+  durationSource?: DurationSource | null;
 }
 
 export interface PlaceResolver {

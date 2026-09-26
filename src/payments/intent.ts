@@ -14,7 +14,7 @@ export type PaymentMessage =
       kind: "change";
       amount?: AmountParse;
       recipientName?: string;
-      memo?: string;
+      memo?: string | null;
     };
 
 const CONFIRM = new Set([
@@ -112,9 +112,6 @@ function splitRecipientAmount(head: string): { recipient: string | null; amountR
     const recipient = tokens.slice(0, tokens.length - size).join(" ").trim();
     if (!looksLikeAmount(amountRaw)) continue;
     return { recipient: recipient || null, amountRaw };
-  }
-  if (tokens.length >= 2 && /^[A-Za-z][\p{L}'-]*$/u.test(tokens[0] ?? "")) {
-    return { recipient: tokens[0] ?? null, amountRaw: tokens.slice(1).join(" ") };
   }
   return null;
 }

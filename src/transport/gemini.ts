@@ -1,6 +1,7 @@
 import { getGeminiClient } from "../gemini/client.js";
+import { formatApproximateDuration } from "./format.js";
 import { inspectMapsGrounding } from "./grounding.js";
-import { lookupGazetteer } from "./locations.js";
+import { displayName, lookupGazetteer } from "./locations.js";
 import { logTransportError } from "./log.js";
 import type {
   GeminiGroundedText,
@@ -9,6 +10,9 @@ import type {
   PhraseDirectionsInput,
   PlaceLocation,
   PlaceResolveResult,
+  TravelMode,
+  TravelTimeEstimate,
+  TravelTimeEstimateInput,
 } from "./types.js";
 
 interface GeminiMapsConfig {
@@ -29,37 +33,102 @@ const TRANSPORT_RULES = [
   "Immediately after the answer, mention Google Maps source titles when they exist.",
 ].join(" ");
 
-export function directionsModelInstructions(input: PhraseDirectionsInput): { system: string; user: string } {
-  const optionalFacts =
-    input.routes.length > 0
-      ? `Optional structured route facts from Google Routes API (use only if present): ${JSON.stringify(
-          input.routes.map((route) => ({
-            mode: route.mode,
-            durationSeconds: route.durationSeconds,
-            distanceMeters: route.distanceMeters,
-            summary: route.summary,
-            steps: route.steps,
-          })),
-        )}`
-      : "No structured Routes API facts were provided. Rely only on Google Maps grounding.";
+const DIRECTION_REPLY_RULES = [
+  "Answer the user's directions question directly.",
+  "Include the travel time naturally when duration is available.",
+  "If durationSource is gemini_estimate, use approximate language such as about, roughly, or around. Never present that estimate as an exact live travel time.",
+  "If durationSource is null, do not invent a travel time.",
+  "Never mention APIs, configuration, providers, missing keys, errors, HTTP statuses, quotas, timeouts, or fallback logic.",
+  "Never invent a subway line, station, bus, road, fare, departure time, or other route detail that is not present in the structured route facts.",
+  "Do not ask a follow-up or offer another lookup when the request can already be answered.",
+  "Keep the response concise and conversational for iMessage. No JSON. No markdown headings.",
+].join(" ");
 
+export function directionsBrief(input: PhraseDirectionsInput): {
+  origin: string | null;
+  destination: string | null;
+  mode: TravelMode[];
+  route: string | null;
+  duration: string | null;
+  distance: string | null;
+  durationSource: PhraseDirectionsInput["durationSource"];
+} {
   return {
-    system: `${DIRECTIONS_AUTHORIZATION_RULE} ${TRANSPORT_RULES}`,
+    origin: input.origin ? displayName(input.origin) : null,
+    destination: input.destination ? displayName(input.destination) : null,
+    mode: input.modes,
+    route: input.routeSummary ?? null,
+    duration: input.durationLabel ?? null,
+    distance: input.distanceLabel ?? null,
+    durationSource: input.durationSource ?? null,
+  };
+}
+
+export function directionsModelInstructions(input: PhraseDirectionsInput): { system: string; user: string } {
+  return {
+    system: `${DIRECTIONS_AUTHORIZATION_RULE} ${DIRECTION_REPLY_RULES}`,
     user: [
       "You are an NYC local answering a transportation question over iMessage.",
       "Return the best route answer now. Do not ask a follow-up.",
+      "Use only the structured facts below for lines, stations, buses, roads, fares, and times.",
       `Question: ${input.question}`,
-      `Origin: ${input.origin ? JSON.stringify(input.origin) : "unknown"}`,
-      `Destination: ${input.destination ? JSON.stringify(input.destination) : "unknown"}`,
-      `Requested modes: ${input.modes.join(", ") || "WALK, TRANSIT"}`,
       `Party size: ${input.partySize ?? "unknown"}`,
       ...(input.preferenceNotes?.length
         ? [
             `Route constraints from this person's known preferences. Follow them when they do not conflict with the current question. Do not quote them as private history: ${input.preferenceNotes.join(" ")}`,
           ]
         : []),
-      optionalFacts,
+      ...(input.conversation?.length ? [`Recent conversation: ${input.conversation.join(" | ")}`] : []),
+      `Facts: ${JSON.stringify(directionsBrief(input))}`,
     ].join("\n"),
+  };
+}
+
+const TRAVEL_TIME_SCHEMA = {
+  type: "object",
+  properties: {
+    canEstimate: { type: "boolean" },
+    lowMinutes: { type: "integer" },
+    highMinutes: { type: "integer" },
+  },
+  required: ["canEstimate"],
+};
+
+export function travelTimeEstimateInstructions(input: TravelTimeEstimateInput): string {
+  return [
+    "Estimate a conservative door-to-door travel-time range for this NYC trip.",
+    "Use only the facts below. If they are not enough to estimate responsibly, set canEstimate to false and omit the minutes.",
+    "Do not invent subway lines, stations, buses, roads, fares, or departure times.",
+    "Prefer a range over one exact minute. Return JSON only.",
+    `Origin: ${displayName(input.origin)}${input.origin.address ? ` (${input.origin.address})` : ""}`,
+    `Destination: ${displayName(input.destination)}${input.destination.address ? ` (${input.destination.address})` : ""}`,
+    `Modes: ${input.modes.join(", ") || "WALK, TRANSIT"}`,
+    input.groundedRoute ? `Grounded route facts: ${input.groundedRoute}` : "No grounded route steps are available.",
+    ...(input.preferenceNotes?.length ? [`Preferences: ${input.preferenceNotes.join(" ")}`] : []),
+    ...(input.conversation?.length ? [`Recent conversation: ${input.conversation.join(" | ")}`] : []),
+  ].join("\n");
+}
+
+function asMinutes(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  return undefined;
+}
+
+/** Accept a conservative range. Anything incomplete or too wide becomes no duration. */
+export function parseTravelTimeEstimate(raw: unknown, modes: TravelMode[]): TravelTimeEstimate | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as { canEstimate?: unknown; lowMinutes?: unknown; highMinutes?: unknown };
+  if (value.canEstimate !== true) return null;
+  const low = asMinutes(value.lowMinutes);
+  const high = asMinutes(value.highMinutes);
+  if (low === undefined || high === undefined) return null;
+  if (low < 1 || high > 180 || high < low) return null;
+  if (high - low > 30) return null;
+  return {
+    lowMinutes: low,
+    highMinutes: high,
+    phrase: formatApproximateDuration(low, high, modes),
   };
 }
 
@@ -180,6 +249,21 @@ export function createGeminiMapsClient(config: GeminiMapsConfig): GeminiMapsClie
     async phraseDirections(input: PhraseDirectionsInput): Promise<GeminiGroundedText> {
       const instructions = directionsModelInstructions(input);
       return generate(instructions.user, input.bias ?? biasFromPlace(input.origin), instructions.system);
+    },
+
+    async estimateTravelTime(input: TravelTimeEstimateInput): Promise<TravelTimeEstimate | null> {
+      const response = await ai.models.generateContent({
+        model,
+        contents: travelTimeEstimateInstructions(input),
+        config: {
+          responseMimeType: "application/json",
+          responseJsonSchema: TRAVEL_TIME_SCHEMA,
+          temperature: 0.2,
+        },
+      });
+      const text = response.text?.trim();
+      if (!text) return null;
+      return parseTravelTimeEstimate(JSON.parse(text), input.modes);
     },
   };
 }

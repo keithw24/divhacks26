@@ -47,6 +47,8 @@ export interface AgentState {
   ingestedMessageIds: Record<string, true>;
   /** In-progress restaurant reservations. Survives a process restart. */
   reservations: ReservationPersistence;
+  /** In-progress payments. Survives a process restart. Scoped by Photon space id. */
+  payments: PaymentPersistence;
 }
 
 /** Enough to match a webhook back to a Photon space after restart. */
@@ -67,8 +69,28 @@ export function emptyReservationBook(): ReservationPersistence {
   return { records: {}, activeBySpace: {}, byConversation: {}, mentions: {}, processedEvents: [] };
 }
 
+/** Pending payments, per-space person mentions, and message ids already applied. */
+export interface PaymentPersistence {
+  records: Record<string, unknown>;
+  activeBySpace: Record<string, string>;
+  recentPeople: Record<string, string[]>;
+  messageReplies: Record<string, string>;
+  inflightMessages: string[];
+}
+
+export function emptyPaymentBook(): PaymentPersistence {
+  return { records: {}, activeBySpace: {}, recentPeople: {}, messageReplies: {}, inflightMessages: [] };
+}
+
 export function emptyState(): AgentState {
-  return { users: {}, spaces: {}, threads: {}, ingestedMessageIds: {}, reservations: emptyReservationBook() };
+  return {
+    users: {},
+    spaces: {},
+    threads: {},
+    ingestedMessageIds: {},
+    reservations: emptyReservationBook(),
+    payments: emptyPaymentBook(),
+  };
 }
 
 export function ingestionKey(spaceId: string, messageId: string): string {
@@ -122,6 +144,7 @@ function readStateFile(filePath: string): AgentState {
       threads: parsed.threads ?? {},
       ingestedMessageIds: parsed.ingestedMessageIds ?? {},
       reservations: readReservationBook(parsed.reservations),
+      payments: readPaymentBook(parsed.payments),
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -147,6 +170,24 @@ function readReservationBook(value: unknown): ReservationPersistence {
     ? record.processedEvents.filter((item): item is string => typeof item === "string")
     : [];
   return { records, activeBySpace, byConversation, mentions, processedEvents };
+}
+
+function readPaymentBook(value: unknown): PaymentPersistence {
+  const record = value && typeof value === "object" ? (value as Partial<PaymentPersistence>) : {};
+  const records = record.records && typeof record.records === "object" ? record.records : {};
+  const activeBySpace = stringMap(record.activeBySpace);
+  const recentPeople: Record<string, string[]> = {};
+  if (record.recentPeople && typeof record.recentPeople === "object") {
+    for (const [key, names] of Object.entries(record.recentPeople)) {
+      if (!Array.isArray(names)) continue;
+      recentPeople[key] = names.filter((name): name is string => typeof name === "string");
+    }
+  }
+  const messageReplies = stringMap(record.messageReplies);
+  const inflightMessages = Array.isArray(record.inflightMessages)
+    ? record.inflightMessages.filter((item): item is string => typeof item === "string")
+    : [];
+  return { records, activeBySpace, recentPeople, messageReplies, inflightMessages };
 }
 
 function stringMap(value: unknown): Record<string, string> {
