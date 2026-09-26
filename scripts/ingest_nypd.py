@@ -3,13 +3,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
-import json
 
 import psycopg
 from dotenv import load_dotenv
@@ -116,20 +117,91 @@ def row_from_api(record: dict) -> dict | None:
     }
 
 
-def fetch_page(dataset: str, offset: int, limit: int) -> list[dict]:
-    params = urlencode(
-        {
-            "$limit": str(limit),
-            "$offset": str(offset),
-            "$order": "cmplnt_fr_dt DESC",
-        }
-    )
-    url = f"{SODA_BASE}/{dataset}.json?{params}"
-    try:
-        with urlopen(url, timeout=60) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (HTTPError, URLError) as exc:
-        raise SystemExit(f"NYC Open Data request failed: {exc}") from exc
+def lookback_start(now: datetime, years: float) -> datetime:
+    return now - timedelta(days=365.25 * years)
+
+
+def soda_since_clause(since: datetime) -> str:
+    return f"cmplnt_fr_dt >= '{since.strftime('%Y-%m-%dT00:00:00')}'"
+
+
+def nypd_datasets(years: float) -> list[str]:
+    listed = os.environ.get("NYPD_DATASETS")
+    if listed:
+        return [item.strip() for item in listed.split(",") if item.strip()]
+    if years > 0:
+        # Historic covers the 2-year window; YTD fills months the historic feed still lags.
+        return ["qgea-i56i", "5uac-w243"]
+    return [os.environ.get("NYPD_DATASET", "5uac-w243")]
+
+
+def fetch_page(dataset: str, offset: int, limit: int, extra: dict[str, str] | None = None) -> list[dict]:
+    params = {
+        "$limit": str(limit),
+        "$offset": str(offset),
+        "$order": "cmplnt_fr_dt ASC,cmplnt_num ASC",
+        **(extra or {}),
+    }
+    url = f"{SODA_BASE}/{dataset}.json?{urlencode(params)}"
+    last_error: Exception | None = None
+    for attempt in range(6):
+        try:
+            with urlopen(url, timeout=90) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            if not isinstance(payload, list):
+                raise SystemExit(f"NYC Open Data {dataset} returned a non-list payload")
+            return payload
+        except (HTTPError, URLError) as exc:
+            last_error = exc
+            code = getattr(exc, "code", None)
+            if code in {429, 500, 502, 503} and attempt < 5:
+                time.sleep(2 ** attempt)
+                continue
+            raise SystemExit(f"NYC Open Data {dataset} failed: {exc}") from exc
+    raise SystemExit(f"NYC Open Data {dataset} failed: {last_error}")
+
+
+def ingest_dataset(
+    cur,
+    conn,
+    dataset: str,
+    *,
+    page_size: int,
+    ingest_limit: int,
+    since: datetime | None,
+) -> tuple[int, int]:
+    inserted = 0
+    skipped = 0
+    offset = 0
+    extra = {"$where": soda_since_clause(since)} if since else {}
+    while True:
+        seen = inserted + skipped
+        if ingest_limit > 0 and seen >= ingest_limit:
+            break
+        remaining = ingest_limit - seen if ingest_limit > 0 else page_size
+        batch_size = page_size if ingest_limit <= 0 else min(page_size, remaining)
+        page = fetch_page(dataset, offset, batch_size, extra)
+        if not page:
+            break
+        rows = []
+        for record in page:
+            mapped = row_from_api(record)
+            if mapped is None:
+                skipped += 1
+                continue
+            if since and mapped["occurred_at"] < since:
+                skipped += 1
+                continue
+            rows.append(mapped)
+        if rows:
+            cur.executemany(INSERT_SQL, rows)
+            conn.commit()
+            inserted += len(rows)
+        offset += len(page)
+        print(f"{dataset}: fetched {offset:,} | inserted {inserted:,} | skipped {skipped:,}")
+        if len(page) < batch_size:
+            break
+    return inserted, skipped
 
 
 def main() -> None:
@@ -137,44 +209,59 @@ def main() -> None:
     if not database_url:
         sys.exit("Set DATABASE_URL in .env (see .env.example).")
 
-    dataset = os.environ.get("NYPD_DATASET", "5uac-w243")
-    page_size = int(os.environ.get("PAGE_SIZE", "1000"))
-    ingest_limit = int(os.environ.get("INGEST_LIMIT", "20000"))
+    years = float(os.environ.get("INGEST_YEARS") or "0")
+    limit_raw = os.environ.get("INGEST_LIMIT")
+    if limit_raw is None or limit_raw.strip() == "":
+        ingest_limit = 0 if years > 0 else 20000
+    else:
+        ingest_limit = int(limit_raw)
+    if years >= 2 and 0 < ingest_limit <= 20000:
+        print(
+            f"warning: INGEST_LIMIT={ingest_limit} is too small for a 2-year window; "
+            "set INGEST_LIMIT=0 to load every matching complaint",
+            file=sys.stderr,
+        )
+    page_size = int(os.environ.get("PAGE_SIZE", "5000" if years > 0 else "1000"))
+    since = lookback_start(datetime.now(timezone.utc), years) if years > 0 else None
+    datasets = nypd_datasets(years)
+
+    if since:
+        print(
+            f"loading NYPD complaints since {since.date().isoformat()} "
+            f"({years:g}y) from {', '.join(datasets)}"
+            + (f", cap {ingest_limit:,}" if ingest_limit > 0 else ", no row cap")
+        )
+    else:
+        print(f"loading {datasets[0]} (no year window, limit={ingest_limit})")
 
     inserted = 0
     skipped = 0
-    offset = 0
-
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
-            while True:
-                remaining = ingest_limit - (inserted + skipped) if ingest_limit > 0 else page_size
-                if ingest_limit > 0 and remaining <= 0:
-                    break
-                batch_size = page_size if ingest_limit <= 0 else min(page_size, remaining)
-                page = fetch_page(dataset, offset, batch_size)
-                if not page:
-                    break
-                rows = []
-                for record in page:
-                    mapped = row_from_api(record)
-                    if mapped is None:
-                        skipped += 1
-                    else:
-                        rows.append(mapped)
-                if rows:
-                    cur.executemany(INSERT_SQL, rows)
-                    conn.commit()
-                    inserted += len(rows)
-                offset += len(page)
-                print(f"fetched {offset:,} | inserted {inserted:,} | skipped {skipped:,}")
-                if len(page) < batch_size:
-                    break
+            remaining_limit = ingest_limit
+            for dataset in datasets:
+                got, miss = ingest_dataset(
+                    cur,
+                    conn,
+                    dataset,
+                    page_size=page_size,
+                    ingest_limit=remaining_limit if ingest_limit > 0 else 0,
+                    since=since,
+                )
+                inserted += got
+                skipped += miss
+                if ingest_limit > 0:
+                    remaining_limit = max(0, ingest_limit - (inserted + skipped))
+                    if remaining_limit <= 0:
+                        break
 
     with psycopg.connect(database_url, autocommit=True) as conn:
-        conn.execute("CALL refresh_continuous_aggregate('nypd_daily_by_borough', NULL, NULL);")
+        try:
+            conn.execute("CALL refresh_continuous_aggregate('nypd_daily_by_borough', NULL, NULL);")
+        except psycopg.errors.LockNotAvailable:
+            print("warning: daily aggregate already refreshing; hourly policy will finish it")
 
-    print(f"done. inserted={inserted:,} skipped={skipped:,} dataset={dataset}")
+    print(f"done. inserted={inserted:,} skipped={skipped:,} datasets={','.join(datasets)}")
 
 
 if __name__ == "__main__":

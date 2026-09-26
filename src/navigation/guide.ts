@@ -67,19 +67,22 @@ export function applyNavHazards(
   );
   const closed = hazards.filter((hazard) => hazard.kind === "street_closed" && hazardHitsWalk(hazard, walkText));
   const films = hazards.filter((hazard) => hazard.kind === "film_shoot" && hazardHitsWalk(hazard, walkText));
+  const crashes = hazards.filter((hazard) => hazard.kind === "crash" && hazardHitsWalk(hazard, walkText));
 
   const darkWalk = night && lights.length > 0 && walk.length > 0;
-  const blockedWalk = (closed.length > 0 || films.length > 0) && walk.length > 0;
+  const blockedWalk = (closed.length > 0 || films.length > 0 || crashes.length > 0) && walk.length > 0;
   if (!darkWalk && !blockedWalk) return { routes, preferTransit: false };
 
   const notes: string[] = [];
   if (darkWalk) {
     notes.push("Open 311 streetlight or signal outages are on this walk, so I’d take transit tonight.");
   }
-  if (films.length) {
+  if (crashes.length) {
+    notes.push("Collision reports from the last few hours sit on this walk, so I’d skip that sidewalk and take transit.");
+  } else if (films.length) {
     notes.push("A film shoot is holding the street on this walk; sidewalks may be closed.");
   } else if (closed.length) {
-    notes.push("311 has an open street-condition report on this walk, so I’d go around on the subway.");
+    notes.push("311 has a street-condition report from the last few hours on this walk, so I’d go around on the subway.");
   }
 
   let next = routes.slice();

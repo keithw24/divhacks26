@@ -104,10 +104,13 @@ the persisted agent state and TLS cache.
 
 ## 5. Schedule refreshes
 
-Use the Droplet's cron to refresh city data daily:
+Use the Droplet's cron to refresh city data. Daily ingest reloads NYPD plus
+layers; hourly ingest only refreshes 311, collisions, film, and events so
+routing can dodge the last few hours of street reports:
 
 ```cron
 17 5 * * * cd /opt/divhacks26 && /usr/bin/docker compose --profile tools run --rm ingest >> /var/log/boroughos-ingest.log 2>&1
+12 * * * * cd /opt/divhacks26 && /usr/bin/docker compose --profile tools run --rm ingest-hourly >> /var/log/boroughos-ingest-hourly.log 2>&1
 ```
 
 Use the actual clone path instead of `/opt/divhacks26`.

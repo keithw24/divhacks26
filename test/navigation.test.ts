@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyNavHazards, streetTokens } from "../src/navigation/guide.js";
-import { lookupNavHazards } from "../src/navigation/hazards.js";
+import { lookupNavHazards, recentOpsNote } from "../src/navigation/hazards.js";
 import { createTransportationService } from "../src/transport/service.js";
 import { lookupGazetteer } from "../src/transport/locations.js";
 import type { RouteResult, RoutingProvider } from "../src/transport/types.js";
@@ -49,6 +49,26 @@ describe("nav hazards", () => {
     );
     expect(guided.routes.some((route) => route.mode === "WALK")).toBe(false);
     expect(guided.note).toMatch(/film shoot/i);
+  });
+
+  it("skips a walk with collision reports from the last few hours", () => {
+    const guided = applyNavHazards(
+      [walk, transit],
+      [{ kind: "crash", label: "recent collision report", street: "Broadway", nearCorridor: true }],
+      { hourEt: 14 },
+    );
+    expect(guided.preferTransit).toBe(true);
+    expect(guided.routes.some((route) => route.mode === "WALK")).toBe(false);
+    expect(guided.note).toMatch(/collision/i);
+  });
+
+  it("describes recent ops without calling it a crime feed", () => {
+    const note = recentOpsNote([
+      { kind: "crash", label: "recent collision report", nearCorridor: true },
+      { kind: "street_closed", label: "Street Condition", nearCorridor: true },
+    ]);
+    expect(note).toMatch(/last few hours/i);
+    expect(note).toMatch(/not a live crime/i);
   });
 
   it("looks up open 311 rows along the corridor", async () => {

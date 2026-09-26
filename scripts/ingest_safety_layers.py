@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -285,6 +285,17 @@ def main() -> None:
     lights_limit = int(os.environ.get("LIGHTS_LIMIT", "15000"))
     film_limit = int(os.environ.get("FILM_LIMIT", "4000"))
     only = (os.environ.get("INGEST_ONLY") or "").strip().lower()
+    only_set = {part.strip() for part in only.split(",") if part.strip()}
+
+    def want(*names: str) -> bool:
+        return not only_set or bool(only_set & set(names))
+
+    hourly = os.environ.get("HOURLY", "").strip() in {"1", "true", "yes"}
+    recent_hours = int(os.environ.get("INGEST_RECENT_HOURS") or ("48" if hourly else "0"))
+    since = None
+    if recent_hours > 0:
+        since = (datetime.now(timezone.utc) - timedelta(hours=recent_hours)).strftime("%Y-%m-%dT%H:%M:%S")
+        print(f"hourly window since {since} ({recent_hours}h)")
 
     root = Path(__file__).resolve().parents[1]
     schemas = [root / "sql" / "004_safety_layers.sql", root / "sql" / "005_nav_hazards.sql"]
@@ -298,7 +309,7 @@ def main() -> None:
         conn.commit()
         print("schema applied")
         with conn.cursor() as cur:
-            if only in ("", "shootings"):
+            if want("shootings"):
                 print("shootings")
                 ingest(
                     cur,
@@ -309,36 +320,42 @@ def main() -> None:
                     map_shooting,
                     SHOOT_SQL,
                 )
-            if only in ("", "collisions"):
+            if want("collisions"):
                 print("collisions")
+                crash_where = "latitude IS NOT NULL"
+                if since:
+                    crash_where = f"{crash_where} AND crash_date >= '{since}'"
                 ingest(
                     cur,
                     "h9gi-nx95",
-                    {"$order": "crash_date DESC", "$where": "latitude IS NOT NULL"},
-                    crash_limit,
+                    {"$order": "crash_date DESC", "$where": crash_where},
+                    crash_limit if not hourly else min(crash_limit, 5000),
                     page_size,
                     map_collision,
                     COLLIDE_SQL,
                 )
-            if only in ("", "lights", "311"):
+            if want("lights", "311"):
                 print("311 lights/signals/street condition")
+                lights_where = (
+                    "complaint_type in('Street Light Condition','Traffic Signal Condition',"
+                    "'Street Condition','Blocked Driveway')"
+                    " AND latitude IS NOT NULL"
+                )
+                if since:
+                    lights_where = f"{lights_where} AND created_date >= '{since}'"
                 ingest(
                     cur,
                     "erm2-nwe9",
                     {
                         "$order": "created_date DESC",
-                        "$where": (
-                            "complaint_type in('Street Light Condition','Traffic Signal Condition',"
-                            "'Street Condition','Blocked Driveway')"
-                            " AND latitude IS NOT NULL"
-                        ),
+                        "$where": lights_where,
                     },
-                    lights_limit,
+                    lights_limit if not hourly else min(lights_limit, 8000),
                     page_size,
                     map_311,
                     LIGHTS_SQL,
                 )
-            if only in ("", "film", "films", "permits"):
+            if want("film", "films", "permits"):
                 print("film permits")
                 # NYC's film portal often lags wall-clock time; keep the newest dated
                 # rows even if they already ended, so street holds can still demo.
@@ -349,7 +366,7 @@ def main() -> None:
                         "$order": "enddatetime DESC",
                         "$where": "startdatetime IS NOT NULL AND enddatetime IS NOT NULL",
                     },
-                    film_limit,
+                    film_limit if not hourly else min(film_limit, 2000),
                     page_size,
                     map_film,
                     FILM_SQL,

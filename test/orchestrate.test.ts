@@ -17,6 +17,7 @@ vi.mock("../src/geocode.js", () => ({ geocodeNyc: vi.fn(async () => null) }));
 vi.mock("../src/navigation/hazards.js", () => ({
   lookupNavHazards: vi.fn(async () => []),
   nightHourEt: vi.fn(() => 12),
+  recentOpsNote: vi.fn(() => undefined),
 }));
 
 import { renderResponse, rankRecommendationsSync } from "../src/agent/compose.js";

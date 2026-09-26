@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY scripts ./scripts
 COPY sql ./sql
 COPY deploy/run-ingest.sh ./deploy/run-ingest.sh
+COPY deploy/run-ingest-hourly.sh ./deploy/run-ingest-hourly.sh
 
-RUN chmod +x ./deploy/run-ingest.sh
+RUN chmod +x ./deploy/run-ingest.sh ./deploy/run-ingest-hourly.sh
 CMD ["./deploy/run-ingest.sh"]

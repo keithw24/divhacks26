@@ -22,10 +22,25 @@ SELECT
 FROM nyc_311_lights L
 CROSS JOIN pts
 WHERE L.status ILIKE 'open%'
-  AND L.occurred_at >= now() - interval '21 days'
   AND L.latitude BETWEEN pts.lat - 0.004 AND pts.lat + 0.004
   AND L.longitude BETWEEN pts.lon - 0.004 AND pts.lon + 0.004
   AND nyc_meters(pts.lat, pts.lon, L.latitude, L.longitude) < $3
+  AND (
+    (
+      (L.complaint_type ILIKE '%signal%' OR L.complaint_type ILIKE '%street light%')
+      AND L.occurred_at >= now() - interval '21 days'
+    )
+    OR (
+      (
+        L.complaint_type ILIKE '%street condition%'
+        OR L.complaint_type ILIKE '%construction%'
+        OR L.complaint_type ILIKE '%blocked%'
+        OR L.descriptor ILIKE '%closed%'
+        OR L.descriptor ILIKE '%blocked%'
+      )
+      AND L.occurred_at >= now() - interval '6 hours'
+    )
+  )
 LIMIT 30
 `;
 
@@ -78,6 +93,25 @@ WHERE parking_held IS NOT NULL
 LIMIT 80
 `;
 
+const CRASH_SQL = `
+WITH pts AS (
+  SELECT * FROM unnest($1::float8[], $2::float8[]) AS t(lat, lon)
+)
+SELECT
+  'crash' AS kind,
+  'recent collision report' AS label,
+  COALESCE(C.on_street, C.off_street) AS street,
+  C.latitude,
+  C.longitude
+FROM nyc_collisions C
+CROSS JOIN pts
+WHERE C.occurred_at >= now() - interval '6 hours'
+  AND C.latitude BETWEEN pts.lat - 0.004 AND pts.lat + 0.004
+  AND C.longitude BETWEEN pts.lon - 0.004 AND pts.lon + 0.004
+  AND nyc_meters(pts.lat, pts.lon, C.latitude, C.longitude) < $3
+LIMIT 20
+`;
+
 function isSchemaGap(error: unknown): boolean {
   if (!error || typeof error !== "object" || !("code" in error)) return false;
   const code = (error as { code: string }).code;
@@ -85,7 +119,7 @@ function isSchemaGap(error: unknown): boolean {
 }
 
 function asKind(value: string): NavHazardKind {
-  if (value === "signal" || value === "street_closed" || value === "film_shoot") return value;
+  if (value === "signal" || value === "street_closed" || value === "film_shoot" || value === "crash") return value;
   return "streetlight";
 }
 
@@ -146,20 +180,35 @@ export async function lookupNavHazards(input: {
   const lats = points.map((point) => point.latitude);
   const lons = points.map((point) => point.longitude);
   const radius = input.radiusMeters ?? CORRIDOR_METERS;
-  const [lights, events, films] = await Promise.all([
+  const [lights, events, films, crashes] = await Promise.all([
     run(query, LIGHTS_SQL, [lats, lons, radius]),
     run(query, EVENTS_SQL, [lats, lons, Math.max(radius, 450)]),
     run(query, FILM_SQL, [], false),
+    run(query, CRASH_SQL, [lats, lons, radius]),
   ]);
-  const merged = [...lights, ...events, ...films];
+  const merged = [...lights, ...events, ...films, ...crashes];
   const unique = new Map<string, NavHazard>();
   for (const hazard of merged) {
     const key = `${hazard.kind}:${hazard.street ?? hazard.label}:${hazard.latitude ?? ""}`;
     if (!unique.has(key)) unique.set(key, hazard);
   }
   const list = [...unique.values()];
-  console.info(`tiger: nav hazards ${list.length} (311/events/film)`);
+  console.info(`tiger: nav hazards ${list.length} (311/events/film/crashes)`);
   return list;
+}
+
+/** One operational sentence. Not a crime forecast. */
+export function recentOpsNote(hazards: NavHazard[]): string | undefined {
+  const fresh = hazards.filter(
+    (hazard) => hazard.kind === "crash" || hazard.kind === "street_closed" || hazard.kind === "film_shoot",
+  );
+  if (!fresh.length) return undefined;
+  const bits = [
+    fresh.some((hazard) => hazard.kind === "crash") ? "collision reports" : "",
+    fresh.some((hazard) => hazard.kind === "street_closed") ? "open 311 street issues" : "",
+    fresh.some((hazard) => hazard.kind === "film_shoot") ? "film/street holds" : "",
+  ].filter(Boolean);
+  return `Last few hours on this stretch (city ops, not a live crime feed): ${bits.join(", ")}. I’d route around walking those blocks.`;
 }
 
 export function nightHourEt(when: string, now = new Date()): number {
