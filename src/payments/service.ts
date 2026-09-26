@@ -1,7 +1,8 @@
-import { parseAmount, type AmountParse } from "./amount.js";
+import { parseAmount, looksLikeAmount, type AmountParse } from "./amount.js";
 import {
   alreadySentText,
   confirmationText,
+  correctionPromptText,
   failureText,
   formatUsd,
   missingDestinationText,
@@ -17,8 +18,10 @@ import {
 } from "./format.js";
 import { assertAmountMatchesUtterance, assertSendableUsd, guardedPaymentProvider } from "./guardrails.js";
 import { classifyPaymentMessage, shouldAskModel, type PaymentMessage } from "./intent.js";
+import { assertConfirmedTransfer } from "./prepare.js";
 import { extractPersonMentions, isPronoun, type RecipientDirectory } from "./recipients.js";
 import { PaymentStore } from "./state.js";
+import { testnetExplorerLink } from "./xrpl/explorer.js";
 import type { CustomerSettlementPort } from "./xrpl/settlement.js";
 import type { DepositExecuteInput, DepositExecuteResult, DepositPaymentPort, DepositSyncInput } from "./deposit-port.js";
 import type {
@@ -95,7 +98,10 @@ export class PaymentService implements DepositPaymentPort {
     const linked = this.store.active(input.spaceId);
     if (
       linked?.purpose === "RESERVATION_DEPOSIT" &&
-      (classified.kind === "confirm" || classified.kind === "cancel" || classified.kind === "change")
+      (classified.kind === "confirm" ||
+        classified.kind === "cancel" ||
+        classified.kind === "change" ||
+        classified.kind === "dispute")
     ) {
       return { handled: false };
     }
@@ -108,8 +114,14 @@ export class PaymentService implements DepositPaymentPort {
 
     const active = this.store.active(input.spaceId);
     if (!active) return { handled: false };
+    if (classified.kind === "none") {
+      const correction = this.correctionFromBareAmount(input, active);
+      if (correction) return correction;
+      return { handled: false };
+    }
     if (classified.kind === "confirm") return this.confirm(input, active);
     if (classified.kind === "cancel") return this.cancel(input, active);
+    if (classified.kind === "dispute") return this.disputeAmount(input, active);
     if (classified.kind === "change") return this.change(input, active, classified);
     return { handled: false };
   }
@@ -186,6 +198,7 @@ export class PaymentService implements DepositPaymentPort {
       destination: resolved.recipient.rippleDestination,
       amountUsd: fields.amount.value,
       memo: fields.memo,
+      confirmationPhase: "confirm_amount",
       ...customerFields,
     });
     logPayment("payment_pending", {
@@ -193,6 +206,7 @@ export class PaymentService implements DepositPaymentPort {
       spaceId: input.spaceId,
       amountUsd: record.amountUsd,
       status: record.status,
+      recipientName: record.recipientName,
     });
     return this.finish(input, confirmationText(record));
   }
@@ -205,6 +219,9 @@ export class PaymentService implements DepositPaymentPort {
     if (active.status === "FAILED") return this.finish(input, failureText(active.amountUsd));
     if (active.status === "PROCESSING") return this.finish(input, progressText(active));
     if (active.status !== "AWAITING_CONFIRMATION") return { handled: false };
+    if (active.confirmationPhase === "awaiting_correction") {
+      return this.finish(input, correctionPromptText(active));
+    }
 
     const capBlock = this.capReply(active.amountUsd, input);
     if (capBlock) {
@@ -220,6 +237,25 @@ export class PaymentService implements DepositPaymentPort {
     if (!stillThere.ok || stillThere.recipient.rippleDestination !== active.destination) {
       this.store.markResult(active.id, "FAILED", { providerStatus: "guardrail" });
       return this.finish(input, rejectedText("I couldn't verify the destination. Nothing was charged"));
+    }
+    const sender = this.settlement
+      ? this.settlement.resolveSender({ senderId: input.senderId, senderName: input.senderName })
+      : undefined;
+    const prepared = assertConfirmedTransfer({
+      record: active,
+      amountUsd: sendable.value,
+      sender: sender ? { customerId: sender.customerId } : undefined,
+      recipient: stillThere.recipient,
+    });
+    if (!prepared.ok) {
+      this.store.markResult(active.id, "FAILED", { providerStatus: "guardrail" });
+      logPayment("payment_prepare_mismatch", {
+        paymentId: active.id,
+        spaceId: input.spaceId,
+        mismatches: prepared.mismatches,
+        amountUsd: active.amountUsd,
+      });
+      return this.finish(input, rejectedText("The payment no longer matches the confirmed amount or wallet. Nothing was charged"));
     }
 
     if (input.messageId && !this.store.beginMessage(input.spaceId, input.messageId)) {
@@ -263,6 +299,7 @@ export class PaymentService implements DepositPaymentPort {
         submittedAsset: result.submittedAsset,
         submittedAmount: result.submittedAmount,
         submittedDrops: result.submittedDrops,
+        explorerUrl: testnetExplorerLink(result.transactionId) ?? undefined,
       });
       logPayment("payment_succeeded", { paymentId: claimed.id, spaceId: claimed.photonSpaceId, status: result.status });
       return this.finish(
@@ -274,6 +311,7 @@ export class PaymentService implements DepositPaymentPort {
           transactionId: result.transactionId,
           submittedAsset: result.submittedAsset,
           nessiePurchaseId: result.nessiePurchaseId,
+          explorerUrl: testnetExplorerLink(result.transactionId),
         }),
       );
     }
@@ -450,6 +488,7 @@ export class PaymentService implements DepositPaymentPort {
         submittedAsset: result.submittedAsset,
         submittedAmount: result.submittedAmount,
         submittedDrops: result.submittedDrops,
+        explorerUrl: testnetExplorerLink(result.transactionId) ?? undefined,
       });
       logPayment("payment_succeeded", { paymentId: claimed.id, spaceId: claimed.photonSpaceId, status: result.status });
       return { outcome: "succeeded", payment: saved };
@@ -528,10 +567,40 @@ export class PaymentService implements DepositPaymentPort {
       draft.recipientName = recipientName;
       draft.destination = destination;
       draft.memo = memo;
+      draft.confirmationPhase = "confirm_amount";
       if (draft.settlement) draft.recipientCustomerId = recipientCustomerId;
     });
     if (!updated) return this.finish(input, progressText(active));
+    logPayment("payment_amount_updated", {
+      paymentId: updated.id,
+      spaceId: input.spaceId,
+      amountUsd: updated.amountUsd,
+    });
     return this.finish(input, confirmationText(updated));
+  }
+
+  private disputeAmount(input: PaymentTurnInput, active: PaymentRecord): PaymentTurnResult {
+    if (!authorized(input, active)) return this.finish(input, `Only ${who(active)} can change that.`);
+    if (active.status !== "AWAITING_CONFIRMATION") return this.finish(input, progressText(active));
+    const updated = this.store.updateIfAwaiting(active.id, (draft) => {
+      draft.confirmationPhase = "awaiting_correction";
+    });
+    if (!updated) return this.finish(input, progressText(active));
+    logPayment("payment_amount_disputed", {
+      paymentId: updated.id,
+      spaceId: input.spaceId,
+      amountUsd: updated.amountUsd,
+    });
+    return this.finish(input, correctionPromptText(updated));
+  }
+
+  private correctionFromBareAmount(input: PaymentTurnInput, active: PaymentRecord): PaymentTurnResult | undefined {
+    if (active.status !== "AWAITING_CONFIRMATION" || active.purpose === "RESERVATION_DEPOSIT") return undefined;
+    if (!looksLikeAmount(input.text.trim())) return undefined;
+    if (active.confirmationPhase !== "awaiting_correction" && active.confirmationPhase !== "confirm_amount") {
+      return undefined;
+    }
+    return this.change(input, active, { kind: "change", amount: parseAmount(input.text.trim()) });
   }
 
   private setUserMax(

@@ -1,4 +1,5 @@
 import { formatUsd } from "../payments/format.js";
+import { testnetExplorerLink } from "../payments/xrpl/explorer.js";
 import type { PaymentStore } from "../payments/state.js";
 import type { ReservationSelection } from "../reservations/orchestrator.js";
 import { paymentNoun } from "../reservations/payment.js";
@@ -273,7 +274,8 @@ export class CrossDomainOrchestrator {
     const transfer = this.deps.payments?.payments.active(spaceId);
     if (transfer && transfer.purpose !== "RESERVATION_DEPOSIT" && (transfer.status === "SUCCEEDED" || transfer.status === "FAILED")) {
       const network = transfer.settlement || transfer.explorerUrl || this.deps.paymentMode === "ripple_test" ? " on XRPL Testnet" : " as a mock test payment";
-      const tx = transfer.transactionId ? ` (tx ${transfer.transactionId.slice(0, 8)})` : "";
+      const url = transfer.explorerUrl || testnetExplorerLink(transfer.transactionId);
+      const tx = url ? ` ${url}` : transfer.transactionId ? ` (tx ${transfer.transactionId.slice(0, 8)})` : "";
       const memo = transfer.memo ? ` for ${transfer.memo}` : "";
       out.push({
         kind: "transfer",

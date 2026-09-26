@@ -529,10 +529,10 @@ function Index() {
               <AgentTag /> send Keith $20 for it
             </Incoming>
             <Outgoing>
-              <AgentTag /> Send Keith $20?
+              <AgentTag /> I'm about to send Keith $20. Confirm $20?
             </Outgoing>
             <Incoming tone="lime">yes</Incoming>
-            <Outgoing variant="sky">Sent $20 to Keith.</Outgoing>
+            <Outgoing variant="sky">Sent $20 to Keith. https://testnet.xrpl.org/transactions/…</Outgoing>
           </ChatWindow>
           <div className="bg-card outline-card rounded-3xl p-5 shadow-[var(--shadow-hard-lime)]">
             <ol className="space-y-2 text-sm">

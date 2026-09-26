@@ -212,7 +212,7 @@ describe("ripple test provider", () => {
       messageId: "yes",
     });
     expect(reply.reply).toBe(
-      "Sent $1 to Keith for coffee. XRPL Testnet: ABCDEF12. https://testnet.xrpl.org/transactions/ABCDEF1234567890HASH",
+      "Sent $1 to Keith for coffee. XRPL Testnet: https://testnet.xrpl.org/transactions/ABCDEF1234567890HASH",
     );
     expect(service.payments.active("space")?.submittedDrops).toBe("1000000");
     expect(ledger.submits).toBe(1);

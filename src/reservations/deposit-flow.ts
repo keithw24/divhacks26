@@ -1,5 +1,6 @@
 import { isValidClassicAddress } from "xrpl";
 import { formatUsd } from "../payments/format.js";
+import { testnetExplorerLink } from "../payments/xrpl/explorer.js";
 import type { MerchantDirectory } from "../payments/merchants.js";
 import { addIsoDays, weekdayNameFromIso, zonedDateISO } from "./clock.js";
 import { formatClockTime } from "./constraints.js";
@@ -810,12 +811,13 @@ export class DepositFlow {
     const noun = paymentNoun(requirement?.paymentType ?? deposit?.paymentType ?? "DEPOSIT");
     const confirmation = reservation.result?.confirmationNumber ? ` Confirmation ${reservation.result.confirmationNumber}.` : "";
     const proof = deposit?.proof;
+    const url = proof?.explorerUrl || testnetExplorerLink(deposit?.transactionId) || testnetExplorerLink(proof?.transactionHash ?? undefined);
     if (this.options.paymentMode === "ripple_test" && proof?.status === "validated") {
-      return `You're booked at ${name} for ${party} ${when}. The ${amount} ${noun} (${proof.amountXrp} test XRP) was validated on XRPL Testnet.${confirmation}`;
+      return `You're booked at ${name} for ${party} ${when}. The ${amount} ${noun} (${proof.amountXrp} test XRP) was validated on XRPL Testnet.${url ? ` ${url}` : ""}${confirmation}`;
     }
     const paid =
       this.options.paymentMode === "ripple_test"
-        ? `The ${amount} ${noun} was paid successfully on XRPL Testnet${shortTx(deposit?.transactionId)}.`
+        ? `The ${amount} ${noun} was paid successfully on XRPL Testnet${url ? ` ${url}` : shortTx(deposit?.transactionId)}.`
         : `The ${amount} ${noun} was a mock test payment, so no XRPL transaction was sent.`;
     return `Booked ${name} for ${party} ${when}. ${paid}${confirmation}`;
   }
@@ -824,12 +826,13 @@ export class DepositFlow {
     const deposit = reservation.deposit;
     const amount = formatUsd(deposit?.requirement?.amountUsd ?? deposit?.amountUsd ?? 0);
     const noun = paymentNoun(deposit?.paymentType ?? "DEPOSIT");
+    const url = deposit?.proof?.explorerUrl || testnetExplorerLink(deposit?.transactionId);
     const paid =
       this.options.paymentMode !== "ripple_test"
         ? "was paid in mock mode"
         : deposit?.proof?.status === "validated"
-          ? "was validated on XRPL Testnet"
-          : `was paid${shortTx(deposit?.transactionId)}`;
+          ? `was validated on XRPL Testnet${url ? ` ${url}` : ""}`
+          : `was paid${url ? ` ${url}` : shortTx(deposit?.transactionId)}`;
     const retry = canRetry ? " Say try again and I'll retry the booking without paying again." : "";
     return `The ${amount} ${noun} ${paid}, but ${reservation.restaurant.name || "the restaurant"} didn't confirm the reservation, so it isn't booked.${retry}`;
   }

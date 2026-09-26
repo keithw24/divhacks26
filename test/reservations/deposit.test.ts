@@ -256,7 +256,7 @@ describe("reservation deposits", () => {
         memo: "Reservation deposit",
       }),
     );
-    expect(paid.reply).toMatch(/^Booked Carbone for 4 tomorrow at 8:00 PM\. The \$50 deposit was paid successfully on XRPL Testnet \(tx ABCDEF12\)/);
+    expect(paid.reply).toMatch(/^Booked Carbone for 4 tomorrow at 8:00 PM\. The \$50 deposit was paid successfully on XRPL Testnet https:\/\/testnet\.xrpl\.org\/transactions\/ABCDEF1234567890/);
     expect(caller.calls).toHaveLength(1);
   });
 
@@ -357,7 +357,7 @@ describe("reservation deposits", () => {
   it("keeps standalone person payments and deposit-free reservations", async () => {
     const keith = session();
     const asked = await keith.say("Send Keith $20", { messageId: "keith" });
-    expect(asked.reply).toMatch(/^Send Keith \$20\?/);
+    expect(asked.reply).toMatch(/I'm about to send Keith \$20/);
     expect(asked.outcome).toBe("payment");
     const sent = await keith.say("Yes", { messageId: "keith-yes" });
     expect(sent.reply).toMatch(/^Sent \$20 to Keith/);

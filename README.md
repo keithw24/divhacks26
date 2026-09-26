@@ -494,7 +494,7 @@ iMessage
   → the same Photon space
 ```
 
-"Send Keith $20 for the Uber" asks "Send Keith $20 for the Uber?" and does not move anything. "Yes" from the same person submits. "No" drops the pending payment. "Actually make it $15" updates the pending payment and waits for a new yes. The yes that applied to $20 is not reused.
+"Send Keith $20 for the Uber" flags that a payment is about to go out and asks to confirm **$20**. Nothing moves yet. "Yes" from the same person submits that tracked amount. "That's wrong" asks for the correct amount (tracked amount stays $20 until they give a new number). "$15" or "actually make it $15" updates the pending payment and waits for a new yes. "Cancel" or "no" drops it. The yes that applied to $20 is not reused. Submit goes through a deterministic check that the sender wallet, recipient wallet, and amount still match the pending record.
 
 Gemini may extract a recipient, amount, and memo. It never chooses a wallet and never submits. Amount checks, the directory lookup, the confirmation gate, and the provider call are ordinary TypeScript.
 
