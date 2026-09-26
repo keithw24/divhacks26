@@ -1,3 +1,4 @@
+import { lookupNavHazards } from "../navigation/hazards.js";
 import { gazetteerBackedResolver, createGeminiMapsClient } from "./gemini.js";
 import { createGoogleRoutesProvider, createPlacesResolver } from "./routing.js";
 import { TransportationService } from "./service.js";
@@ -38,11 +39,27 @@ export function createTransportationServiceFromEnv(
         }
       : undefined);
 
+  const hazardLookup =
+    overrides.hazardLookup ??
+    (env.databaseUrl
+      ? async (input: { origin: { latitude?: number; longitude?: number }; destination: { latitude?: number; longitude?: number }; when: string }) =>
+          lookupNavHazards({
+            points: [input.origin, input.destination].flatMap((place) =>
+              typeof place.latitude === "number" && typeof place.longitude === "number"
+                ? [{ latitude: place.latitude, longitude: place.longitude }]
+                : [],
+            ),
+            databaseUrl: env.databaseUrl,
+            when: input.when,
+          })
+      : undefined);
+
   return new TransportationService({
     memory: overrides.memory,
     gemini,
     routing,
     resolver,
     safetyLookup,
+    hazardLookup,
   });
 }

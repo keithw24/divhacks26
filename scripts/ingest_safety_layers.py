@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load shootings, collisions, and 311 light/signal requests into Tiger."""
+"""Load shootings, collisions, 311 light/street reports, and film permits into Tiger."""
 
 from __future__ import annotations
 
@@ -193,8 +193,41 @@ def map_311(record: dict) -> dict | None:
         "descriptor": clean(record.get("descriptor")),
         "status": clean(record.get("status")),
         "borough": clean(record.get("borough")),
+        "street_name": clean(record.get("street_name")) or clean(record.get("incident_address")),
         "latitude": lat,
         "longitude": lon,
+    }
+
+
+def parse_iso(value: str) -> datetime:
+    text = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def map_film(record: dict) -> dict | None:
+    event_id = clean(record.get("eventid") or record.get("event_id"))
+    start_raw = clean(record.get("startdatetime") or record.get("start_date_time") or record.get("enteredon"))
+    end_raw = clean(record.get("enddatetime") or record.get("end_date_time"))
+    parking_held = clean(record.get("parkingheld") or record.get("parking_held"))
+    if event_id is None or start_raw is None or end_raw is None or parking_held is None:
+        return None
+    try:
+        start_at = parse_iso(start_raw)
+        end_at = parse_iso(end_raw)
+    except ValueError:
+        return None
+    return {
+        "event_id": event_id,
+        "start_at": start_at,
+        "end_at": end_at,
+        "event_type": clean(record.get("eventtype") or record.get("event_type")),
+        "category": clean(record.get("category")),
+        "parking_held": parking_held,
+        "borough": clean(record.get("borough")),
+        "zipcodes": clean(record.get("zipcode(s)") or record.get("zipcode_s") or record.get("zipcodes")),
     }
 
 
@@ -221,11 +254,24 @@ INSERT INTO nyc_collisions (
 
 LIGHTS_SQL = """
 INSERT INTO nyc_311_lights (
-    unique_key, occurred_at, complaint_type, descriptor, status, borough, latitude, longitude
+    unique_key, occurred_at, complaint_type, descriptor, status, borough, street_name, latitude, longitude
 ) VALUES (
     %(unique_key)s, %(occurred_at)s, %(complaint_type)s, %(descriptor)s, %(status)s,
-    %(borough)s, %(latitude)s, %(longitude)s
-) ON CONFLICT (occurred_at, unique_key) DO NOTHING
+    %(borough)s, %(street_name)s, %(latitude)s, %(longitude)s
+) ON CONFLICT (occurred_at, unique_key) DO UPDATE SET
+    status = EXCLUDED.status,
+    street_name = COALESCE(EXCLUDED.street_name, nyc_311_lights.street_name)
+"""
+
+FILM_SQL = """
+INSERT INTO nyc_film_permits (
+    event_id, start_at, end_at, event_type, category, parking_held, borough, zipcodes
+) VALUES (
+    %(event_id)s, %(start_at)s, %(end_at)s, %(event_type)s, %(category)s,
+    %(parking_held)s, %(borough)s, %(zipcodes)s
+) ON CONFLICT (event_id, start_at) DO UPDATE SET
+    end_at = EXCLUDED.end_at,
+    parking_held = EXCLUDED.parking_held
 """
 
 
@@ -237,53 +283,77 @@ def main() -> None:
     shoot_limit = int(os.environ.get("SHOOTING_LIMIT", "15000"))
     crash_limit = int(os.environ.get("COLLISION_LIMIT", "20000"))
     lights_limit = int(os.environ.get("LIGHTS_LIMIT", "15000"))
+    film_limit = int(os.environ.get("FILM_LIMIT", "4000"))
+    only = (os.environ.get("INGEST_ONLY") or "").strip().lower()
 
-    schema_path = Path(__file__).resolve().parents[1] / "sql" / "004_safety_layers.sql"
-    schema = schema_path.read_text(encoding="utf-8")
+    root = Path(__file__).resolve().parents[1]
+    schemas = [root / "sql" / "004_safety_layers.sql", root / "sql" / "005_nav_hazards.sql"]
     with psycopg.connect(database_url) as conn:
-        for stmt in schema.split(";"):
-            piece = stmt.strip()
-            if piece:
-                conn.execute(piece)
+        for schema_path in schemas:
+            schema = schema_path.read_text(encoding="utf-8")
+            for stmt in schema.split(";"):
+                piece = stmt.strip()
+                if piece:
+                    conn.execute(piece)
         conn.commit()
         print("schema applied")
         with conn.cursor() as cur:
-            print("shootings")
-            ingest(
-                cur,
-                "833y-fsy8",
-                {"$order": "occur_date DESC", "$where": "latitude IS NOT NULL"},
-                shoot_limit,
-                page_size,
-                map_shooting,
-                SHOOT_SQL,
-            )
-            print("collisions")
-            ingest(
-                cur,
-                "h9gi-nx95",
-                {"$order": "crash_date DESC", "$where": "latitude IS NOT NULL"},
-                crash_limit,
-                page_size,
-                map_collision,
-                COLLIDE_SQL,
-            )
-            print("311 lights/signals")
-            ingest(
-                cur,
-                "erm2-nwe9",
-                {
-                    "$order": "created_date DESC",
-                    "$where": (
-                        "complaint_type in('Street Light Condition','Traffic Signal Condition')"
-                        " AND latitude IS NOT NULL"
-                    ),
-                },
-                lights_limit,
-                page_size,
-                map_311,
-                LIGHTS_SQL,
-            )
+            if only in ("", "shootings"):
+                print("shootings")
+                ingest(
+                    cur,
+                    "833y-fsy8",
+                    {"$order": "occur_date DESC", "$where": "latitude IS NOT NULL"},
+                    shoot_limit,
+                    page_size,
+                    map_shooting,
+                    SHOOT_SQL,
+                )
+            if only in ("", "collisions"):
+                print("collisions")
+                ingest(
+                    cur,
+                    "h9gi-nx95",
+                    {"$order": "crash_date DESC", "$where": "latitude IS NOT NULL"},
+                    crash_limit,
+                    page_size,
+                    map_collision,
+                    COLLIDE_SQL,
+                )
+            if only in ("", "lights", "311"):
+                print("311 lights/signals/street condition")
+                ingest(
+                    cur,
+                    "erm2-nwe9",
+                    {
+                        "$order": "created_date DESC",
+                        "$where": (
+                            "complaint_type in('Street Light Condition','Traffic Signal Condition',"
+                            "'Street Condition','Blocked Driveway')"
+                            " AND latitude IS NOT NULL"
+                        ),
+                    },
+                    lights_limit,
+                    page_size,
+                    map_311,
+                    LIGHTS_SQL,
+                )
+            if only in ("", "film", "films", "permits"):
+                print("film permits")
+                # NYC's film portal often lags wall-clock time; keep the newest dated
+                # rows even if they already ended, so street holds can still demo.
+                ingest(
+                    cur,
+                    "tg4x-b46p",
+                    {
+                        "$order": "enddatetime DESC",
+                        "$where": "startdatetime IS NOT NULL AND enddatetime IS NOT NULL",
+                    },
+                    film_limit,
+                    page_size,
+                    map_film,
+                    FILM_SQL,
+                )
     print("done")
 
 

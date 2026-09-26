@@ -13,6 +13,10 @@ vi.mock("../src/agent/safetySummary.js", () => ({
   summarizeSafety: vi.fn(async () => "Safer than NYC average"),
 }));
 vi.mock("../src/geocode.js", () => ({ geocodeNyc: vi.fn(async () => null) }));
+vi.mock("../src/navigation/hazards.js", () => ({
+  lookupNavHazards: vi.fn(async () => []),
+  nightHourEt: vi.fn(() => 12),
+}));
 
 import { renderResponse, rankRecommendations } from "../src/agent/compose.js";
 import { parseIntent } from "../src/agent/intent.js";

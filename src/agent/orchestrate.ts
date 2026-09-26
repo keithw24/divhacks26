@@ -2,6 +2,8 @@ import { config } from "../config.js";
 import type { Location, Recommendation, UserIntent } from "../domain/contracts.js";
 import { prefersSaferSlowerRoute } from "../formatReport.js";
 import { geocodeNyc } from "../geocode.js";
+import { applyNavHazards } from "../navigation/guide.js";
+import { lookupNavHazards, nightHourEt } from "../navigation/hazards.js";
 import { asksDirectionsHome, wantsSafetySketch } from "../safetyIntent.js";
 import { findEvents } from "../skills/eventsSkill.js";
 import { findFood } from "../skills/foodSkill.js";
@@ -130,7 +132,30 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     : undefined;
   const tradeTimeForSafety =
     Boolean(intent.needs.includes("route") && destination) && prefersSaferSlowerRoute(safety?.data);
-  const travelMode = tradeTimeForSafety && intent.travelMode === "WALK" ? "TRANSIT" : intent.travelMode;
+  let travelMode = tradeTimeForSafety && intent.travelMode === "WALK" ? "TRANSIT" : intent.travelMode;
+  let navNote: string | undefined;
+  if (intent.needs.includes("route") && destination && config.databaseUrl) {
+    try {
+      const hazards = await lookupNavHazards({
+        points: [origin, destination],
+        databaseUrl: config.databaseUrl,
+        when: input.question,
+        now,
+      });
+      const guided = applyNavHazards(
+        [
+          { mode: "WALK", steps: [], summary: `${origin.label} ${destination.label}` },
+          { mode: "TRANSIT", steps: [], summary: "transit" },
+        ],
+        hazards,
+        { hourEt: nightHourEt(input.question, now) },
+      );
+      if (guided.preferTransit && travelMode === "WALK") travelMode = "TRANSIT";
+      navNote = guided.note;
+    } catch (error) {
+      console.warn("tiger: nav hazards unavailable:", error);
+    }
+  }
   const route =
     intent.needs.includes("route") && destination
       ? await getRoute({
@@ -143,6 +168,9 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
       : undefined;
   if (tradeTimeForSafety && route?.data) {
     route.data.summary = `${route.data.summary} — slightly longer transit instead of walking this hour`;
+  }
+  if (navNote && route?.data) {
+    route.data.summary = `${route.data.summary} — ${navNote}`;
   }
 
   const warnings = [

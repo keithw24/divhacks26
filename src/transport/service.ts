@@ -17,6 +17,9 @@ import { displayName, hasCoordinates, lookupGazetteer } from "./locations.js";
 import { logDurationSource, logTransportError } from "./log.js";
 import { collectRoutes } from "./routing.js";
 import { prefersSaferSlowerRoute } from "../formatReport.js";
+import { applyNavHazards, hazardRoutingHint } from "../navigation/guide.js";
+import { nightHourEt } from "../navigation/hazards.js";
+import type { NavHazard } from "../navigation/types.js";
 import { asksDirectionsHome } from "../safetyIntent.js";
 import type { BlockSafetyReport } from "../safety.js";
 import { applyRoutePreferences, type RoutePreferences } from "./preferences.js";
@@ -61,6 +64,11 @@ export interface TransportationDependencies {
     label: string;
     when: string;
   }) => Promise<BlockSafetyReport | null>;
+  hazardLookup?: (input: {
+    origin: PlaceLocation;
+    destination: PlaceLocation;
+    when: string;
+  }) => Promise<NavHazard[]>;
 }
 
 interface RoleResolution {
@@ -76,6 +84,7 @@ export class TransportationService {
   private readonly gemini?: GeminiMapsClient;
   private readonly routing?: RoutingProvider;
   private readonly safetyLookup?: TransportationDependencies["safetyLookup"];
+  private readonly hazardLookup?: TransportationDependencies["hazardLookup"];
 
   constructor(deps: TransportationDependencies = {}) {
     this.memory = deps.memory ?? new ConversationMemory();
@@ -83,6 +92,7 @@ export class TransportationService {
     this.gemini = deps.gemini;
     this.routing = deps.routing;
     this.safetyLookup = deps.safetyLookup;
+    this.hazardLookup = deps.hazardLookup;
   }
 
   hasPlaceContext(spaceId: string): boolean {
@@ -227,6 +237,12 @@ export class TransportationService {
     }
     const safer = await this.saferSlowerIfNeeded(origin.place, request.text, intent.kind, modes);
     modes = safer.modes;
+    const hourEt = nightHourEt(request.text);
+    const hazards = await this.loadHazards(origin.place, destination.place, request.text);
+    const hint = hazardRoutingHint(hazards, hourEt);
+    if (hint.preferTransit && !modes.includes("TRANSIT")) {
+      modes = ["TRANSIT", ...modes];
+    }
     const routePrefs: RoutePreferences = {
       ...request.preferences,
       preferSaferSlower: safer.preferSaferSlower || request.preferences?.preferSaferSlower,
@@ -234,15 +250,22 @@ export class TransportationService {
     this.memory.setMode(spaceId, modes[0]);
     const collected = await collectRoutes(this.routing, origin.place, destination.place, modes);
     const adjusted = applyRoutePreferences(collected.routes, routePrefs);
-    let routes = adjusted.routes;
-    if (intent.wantsFastest && !routePrefs.preferSaferSlower) {
+    const guided = applyNavHazards(adjusted.routes, hazards, {
+      hourEt,
+      explicitWalk: intent.modes.length === 1 && intent.modes[0] === "WALK" && !intent.compareModes,
+    });
+    let routes = guided.routes;
+    if (intent.wantsFastest && !routePrefs.preferSaferSlower && !guided.preferTransit) {
       routes = [...routes].sort(
         (a, b) =>
           (a.durationSeconds ?? Number.MAX_SAFE_INTEGER) - (b.durationSeconds ?? Number.MAX_SAFE_INTEGER),
       );
     }
-    const preferenceNote = adjusted.note;
-    const preferenceNotes = preferenceLines(routePrefs);
+    const preferenceNote = [adjusted.note, guided.note].filter(Boolean).join(" ");
+    const preferenceNotes = [
+      ...preferenceLines(routePrefs),
+      ...(guided.note ? [guided.note] : []),
+    ];
     const conversation = ctx.recentMessages.slice(-6).map((turn) => turn.text);
     const hasGoogleDuration = routes.some((route) => typeof route.durationSeconds === "number");
     let durationSource: DurationSource | null = hasGoogleDuration ? "google_routes" : null;
@@ -277,8 +300,8 @@ export class TransportationService {
       approximatePhrase: durationSource === "gemini_estimate" ? estimate?.phrase : undefined,
       partySize: intent.partySize ?? ctx.partySize,
       sources: destination.sources,
-      extraNote: preferenceNote,
-      preferFastest: intent.wantsFastest && !routePrefs.preferSaferSlower,
+      extraNote: preferenceNote || undefined,
+      preferFastest: intent.wantsFastest && !routePrefs.preferSaferSlower && !guided.preferTransit,
       preferSaferSlower: routePrefs.preferSaferSlower,
     });
     const extraMinutes =
@@ -397,6 +420,20 @@ export class TransportationService {
     } catch (error) {
       logTransportError("safetyLookup", error);
       return { modes, preferSaferSlower: false };
+    }
+  }
+
+  private async loadHazards(
+    origin: PlaceLocation,
+    destination: PlaceLocation,
+    when: string,
+  ): Promise<NavHazard[]> {
+    if (!this.hazardLookup || !hasCoordinates(origin) || !hasCoordinates(destination)) return [];
+    try {
+      return await this.hazardLookup({ origin, destination, when });
+    } catch (error) {
+      logTransportError("hazards", error);
+      return [];
     }
   }
 
