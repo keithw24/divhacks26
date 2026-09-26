@@ -1,4 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+
+// Never reach the live API from a local .env key: every Gemini call takes its offline fallback, as in CI.
+vi.mock("../src/gemini/client.js", () => ({
+  getGeminiClient: () => {
+    throw new Error("Gemini is disabled in tests");
+  },
+}));
 import { checkInTopic, scheduleCheckIn, takeCheckIn } from "../src/agent/checkin.js";
 import { classifyMemory } from "../src/agent/classify.js";
 import { handleInboundMessage, type InboundDeps } from "../src/agent/inbound.js";
