@@ -10,7 +10,9 @@ import { suggestNext } from "./agent/suggest.js";
 async function connect() {
   if (config.chatProvider === "imessage") {
     if (!config.spectrumProjectId || !config.spectrumProjectSecret) {
-      throw new Error("CHAT_PROVIDER=imessage needs SPECTRUM_PROJECT_ID and SPECTRUM_PROJECT_SECRET");
+      throw new Error(
+        "CHAT_PROVIDER=imessage needs SPECTRUM_PROJECT_ID/SECRET or PHOTON_PROJECT_ID/SECRET",
+      );
     }
     return Spectrum({
       projectId: config.spectrumProjectId,
@@ -36,7 +38,6 @@ async function readMessage(spaceId: string, who: string, message: Message): Prom
       return loc ? "[shared a location]" : `[shared a link: ${content.url}]`;
     }
     case "attachment": {
-      // iMessage location pins arrive as a small vCard containing an Apple Maps URL.
       const isVcard = /vcard|vlocation/i.test(content.mimeType) || content.name.toLowerCase().endsWith(".vcf");
       if (isVcard && (content.size ?? 0) < 64_000) {
         const loc = parseLatLng((await content.read()).toString("utf8"));
@@ -77,9 +78,10 @@ console.log(`${config.agentName} is listening on ${config.chatProvider}`);
 for await (const [space, message] of app.messages) {
   if (message.direction !== "inbound" || message.sender?.kind === "agent") continue;
 
-  const isGroup = config.chatProvider === "terminal"
-    ? config.terminalAsGroup
-    : (space as { type?: string }).type === "group";
+  const isGroup =
+    config.chatProvider === "terminal"
+      ? config.terminalAsGroup
+      : (space as { type?: string }).type === "group";
   const who = message.sender?.id ?? "someone";
 
   const text = await readMessage(space.id, who, message).catch((err) => {
@@ -88,12 +90,10 @@ for await (const [space, message] of app.messages) {
   });
   if (text === null) continue;
 
-  // Every message goes into the chat context, even ones not addressed to the agent.
   recordMessage(space.id, who, text);
 
   const question = message.content.type === "text" ? addressedText(text, isGroup) : null;
   if (question === null) continue;
 
-  // Don't await: a slow Gemini call in one chat shouldn't hold up other chats.
   void reply(space, isGroup, who, question);
 }

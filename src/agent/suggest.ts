@@ -1,6 +1,9 @@
 import { GoogleGenAI, type GenerateContentResponse } from "@google/genai";
 import { config } from "../config.js";
 import type { LatLng } from "../chat/location.js";
+import { formatSafetyReply } from "../formatReport.js";
+import { geocodeNyc } from "../geocode.js";
+import { currentHourEt, lookupBlockSafety, parseRequestedHour } from "../safety.js";
 import { systemPrompt } from "./prompt.js";
 
 let client: GoogleGenAI | undefined;
@@ -16,6 +19,7 @@ export interface SuggestInput {
   transcript: { at: Date; who: string; text: string }[];
   location?: LatLng & { who: string };
   now?: Date;
+  citySketch?: string;
 }
 
 const clock = (d: Date) =>
@@ -30,6 +34,10 @@ export function buildContext(input: SuggestInput): string {
     lines.push(`${input.location.who} shared their location: ${input.location.latitude}, ${input.location.longitude}.`);
   } else {
     lines.push("No shared location. Infer it from the chat if possible.");
+  }
+
+  if (input.citySketch) {
+    lines.push("", "City complaint sketch (NYPD Open Data via Tiger, block-snapped):", input.citySketch);
   }
 
   if (input.transcript.length) {
@@ -57,6 +65,27 @@ export function placeLinks(response: GenerateContentResponse, reply: string): st
   return links;
 }
 
+async function citySketchFor(input: SuggestInput): Promise<string | undefined> {
+  if (!config.databaseUrl) return undefined;
+  let placeLabel = "shared pin";
+  let lat = input.location?.latitude;
+  let lon = input.location?.longitude;
+  if (lat == null || lon == null) {
+    const geo = await geocodeNyc(input.question).catch(() => null);
+    if (!geo) return undefined;
+    placeLabel = geo.label;
+    lat = geo.latitude;
+    lon = geo.longitude;
+  }
+  const clockNow = currentHourEt(input.now);
+  const hourEt = parseRequestedHour(input.question, clockNow.hourEt);
+  const report = await lookupBlockSafety(config.databaseUrl, lat, lon, hourEt, clockNow.asOfEt);
+  return formatSafetyReply(
+    { label: placeLabel, latitude: lat, longitude: lon, locality: null },
+    report,
+  );
+}
+
 const UNGROUNDED_NOTE =
   "\n\nGoogle Maps is unavailable right now, so rely on your own knowledge: only suggest well-known, " +
   "long-established places, and don't state exact hours — say \"usually open late\" or similar instead.";
@@ -82,9 +111,13 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 
 /** Ask Gemini what the person/group should do next, grounded in Google Maps when the key allows it. */
 export async function suggestNext(input: SuggestInput): Promise<string> {
+  const citySketch = await citySketchFor(input).catch((err) => {
+    console.error("tiger sketch failed:", err);
+    return undefined;
+  });
   const request = {
     model: config.geminiModel,
-    contents: [{ role: "user", parts: [{ text: buildContext(input) }] }],
+    contents: [{ role: "user", parts: [{ text: buildContext({ ...input, citySketch }) }] }],
   };
 
   let response: GenerateContentResponse;
