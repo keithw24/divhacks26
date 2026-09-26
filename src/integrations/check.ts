@@ -68,15 +68,20 @@ async function main(): Promise<void> {
     { id: "ripple", label: "Ripple", run: checkRipple },
   ];
 
+  const only = process.argv.find((arg) => arg.startsWith("--only="))?.slice(7);
+  if (only && !probes.some((probe) => probe.id === only)) {
+    throw new Error("Unknown integration selection");
+  }
+  const selected = only ? probes.filter((probe) => probe.id === only) : probes;
   const results = new Map<string, ProbeResult>();
-  for (const probe of probes) {
+  for (const probe of selected) {
     results.set(probe.id, await runProbe(probe));
   }
 
   console.log("");
   console.log("LIVE INTEGRATION CHECK");
   console.log("");
-  for (const probe of probes) {
+  for (const probe of selected) {
     const result = results.get(probe.id)!;
     const mark = result.passedLive ? "PASS" : result.status === "MOCK" ? "MOCK" : "FAIL";
     const line = `${probe.label.padEnd(20)} ${mark}   ${result.detail}`;
@@ -90,19 +95,20 @@ async function main(): Promise<void> {
   }
 
   const requiredHits = REQUIRED.filter((id) => results.get(id)?.passedLive).length;
-  const scored = [...REQUIRED, "gemini", "geocoder"] as const;
+  const scored = only ? [only] : [...REQUIRED, "gemini", "geocoder"];
   const verified = scored.filter((id) => results.get(id)?.passedLive).length;
   console.log("");
-  console.log(`${requiredHits}/${REQUIRED.length} LIVE`);
-  console.log(`LIVE DEMO READINESS: ${verified}/${scored.length} integrations verified live`);
+  if (!only) console.log(`${requiredHits}/${REQUIRED.length} LIVE`);
+  console.log(`${only ? "SELECTED CHECK" : "LIVE DEMO READINESS"}: ${verified}/${scored.length} integrations verified live`);
   console.log("");
   console.log("Smoke checks stopped before any reservation call, ticket purchase, or payment.");
 
-  const integrations: PublicIntegration[] = probes.map((probe) => {
+  const integrations: PublicIntegration[] = selected.map((probe) => {
     const result = results.get(probe.id)!;
     return { id: probe.id, label: probe.label, status: result.status, detail: result.detail };
   });
-  await writeIntegrationHealth({ checkedAt: started.toISOString(), integrations });
+  // A partial check must not replace the full dashboard snapshot.
+  if (!only) await writeIntegrationHealth({ checkedAt: started.toISOString(), integrations });
 
   if (verified !== scored.length) process.exitCode = 1;
 }
@@ -230,22 +236,35 @@ async function checkTicketmaster(): Promise<ProbeResult> {
 
 async function checkElevenLabs(): Promise<ProbeResult> {
   if (!config.elevenLabsApiKey) return missing("ELEVENLABS_API_KEY");
-  if (!config.elevenLabsAgentId) return missing("ELEVENLABS_AGENT_ID");
-  if (!config.elevenLabsAgentPhoneNumberId) return missing("ELEVENLABS_AGENT_PHONE_NUMBER_ID");
   const started = Date.now();
-  const user = await eleven("/v1/user");
-  if (!user.ok) return httpFail("ElevenLabs authentication failed", user.status);
-  const agent = await eleven(`/v1/convai/agents/${encodeURIComponent(config.elevenLabsAgentId)}`);
-  if (agent.status === 404) return httpFail("configured ElevenLabs agent was not found", 404);
-  if (!agent.ok) return httpFail("ElevenLabs agent lookup failed", agent.status);
+  // Check permissions used by calling, not the unrelated profile-read endpoint.
+  const agents = await eleven(config.elevenLabsAgentId
+    ? `/v1/convai/agents/${encodeURIComponent(config.elevenLabsAgentId)}`
+    : "/v1/convai/agents");
+  if (!agents.ok) return httpFail("ElevenLabs agent lookup failed", agents.status);
   const phones = await eleven("/v1/convai/phone-numbers");
   if (!phones.ok) return httpFail("ElevenLabs phone-number lookup failed", phones.status);
   const ids = collectIds(phones.body);
+  const missingFields = [
+    ...(!config.elevenLabsAgentId ? ["ELEVENLABS_AGENT_ID"] : []),
+    ...(!config.elevenLabsAgentPhoneNumberId ? ["ELEVENLABS_AGENT_PHONE_NUMBER_ID"] : []),
+    ...(!config.elevenLabsWebhookSecret ? ["ELEVENLABS_WEBHOOK_SECRET"] : []),
+  ];
+  if (missingFields.length) {
+    const body = agents.body as { agents?: unknown[] } | null;
+    const agentCount = Array.isArray(body?.agents) ? body.agents.length : undefined;
+    return {
+      status: "NOT_CONFIGURED",
+      detail: `Agents API authenticated; ${agentCount === undefined ? "configured agent found" : `${agentCount} agents returned`}; ${ids.length} connected phone numbers. Missing: ${missingFields.join(", ")}. No call placed.`,
+      missingEnv: missingFields.join(", "),
+      passedLive: false,
+    };
+  }
   if (!ids.includes(config.elevenLabsAgentPhoneNumberId)) {
     return fail("configured agent phone number id was not found on the ElevenLabs account");
   }
   logIntegration("ELEVENLABS", "LIVE", `authenticated API reachable in ${Date.now() - started}ms`);
-  return pass("authenticated API reachable (no call placed)");
+  return pass("agent and phone configuration verified; webhook delivery and outbound calls still untested (no call placed)");
 }
 
 async function checkBackboard(): Promise<ProbeResult> {

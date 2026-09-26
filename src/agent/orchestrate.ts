@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import type { EvidenceCall, EvidencePlan } from "../domain/evidence.js";
+import type { SkillResult } from "../domain/contracts.js";
+import { buildEvidenceGraph } from "../evidence/graph.js";
 import { config } from "../config.js";
 import type { Location, Recommendation, UserIntent } from "../domain/contracts.js";
 import { prefersSaferSlowerRoute } from "../formatReport.js";
@@ -12,14 +16,14 @@ import type { BlockSafetyReport } from "../safety.js";
 import { getSafety } from "../skills/safetySkill.js";
 import { renderResponse, rankRecommendationsSync } from "./compose.js";
 import { parseIntent } from "./intent.js";
-import { summarizeSafety } from "./safetySummary.js";
 
 export interface OrchestratorInput {
   question: string;
   transcript: Array<{ at: Date; who: string; text: string }>;
   location?: { latitude: number; longitude: number; who: string };
   now?: Date;
-  /** Answer to use when the skills can't: no resolvable location, or nothing verified came back. */
+  onEvidence?: (plan: EvidencePlan) => void;
+  /** Deprecated: factual plans fail closed; this callback is no longer used. Answer to use when the skills can't: no resolvable location, or nothing verified came back. */
   fallback?: () => Promise<string>;
   /** Fenced long-term memory. Not part of the group transcript. */
   memoryContext?: string;
@@ -64,29 +68,40 @@ async function resolveOrigin(intent: UserIntent, input: OrchestratorInput): Prom
 
 export async function orchestrate(input: OrchestratorInput): Promise<string> {
   const now = input.now ?? new Date();
+  const calls: EvidenceCall[] = [];
+  async function observed<T>(skill: EvidenceCall["skill"], run: () => Promise<SkillResult<T>>, empty: T): Promise<SkillResult<T>> {
+    const call: EvidenceCall = { id: randomUUID(), skill, startedAt: new Date().toISOString(), retrievedAt: "", status: "unavailable" };
+    calls.push(call);
+    try {
+      const result = await run();
+      call.status = result.status;
+      return result;
+    } catch {
+      return { status: "unavailable", data: empty, sources: [], warnings: [`${skill} is temporarily unavailable.`] };
+    } finally { call.retrievedAt = new Date().toISOString(); }
+  }
   const intent = await parseIntent(input.question, sharedLocation(input));
   const origin = await resolveOrigin(intent, input);
   const homeTrip = asksDirectionsHome(input.question);
   const wantsSafety = wantsSafetySketch(input.question) || intent.needs.includes("safety") || homeTrip;
   if (!origin) {
     console.info(wantsSafety ? "tiger: skipped (no NYC origin)" : "tiger: skipped (not a safety prompt)");
-    if (input.fallback) return input.fallback();
-    return intent.clarificationQuestion || "Where in NYC are you? Share a location or name a neighborhood.";
+    return "Where in NYC are you? Share a location or name a neighborhood.";
   }
 
   const window = eventWindow(intent, now);
   const foodPromise = intent.needs.includes("food")
-    ? findFood({
+    ? observed("food", () => findFood({
         origin,
         cuisine: intent.cuisine,
         budget: intent.budget,
         openNow: !/tomorrow|later/i.test(intent.when),
         apiKey: config.googleMapsApiKey,
         strict: config.liveDemoMode,
-      })
+      }), [])
     : Promise.resolve(null);
   const eventsPromise = intent.needs.includes("events")
-    ? findEvents({
+    ? observed("events", () => findEvents({
         origin,
         from: window.from,
         to: window.to,
@@ -95,7 +110,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
         budget: intent.budget,
         databaseUrl: config.databaseUrl,
         tavilyApiKey: config.tavilyApiKey,
-      })
+      }), [])
     : Promise.resolve(null);
 
   const [food, events] = await Promise.all([foodPromise, eventsPromise]);
@@ -132,12 +147,12 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     console.info("tiger: skipped (not a safety prompt)");
   }
   const safety = wantsSafety
-    ? await getSafety({
+    ? await observed("safety", () => getSafety({
         origin: safetyTarget,
         when: input.question,
         databaseUrl: config.databaseUrl,
         now,
-      })
+      }), null)
     : undefined;
   const askedSafety = wantsSafetySketch(input.question) || intent.needs.includes("safety");
   if (askedSafety && safety?.data) input.onSafetyReport?.(safety.data);
@@ -175,14 +190,14 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   }
   const route =
     intent.needs.includes("route") && destination
-      ? await getRoute({
+      ? await observed("route", () => getRoute({
           origin,
           destination,
           travelMode,
           departureTime: now.toISOString(),
           apiKey: config.googleMapsApiKey,
           strict: config.liveDemoMode,
-        })
+        }), { mode: travelMode, summary: "", directionsUrl: "" })
       : undefined;
   if (tradeTimeForSafety && route?.data) {
     route.data.summary = `${route.data.summary} — slightly longer transit instead of walking this hour`;
@@ -190,63 +205,18 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   if (navNote && route?.data) {
     route.data.summary = `${route.data.summary} — ${navNote}`;
   }
-
-  const warnings = [
-    ...(food && food.status !== "ok" ? food.warnings : []),
-    ...(events && events.status !== "ok" ? events.warnings : []),
-    ...(safety && safety.status !== "ok" ? safety.warnings : []),
-    ...(route && route.status !== "ok" ? route.warnings : []),
-  ];
-  // A request for things to do or eat needs picks; a lone safety or route line doesn't answer it.
-  const wantedPicks = intent.needs.includes("food") || intent.needs.includes("events");
-  const nothingVerified = !picks.length && !safety?.data && !route;
-  if (!picks.length && ranked.groupText && wantedPicks && candidates.length) {
-    const safetyLine = [safety?.data ? await summarizeSafety(safety.data) : undefined, opsNote]
-      .filter(Boolean)
-      .join(" ") || undefined;
-    return renderResponse({
-      picks: [],
-      safety,
-      safetyLine,
-      route,
-      warnings,
-      groupText: ranked.groupText,
-    });
-  }
-  if (input.fallback && !picks.length && (wantedPicks || nothingVerified)) {
-    const askedEvents = intent.needs.includes("events");
-    const foodEmpty = !intent.needs.includes("food") || (food?.data.length ?? 0) === 0;
-    if (askedEvents && (events?.data.length ?? 0) === 0 && foodEmpty) {
-      const safetyLine = [safety?.data ? await summarizeSafety(safety.data) : undefined, opsNote]
-      .filter(Boolean)
-      .join(" ") || undefined;
-      return renderResponse({
-        picks: [],
-        safety,
-        safetyLine,
-        route,
-        warnings: [
-          ...(events?.warnings?.length
-            ? events.warnings
-            : ["No official NYC Parks or permitted events matched this time window."]),
-          ...(food && food.status !== "ok" ? food.warnings : []),
-          ...(safety && safety.status !== "ok" ? safety.warnings : []),
-          ...(route && route.status !== "ok" ? route.warnings : []),
-        ],
-      });
-    }
-    return input.fallback();
-  }
-  const safetyLine = [safety?.data ? await summarizeSafety(safety.data) : undefined, opsNote]
-    .filter(Boolean)
-    .join(" ") || undefined;
-  return renderResponse({
-    picks,
-    safety,
-    safetyLine,
-    route,
-    warnings,
-    groupText: picks.length ? ranked.groupText : undefined,
-    offerMore: ranked.offerMore,
+  const graph = buildEvidenceGraph({
+    picks, safety, route, calls, intent, eventWindow: window,
+    routeTargetId: !explicitDestination ? picks[0]?.item.id : undefined,
+    safetyTargetId: !explicitDestination && candidates.length ? picks[0]?.item.id : undefined,
   });
+  if (travelMode !== intent.travelMode) {
+    graph.limitations.push("The requested travel mode was changed by routing policy; comparative travel times have not been verified.");
+  }
+  if (opsNote) {
+    graph.limitations.push(opsNote);
+  }
+  const response = renderResponse({ picks, safety, route, warnings: [], graph });
+  input.onEvidence?.(graph);
+  return response;
 }

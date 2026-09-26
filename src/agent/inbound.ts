@@ -23,6 +23,8 @@ import type { TransportationRequest, TransportationResult } from "../transport/s
 export interface InboundMessage {
   spaceId: string;
   messageId: string;
+  /** Original provider IDs when consecutive texts were collected into one turn. */
+  messageIds?: string[];
   senderId: string;
   senderName?: string;
   text: string;
@@ -137,6 +139,15 @@ export async function handleInboundMessage(
   deps: InboundDeps,
 ): Promise<TurnOutcome> {
   if ((message.direction ?? "inbound") !== "inbound" || message.senderKind === "agent") return "ignored";
+
+  const keys = (message.messageIds ?? [message.messageId]).map((id) => JSON.stringify([message.spaceId, id]));
+  let duplicate = false;
+  deps.store.update((state) => {
+    const handled = state.handledMessageIds ?? [];
+    duplicate = keys.some((key) => handled.includes(key));
+    if (!duplicate) state.handledMessageIds = [...handled, ...keys].slice(-5000);
+  });
+  if (duplicate) return "ignored";
 
   const senderId = message.senderId || "someone";
   deps.recordChatMessage(message.spaceId, senderId, message.text);

@@ -35,6 +35,7 @@
     "demo:restaurant-call": "tsx src/phone/demo.ts",
     "transport:gemini-live": "tsx src/transport/gemini-live.ts",
     "integrations:check": "tsx src/integrations/check.ts",
+    "integrations:check-elevenlabs": "tsx src/integrations/check.ts --only=elevenlabs",
     "integrations:test-call": "tsx src/integrations/test-call.ts",
     "integrations:test-imessage": "tsx src/integrations/test-imessage.ts"
   },

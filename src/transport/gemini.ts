@@ -1,4 +1,5 @@
 import { getGeminiClient } from "../gemini/client.js";
+import { MESSAGE_WRITING_RULES } from "../agent/writing-style.js";
 import { formatApproximateDuration } from "./format.js";
 import { inspectMapsGrounding } from "./grounding.js";
 import { displayName, lookupGazetteer } from "./locations.js";
@@ -66,7 +67,7 @@ export function directionsBrief(input: PhraseDirectionsInput): {
 
 export function directionsModelInstructions(input: PhraseDirectionsInput): { system: string; user: string } {
   return {
-    system: `${DIRECTIONS_AUTHORIZATION_RULE} ${DIRECTION_REPLY_RULES}`,
+    system: `${DIRECTIONS_AUTHORIZATION_RULE} ${DIRECTION_REPLY_RULES}\n\n${MESSAGE_WRITING_RULES}`,
     user: [
       "You are an NYC local answering a transportation question over iMessage.",
       "Return the best route answer now. Do not ask a follow-up.",
@@ -242,7 +243,7 @@ export function createGeminiMapsClient(config: GeminiMapsConfig): GeminiMapsClie
           `Question: ${query}`,
         ].join("\n"),
         biasFromPlace(origin),
-        DIRECTIONS_AUTHORIZATION_RULE,
+        `${DIRECTIONS_AUTHORIZATION_RULE}\n\n${MESSAGE_WRITING_RULES}`,
       );
     },
 

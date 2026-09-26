@@ -15,6 +15,7 @@ export const config = {
   spectrumProjectSecret: env("SPECTRUM_PROJECT_SECRET") || env("PHOTON_PROJECT_SECRET") || env("PHOTON_SECRET"),
   agentName: env("AGENT_NAME", "Agent"),
   terminalAsGroup: env("TERMINAL_AS_GROUP") === "1",
+  messageBatchDelayMs: positiveNumber(env("MESSAGE_BATCH_DELAY_MS", "2000"), 2000),
   autoReply: env("BOROUGHOS_AUTOREPLY", "true") !== "false",
   // GEMINI_API_KEY is canonical. GOOGLE_API_KEY is accepted only as a legacy alias.
   geminiApiKey: env("GEMINI_API_KEY") || env("GOOGLE_API_KEY"),

@@ -182,7 +182,7 @@ describe("Photon turn → Gemini", () => {
     expect(FRIENDLY_FAILURE).not.toMatch(/Error|stack|key/i);
   });
 
-  it("falls back to space.send when a threaded reply is skipped", async () => {
+  it("does not send twice when the provider returns no message", async () => {
     const sink = { replies: [] as string[], sends: [] as string[] };
     await runConversationTurn(
       { spaceId: "dm-fallback", direction: "inbound", isGroup: false, question: "what now?" },
@@ -206,7 +206,7 @@ describe("Photon turn → Gemini", () => {
     );
 
     expect(sink.replies).toEqual(["Use the park."]);
-    expect(sink.sends).toEqual(["Use the park."]);
+    expect(sink.sends).toEqual([]);
   });
 });
 
@@ -259,4 +259,25 @@ describe("transportation stays on the transportation path", () => {
     expect(sink.replies[0]).not.toContain("invented");
     expect(memory.get("group-route").destination?.name).toMatch(/Times Square/);
   });
+});
+
+it("does not send an additional failure text when delivery may already have succeeded", async () => {
+  const sent: string[] = [];
+  const outcome = await runConversationTurn(
+    { spaceId: "delivery-timeout", direction: "inbound", isGroup: false, question: "what now?" },
+    {
+      reply: async (text) => { sent.push(text); throw new Error("timeout after send"); },
+      send: async (text) => { sent.push(text); },
+      responding: async (fn) => fn(),
+    },
+    {
+      autoReply: true,
+      handleTransport: async () => ({ handled: false, acknowledgement: "👍" }),
+      suggest: async () => "Use the park.",
+      transcript: () => [],
+      recordAssistant: () => undefined,
+    },
+  );
+  expect(outcome).toBe("failed");
+  expect(sent).toEqual(["Use the park."]);
 });
