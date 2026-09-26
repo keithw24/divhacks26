@@ -91,6 +91,12 @@ npm run dev
 Send a text message to the iMessage line connected to the Photon project. A
 working round-trip produces a 👍 tapback, typing indicator, and BoroughOS reply.
 
+## Deploy to DigitalOcean
+
+The production stack runs the Photon worker/API, Keith's frontend, and Caddy on
+one DigitalOcean Droplet. Agent JSON state and TLS certificates use persistent
+Docker volumes. Follow the [DigitalOcean deployment guide](docs/digitalocean-deployment.md).
+
 ### Current boundary
 
 - Photon/Spectrum owns conversation transport.

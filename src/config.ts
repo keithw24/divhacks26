@@ -62,7 +62,8 @@ export const config = {
   nessieCustomerId: env("NESSIE_CUSTOMER_ID"),
   nessieAccountId: env("NESSIE_ACCOUNT_ID"),
   // Website API (sign-in codes over iMessage, onboarding). WEB_API_PORT=off disables it.
-  webApiPort: env("WEB_API_PORT", "8788"),
+  webApiPort: env("WEB_API_PORT") || env("PORT", "8788"),
+  webApiHost: env("WEB_API_HOST", "0.0.0.0"),
   webAllowedOrigins: env("WEB_ALLOWED_ORIGINS", "http://localhost:5174,http://localhost:8080")
     .split(",")
     .map((origin) => origin.trim())

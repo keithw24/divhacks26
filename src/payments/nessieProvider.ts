@@ -37,7 +37,7 @@ export class NessiePaymentProvider implements PaymentProvider {
       const purchase = await this.client.createPurchase({
         accountId: this.accountId!,
         merchantId,
-        amount: Math.round(input.amountUsd * 100) / 100,
+        amount: input.amountUsd,
         description: input.memo?.trim() || `pay ${input.recipientName || "merchant"}`,
         purchaseDate: todayEt(),
       });

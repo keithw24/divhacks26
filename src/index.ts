@@ -193,6 +193,7 @@ const web =
     ? undefined
     : startWebRuntime({
         port: Number(config.webApiPort) || 8788,
+        host: config.webApiHost,
         statePath: config.webStatePath,
         maxUsers: config.webMaxUsers,
         allowedOrigins: config.webAllowedOrigins,
@@ -220,10 +221,13 @@ const web =
         memory,
         backboard: config.backboardApiKey ? createBackboardClient({ apiKey: config.backboardApiKey }) : undefined,
         agentState,
+        handleElevenLabsWebhook: (body, signature) => reservations.orchestrator.handleWebhook(body, signature),
       });
-void reservations.listen(config.reservationWebhookPort).catch((error) => {
-  console.error(`reservation webhook failed to listen: ${errorCategory(error)}`);
-});
+if (!web) {
+  void reservations.listen(config.reservationWebhookPort).catch((error) => {
+    console.error(`reservation webhook failed to listen: ${errorCategory(error)}`);
+  });
+}
 
 const textFlag = process.argv.indexOf("--text");
 if (textFlag !== -1) {

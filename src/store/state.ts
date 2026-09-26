@@ -79,10 +79,12 @@ export interface PaymentPersistence {
   recentPeople: Record<string, string[]>;
   messageReplies: Record<string, string>;
   inflightMessages: string[];
+  /** Per Photon sender id. Missing means the process default (`PAYMENTS_MAX_USD`). */
+  maxUsdByUser?: Record<string, number>;
 }
 
 export function emptyPaymentBook(): PaymentPersistence {
-  return { records: {}, activeBySpace: {}, recentPeople: {}, messageReplies: {}, inflightMessages: [] };
+  return { records: {}, activeBySpace: {}, recentPeople: {}, messageReplies: {}, inflightMessages: [], maxUsdByUser: {} };
 }
 
 export function emptyMeetupBook(): MeetupPersistence {
@@ -196,7 +198,13 @@ function readPaymentBook(value: unknown): PaymentPersistence {
   const inflightMessages = Array.isArray(record.inflightMessages)
     ? record.inflightMessages.filter((item): item is string => typeof item === "string")
     : [];
-  return { records, activeBySpace, recentPeople, messageReplies, inflightMessages };
+  const maxUsdByUser: Record<string, number> = {};
+  if (record.maxUsdByUser && typeof record.maxUsdByUser === "object") {
+    for (const [userId, amount] of Object.entries(record.maxUsdByUser)) {
+      if (typeof amount === "number" && Number.isFinite(amount) && amount > 0) maxUsdByUser[userId] = amount;
+    }
+  }
+  return { records, activeBySpace, recentPeople, messageReplies, inflightMessages, maxUsdByUser };
 }
 
 function readMeetupBook(value: unknown): MeetupPersistence {
