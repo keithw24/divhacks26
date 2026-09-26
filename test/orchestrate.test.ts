@@ -97,4 +97,11 @@ describe("skill dispatcher", () => {
     await expect(orchestrate({ question: "what now?", transcript: [], fallback })).resolves.toBe("where are you?");
     expect(findFood).not.toHaveBeenCalled();
   });
+
+  it("uses the fallback when food/events were asked for but nothing was picked, even with safety data", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["food", "events", "safety"] });
+    vi.mocked(getSafety).mockResolvedValue({ status: "ok", data: { peakHour: 16 } as never, sources: [], warnings: [] });
+    const fallback = vi.fn(async () => "gemini fallback");
+    await expect(orchestrate({ question: "what should we do now?", transcript: [], location, fallback })).resolves.toBe("gemini fallback");
+  });
 });

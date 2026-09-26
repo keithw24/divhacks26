@@ -128,6 +128,9 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     ...(safety && safety.status !== "ok" ? safety.warnings : []),
     ...(route && route.status !== "ok" ? route.warnings : []),
   ];
-  if (input.fallback && !picks.length && !safety?.data && !route) return input.fallback();
+  // A request for things to do or eat needs picks; a lone safety or route line doesn't answer it.
+  const wantedPicks = intent.needs.includes("food") || intent.needs.includes("events");
+  const nothingVerified = !picks.length && !safety?.data && !route;
+  if (input.fallback && !picks.length && (wantedPicks || nothingVerified)) return input.fallback();
   return renderResponse({ picks, safety, route, warnings });
 }
