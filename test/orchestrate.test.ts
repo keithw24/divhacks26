@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../src/agent/intent.js", () => ({ parseIntent: vi.fn() }));
 vi.mock("../src/agent/compose.js", () => ({
   rankRecommendations: vi.fn(),
+  rankRecommendationsSync: vi.fn(() => ({ picks: [], offerMore: false })),
   renderResponse: vi.fn(() => "rendered response"),
 }));
 vi.mock("../src/skills/eventsSkill.js", () => ({ findEvents: vi.fn() }));
@@ -18,7 +19,7 @@ vi.mock("../src/navigation/hazards.js", () => ({
   nightHourEt: vi.fn(() => 12),
 }));
 
-import { renderResponse, rankRecommendations } from "../src/agent/compose.js";
+import { renderResponse, rankRecommendationsSync } from "../src/agent/compose.js";
 import { parseIntent } from "../src/agent/intent.js";
 import { orchestrate } from "../src/agent/orchestrate.js";
 import { findEvents } from "../src/skills/eventsSkill.js";
@@ -47,7 +48,7 @@ describe("skill dispatcher", () => {
       sources: [],
       warnings: [],
     });
-    vi.mocked(rankRecommendations).mockResolvedValue([]);
+    vi.mocked(rankRecommendationsSync).mockReturnValue({ picks: [], offerMore: false });
     vi.mocked(renderResponse).mockReturnValue("rendered response");
   });
 
@@ -81,7 +82,7 @@ describe("skill dispatcher", () => {
     };
     vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["events", "food", "safety", "route"] });
     vi.mocked(findEvents).mockResolvedValue({ status: "ok", data: [event], sources: [], warnings: [] });
-    vi.mocked(rankRecommendations).mockResolvedValue([{ item: event, reason: "nearby" }]);
+    vi.mocked(rankRecommendationsSync).mockReturnValue({ picks: [{ item: event, reason: "nearby" }], offerMore: false });
 
     await orchestrate({ question: "Plan a fun safe night", transcript: [], location });
 

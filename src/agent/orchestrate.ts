@@ -9,7 +9,7 @@ import { findEvents } from "../skills/eventsSkill.js";
 import { findFood } from "../skills/foodSkill.js";
 import { getRoute } from "../skills/routeSkill.js";
 import { getSafety } from "../skills/safetySkill.js";
-import { renderResponse, rankRecommendations } from "./compose.js";
+import { renderResponse, rankRecommendationsSync } from "./compose.js";
 import { parseIntent } from "./intent.js";
 import { summarizeSafety } from "./safetySummary.js";
 
@@ -95,12 +95,13 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
 
   const [food, events] = await Promise.all([foodPromise, eventsPromise]);
   const candidates: Recommendation[] = [...(events?.data ?? []), ...(food?.data ?? [])];
-  const picks = await rankRecommendations(
+  const ranked = rankRecommendationsSync(
     input.question,
     candidates,
     input.transcript.map(({ who, text }) => ({ who, text })),
-    input.memoryContext,
+    { budget: intent.budget, maxTravelMinutes: intent.maxTravelMinutes },
   );
+  const picks = ranked.picks;
 
   let explicitDestination = intent.destination;
   const destQuery = intent.destinationQuery?.trim();
@@ -184,6 +185,17 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   // A request for things to do or eat needs picks; a lone safety or route line doesn't answer it.
   const wantedPicks = intent.needs.includes("food") || intent.needs.includes("events");
   const nothingVerified = !picks.length && !safety?.data && !route;
+  if (!picks.length && ranked.groupText && wantedPicks && candidates.length) {
+    const safetyLine = safety?.data ? await summarizeSafety(safety.data) : undefined;
+    return renderResponse({
+      picks: [],
+      safety,
+      safetyLine,
+      route,
+      warnings,
+      groupText: ranked.groupText,
+    });
+  }
   if (input.fallback && !picks.length && (wantedPicks || nothingVerified)) {
     const askedEvents = intent.needs.includes("events");
     const foodEmpty = !intent.needs.includes("food") || (food?.data.length ?? 0) === 0;
@@ -207,5 +219,13 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     return input.fallback();
   }
   const safetyLine = safety?.data ? await summarizeSafety(safety.data) : undefined;
-  return renderResponse({ picks, safety, safetyLine, route, warnings });
+  return renderResponse({
+    picks,
+    safety,
+    safetyLine,
+    route,
+    warnings,
+    groupText: picks.length ? ranked.groupText : undefined,
+    offerMore: ranked.offerMore,
+  });
 }
