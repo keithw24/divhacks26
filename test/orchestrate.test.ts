@@ -9,6 +9,7 @@ vi.mock("../src/skills/eventsSkill.js", () => ({ findEvents: vi.fn() }));
 vi.mock("../src/skills/foodSkill.js", () => ({ findFood: vi.fn() }));
 vi.mock("../src/skills/routeSkill.js", () => ({ getRoute: vi.fn() }));
 vi.mock("../src/skills/safetySkill.js", () => ({ getSafety: vi.fn() }));
+vi.mock("../src/geocode.js", () => ({ geocodeNyc: vi.fn(async () => null) }));
 
 import { renderResponse, rankRecommendations } from "../src/agent/compose.js";
 import { parseIntent } from "../src/agent/intent.js";
@@ -81,5 +82,35 @@ describe("skill dispatcher", () => {
     expect(findFood).toHaveBeenCalledOnce();
     expect(getSafety).toHaveBeenCalledWith(expect.objectContaining({ origin: event.location }));
     expect(getRoute).toHaveBeenCalledWith(expect.objectContaining({ destination: event.location }));
+  });
+
+  it("uses the fallback when no skill returns anything verified", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["food", "events", "safety"] });
+    const fallback = vi.fn(async () => "gemini fallback");
+    await expect(orchestrate({ question: "what now?", transcript: [], location, fallback })).resolves.toBe("gemini fallback");
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(renderResponse).not.toHaveBeenCalled();
+  });
+
+  it("keeps the skill answer when any skill returns data", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["safety"] });
+    vi.mocked(getSafety).mockResolvedValue({ status: "ok", data: { peakHour: 22 } as never, sources: [], warnings: [] });
+    const fallback = vi.fn(async () => "gemini fallback");
+    await expect(orchestrate({ question: "Is it safe here?", transcript: [], location, fallback })).resolves.toBe("rendered response");
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it("hands off to the fallback when no location can be resolved", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, origin: undefined, needs: ["food"] });
+    const fallback = vi.fn(async () => "where are you?");
+    await expect(orchestrate({ question: "what now?", transcript: [], fallback })).resolves.toBe("where are you?");
+    expect(findFood).not.toHaveBeenCalled();
+  });
+
+  it("uses the fallback when food/events were asked for but nothing was picked, even with safety data", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["food", "events", "safety"] });
+    vi.mocked(getSafety).mockResolvedValue({ status: "ok", data: { peakHour: 16 } as never, sources: [], warnings: [] });
+    const fallback = vi.fn(async () => "gemini fallback");
+    await expect(orchestrate({ question: "what should we do now?", transcript: [], location, fallback })).resolves.toBe("gemini fallback");
   });
 });

@@ -1,4 +1,17 @@
+import type { GenerateContentResponse } from "@google/genai";
+import { config } from "../config.js";
 import type { LatLng } from "../chat/location.js";
+import { getGeminiClient } from "../gemini/client.js";
+import { formatSafetyReply } from "../formatReport.js";
+import { geocodeNyc } from "../geocode.js";
+import { currentHourEt, lookupBlockSafety, parseRequestedHour } from "../safety.js";
+import { wantsSafetySketch } from "../safetyIntent.js";
+import { systemPrompt } from "./prompt.js";
+
+function gemini() {
+  if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is not set (see .env.example)");
+  return getGeminiClient(config.geminiApiKey);
+}
 import { orchestrate } from "./orchestrate.js";
 
 export interface SuggestInput {
@@ -115,12 +128,56 @@ async function generateWithGemini(input: SuggestInput, citySketch: string | unde
   });
 }
 
-/** Ask Gemini what the person/group should do next, grounded in Google Maps. */
+
+/**
+ * Single-prompt Gemini suggestion (with the Tiger city sketch and a model fallback chain).
+ * Used when the skill pipeline has nothing verified to offer, e.g. no Places key or no events loaded.
+ */
+export async function suggestWithGemini(input: SuggestInput): Promise<string> {
+  const citySketch = await citySketchFor(input).catch((err) => {
+    console.error(`tiger sketch failed: ${err instanceof Error ? err.name : "Error"}`);
+    return undefined;
+  });
+  if (citySketch) {
+    const first = citySketch.split("\n")[0] ?? "tiger sketch";
+    console.info(`tiger: queried nypd_complaints (${first})`);
+  }
+
+  const tried = new Set<string>();
+  const attempts: Array<{ model: string; useMaps: boolean }> = [
+    { model: config.geminiModel, useMaps: false },
+    { model: "gemini-3.5-flash-lite", useMaps: false },
+    { model: "gemini-flash-lite-latest", useMaps: false },
+  ];
+
+  for (const attempt of attempts) {
+    if (tried.has(attempt.model)) continue;
+    tried.add(attempt.model);
+    try {
+      const response = await generateWithGemini(input, citySketch, attempt.model, attempt.useMaps);
+      const reply = response.text?.trim();
+      if (!reply) continue;
+      const links = attempt.useMaps ? placeLinks(response, reply) : [];
+      return links.length ? `${reply}\n\n${links.join("\n")}` : reply;
+    } catch (err) {
+      console.error(`gemini ${attempt.model} failed:`, err);
+      if (!isRetryableModelError(err)) throw err;
+    }
+  }
+
+  return fallbackReply(citySketch);
+}
+
+/**
+ * Route one chat turn through the shared intent parser and factual skills (safety, food, events, route).
+ * If no skill returns anything usable, fall back to the single-prompt Gemini suggestion.
+ */
 export async function suggestNext(input: SuggestInput): Promise<string> {
   return orchestrate({
     question: input.question,
     transcript: input.transcript,
     location: input.location,
     now: input.now,
+    fallback: () => suggestWithGemini(input),
   });
 }

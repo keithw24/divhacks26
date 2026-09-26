@@ -14,6 +14,8 @@ export interface OrchestratorInput {
   transcript: Array<{ at: Date; who: string; text: string }>;
   location?: { latitude: number; longitude: number; who: string };
   now?: Date;
+  /** Answer to use when the skills can't: no resolvable location, or nothing verified came back. */
+  fallback?: () => Promise<string>;
 }
 
 function sharedLocation(input: OrchestratorInput): Location | undefined {
@@ -56,6 +58,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   const wantsSafety = wantsSafetySketch(input.question) || intent.needs.includes("safety");
   if (!origin) {
     console.info(wantsSafety ? "tiger: skipped (no NYC origin)" : "tiger: skipped (not a safety prompt)");
+    if (input.fallback) return input.fallback();
     return intent.clarificationQuestion || "Where in NYC are you? Share a location or name a neighborhood.";
   }
 
@@ -135,5 +138,9 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     ...(safety && safety.status !== "ok" ? safety.warnings : []),
     ...(route && route.status !== "ok" ? route.warnings : []),
   ];
+  // A request for things to do or eat needs picks; a lone safety or route line doesn't answer it.
+  const wantedPicks = intent.needs.includes("food") || intent.needs.includes("events");
+  const nothingVerified = !picks.length && !safety?.data && !route;
+  if (input.fallback && !picks.length && (wantedPicks || nothingVerified)) return input.fallback();
   return renderResponse({ picks, safety, route, warnings });
 }
