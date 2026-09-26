@@ -546,7 +546,7 @@ function GuardrailCard({ entry, senderName }: { entry: Guardrail; senderName: st
   const failed = checks.filter((check) => !check.passed);
   const confirmation = confirmationStage(null, checks);
   return (
-    <div className="bg-foreground text-background outline-card rounded-2xl p-4 space-y-3">
+    <div className="bg-ink text-ink-foreground outline-card rounded-2xl p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="font-bold">
@@ -784,7 +784,7 @@ function StageLegend() {
       {STAGES.map((stage, i) => (
         <li key={stage} className="bg-card outline-card rounded-2xl p-3">
           <div className="flex items-center gap-2">
-            <span className="size-5 shrink-0 rounded-full bg-foreground text-background grid place-items-center text-[10px] font-bold">
+            <span className="size-5 shrink-0 rounded-full bg-ink text-ink-foreground grid place-items-center text-[10px] font-bold">
               {i + 1}
             </span>
             <span className="font-bold text-sm">{stage}</span>
@@ -863,7 +863,7 @@ export function XrplTestnetSection() {
             <Stat
               value={data.guardrails.length}
               label="Blocked before signing"
-              className="bg-foreground text-background"
+              className="bg-ink text-ink-foreground"
             />
           </div>
 

@@ -57,7 +57,7 @@ export const emptyPreferences = (): Preferences => ({
 
 const chip = (on: boolean) =>
   `outline-card rounded-full px-4 py-2 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40 ${
-    on ? "bg-foreground text-background" : "bg-card hover:bg-muted"
+    on ? "bg-ink text-ink-foreground" : "bg-card hover:bg-muted"
   }`;
 
 type Section = "about" | "food" | "voice";

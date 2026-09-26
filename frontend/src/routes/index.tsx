@@ -35,7 +35,7 @@ function SectionTitle({ kicker, title, sub }: { kicker?: string; title: string; 
   return (
     <div>
       {kicker ? (
-        <span className="inline-block bg-foreground text-background text-[11px] font-bold uppercase tracking-[0.18em] px-2.5 py-1 rounded-full mb-3">
+        <span className="inline-block border border-border bg-card/60 text-muted-foreground text-xs font-medium px-3 py-1 rounded-full mb-4">
           {kicker}
         </span>
       ) : null}
@@ -53,7 +53,7 @@ function FlowStep({
   tone: "ink" | "primary" | "sky" | "lime" | "blue" | "paper";
 }) {
   const tones = {
-    ink: "bg-foreground text-background",
+    ink: "bg-ink text-ink-foreground",
     primary: "bg-primary text-primary-foreground",
     sky: "bg-sky text-sky-foreground",
     lime: "bg-lime text-lime-foreground",
@@ -109,66 +109,66 @@ function StartLink({ className, children }: { className: string; children: React
 }
 
 function Connector() {
-  return <div className="w-0.5 h-5 bg-foreground" />;
+  return <div className="w-px h-5 bg-gradient-to-b from-primary/70 to-border" />;
 }
 
 function Index() {
   return (
     <div className="bg-background text-foreground">
-      <nav className="sticky top-0 z-50 flex items-center justify-between px-5 py-3 border-b border-border bg-background/85 backdrop-blur-md">
+      <nav className="sticky top-0 z-50 flex items-center justify-between px-5 md:px-10 py-4 border-b border-border bg-background/70 backdrop-blur-xl">
         <div className="flex items-center gap-2">
-          <div className="size-7 rounded-lg bg-foreground text-primary font-bold grid place-items-center text-sm">
+          <div className="size-8 rounded-full bg-gradient-to-br from-primary to-lime text-primary-foreground font-bold grid place-items-center text-sm shadow-[var(--shadow-hard-primary)]">
             @
           </div>
           <span className="font-bold tracking-tight text-lg">plansaroundus</span>
         </div>
-        <div className="hidden md:flex items-center gap-6 text-sm font-medium">
-          <a className="hover:text-primary" href="#how">
+        <div className="hidden md:flex items-center gap-7 text-sm text-muted-foreground">
+          <a className="hover:text-foreground transition-colors" href="#how">
             How it works
           </a>
-          <a className="hover:text-primary" href="#safety">
+          <a className="hover:text-foreground transition-colors" href="#safety">
             Safety
           </a>
-          <a className="hover:text-primary" href="#xrpl">
+          <a className="hover:text-foreground transition-colors" href="#xrpl">
             XRPL Testnet
           </a>
-          <a className="hover:text-primary" href="#integrations">
+          <a className="hover:text-foreground transition-colors" href="#integrations">
             Integrations
           </a>
-          <a className="hover:text-primary" href="#architecture">
+          <a className="hover:text-foreground transition-colors" href="#architecture">
             Architecture
           </a>
         </div>
-        <StartLink className="bg-primary text-primary-foreground px-4 py-2 rounded-full text-sm font-bold outline-card shadow-[var(--shadow-hard)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
+        <StartLink className="bg-card/60 text-foreground px-4 py-2 rounded-lg text-sm font-medium outline-card hover:border-primary/60 hover:bg-card transition-colors">
           Get @agent
         </StartLink>
       </nav>
 
       {/* HERO */}
-      <section className="relative overflow-hidden px-5 pt-16 pb-10">
-        <div className="absolute inset-0 grid place-items-center select-none pointer-events-none">
-          <span className="font-display text-[24vw] leading-none text-lime/25 tracking-tighter whitespace-nowrap">
-            @AGENT
-          </span>
-        </div>
+      <section className="relative overflow-hidden px-5 pt-24 md:pt-32 pb-16">
+        <div
+          aria-hidden
+          className="absolute inset-x-0 top-24 mx-auto h-[34rem] max-w-5xl glow-hero pointer-events-none"
+        />
         <div className="relative max-w-5xl mx-auto text-center">
-          <span className="inline-block bg-blue text-blue-foreground text-xs font-bold uppercase tracking-[0.15em] px-3 py-1 rounded-full outline-card mb-5 animate-rise">
+          <span className="inline-flex items-center gap-2 border border-border bg-card/60 backdrop-blur text-muted-foreground text-xs font-medium px-3 py-1 rounded-full mb-6 animate-rise">
+            <span className="size-1.5 rounded-full bg-primary animate-blip" />
             Lives in your iMessage group chat
           </span>
-          <h1 className="font-display text-6xl md:text-8xl leading-[0.9] tracking-tight text-balance animate-rise [animation-delay:80ms]">
+          <h1 className="font-display text-5xl md:text-7xl leading-[1.02] text-balance animate-rise [animation-delay:80ms] bg-gradient-to-b from-foreground to-foreground/70 bg-clip-text text-transparent">
             Your group chat can actually get things done.
           </h1>
-          <p className="max-w-[58ch] mx-auto mt-6 text-lg md:text-xl text-pretty text-muted-foreground animate-rise [animation-delay:160ms]">
+          <p className="max-w-[58ch] mx-auto mt-6 text-base md:text-lg text-pretty text-muted-foreground animate-rise [animation-delay:160ms]">
             plansaroundus is an action layer for iMessage. It understands the conversation,
             remembers the people in it, and turns what the group wants into real actions — calls,
             payments, plans — right in the same thread. Not another chatbot to open.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3 animate-rise [animation-delay:240ms]">
-            <StartLink className="bg-foreground text-background px-6 py-3 rounded-full font-bold outline-card shadow-[var(--shadow-hard-primary)]">
-              Get your beta spot
+            <StartLink className="bg-primary text-primary-foreground px-6 py-3 rounded-lg font-medium shadow-[var(--shadow-hard-primary)] hover:brightness-110 transition">
+              Get your beta spot ↗
             </StartLink>
             <a
-              className="bg-sky text-sky-foreground px-6 py-3 rounded-full font-bold outline-card"
+              className="bg-card/60 text-foreground px-6 py-3 rounded-lg font-medium outline-card hover:bg-card transition-colors"
               href="#demo"
             >
               Walk through the demo
@@ -276,7 +276,7 @@ function Index() {
             ["usually starts at Columbia", "bg-sky text-sky-foreground"],
             ["prefers the subway", "bg-primary text-primary-foreground"],
             ["group likes Italian", "bg-blue text-blue-foreground"],
-            ["we picked Carbone last time", "bg-foreground text-background"],
+            ["we picked Carbone last time", "bg-ink text-ink-foreground"],
           ].map(([label, tone]) => (
             <span
               key={label}
@@ -321,7 +321,7 @@ function Index() {
           sub="Gemini does the reasoning; Google Maps grounding supplies real places and location context. When exact route or timing data isn't available, @agent says so instead of guessing."
         />
         <div className="mt-6 bg-card outline-card rounded-3xl p-5 shadow-[var(--shadow-hard-lime)] flex flex-wrap items-center gap-5">
-          <div className="size-14 rounded-2xl bg-foreground text-lime font-display text-2xl grid place-items-center shrink-0">
+          <div className="size-14 rounded-2xl bg-ink text-lime font-display text-2xl grid place-items-center shrink-0">
             ↗
           </div>
           <div className="flex-1 min-w-[12rem]">
@@ -429,7 +429,7 @@ function Index() {
                 className="bg-bubble px-4 py-3 rounded-[18px] rounded-tl-md flex items-center gap-3"
                 aria-label="Voice reply, 0:14"
               >
-                <span className="size-6 rounded-full bg-foreground text-background grid place-items-center text-xs">
+                <span className="size-6 rounded-full bg-ink text-ink-foreground grid place-items-center text-xs">
                   ▶
                 </span>
                 <span className="flex items-end gap-[3px] h-5" aria-hidden="true">
@@ -475,7 +475,7 @@ function Index() {
           sub="We're integrating ElevenLabs so the assistant can hold a natural phone conversation. Gemini decides what to say; ElevenLabs is the voice on the line."
         />
         <div className="mt-6 grid md:grid-cols-2 gap-4">
-          <div className="bg-foreground text-background rounded-3xl p-6 outline-card">
+          <div className="bg-ink text-ink-foreground rounded-3xl p-6 outline-card">
             <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
               <span className="size-3 rounded-full bg-primary animate-blip" />
               Calling Carbone…
@@ -537,13 +537,13 @@ function Index() {
           <div className="bg-card outline-card rounded-3xl p-5 shadow-[var(--shadow-hard-lime)]">
             <ol className="space-y-2 text-sm">
               {[
-                ["iMessage request", "bg-foreground text-background"],
+                ["iMessage request", "bg-ink text-ink-foreground"],
                 ["Gemini reads recipient + amount + reason", "bg-lime text-lime-foreground"],
                 ["Explicit confirmation from the sender", "bg-primary text-primary-foreground"],
                 ["Deterministic policy check (no LLM)", "bg-card text-foreground"],
                 ["Signed from the sender's own Testnet wallet", "bg-blue text-blue-foreground"],
                 ["Validated ledger result + hash", "bg-sky text-sky-foreground"],
-                ["Reply in the same iMessage chat", "bg-foreground text-background"],
+                ["Reply in the same iMessage chat", "bg-ink text-ink-foreground"],
               ].map(([label, tone], i) => (
                 <li key={label} className="flex items-center gap-3">
                   <span
@@ -579,7 +579,7 @@ function Index() {
           title="Discussion → decision → action. One thread."
           sub="These aren't separate mini-apps. The same conversation can move from picking a place, to booking it, to paying, to getting there."
         />
-        <div className="mt-8 bg-foreground text-background outline-card rounded-[28px] p-5 md:p-7 shadow-[var(--shadow-hard-primary)]">
+        <div className="mt-8 bg-ink text-ink-foreground outline-card rounded-[28px] p-5 md:p-7 shadow-[var(--shadow-hard-primary)]">
           <div className="font-mono text-xs uppercase tracking-wider text-background/60 mb-4">
             Group · Friday night — demo example
           </div>
@@ -704,7 +704,7 @@ function Index() {
               <li>Grounded geographic information</li>
             </ul>
           </div>
-          <div className="bg-foreground text-background outline-card rounded-2xl p-5">
+          <div className="bg-ink text-ink-foreground outline-card rounded-2xl p-5">
             <div className="font-display text-2xl tracking-tight">ElevenLabs</div>
             <div className="text-sm opacity-70 mt-1 font-bold uppercase tracking-wider">
               Voice and phone interaction
@@ -773,7 +773,7 @@ function Index() {
                   </div>
                 </div>
               </div>
-              <div className="bg-foreground text-background outline-card rounded-xl p-3 text-sm font-bold">
+              <div className="bg-ink text-ink-foreground outline-card rounded-xl p-3 text-sm font-bold">
                 <div className="text-center">Action layer</div>
                 <div className="mt-2 space-y-1.5">
                   <div className="bg-primary text-primary-foreground rounded-lg px-2 py-1.5 text-xs">
@@ -816,7 +816,7 @@ function Index() {
               <span>{step}</span>
             </li>
           ))}
-          <li className="flex gap-4 items-center bg-foreground text-background outline-card rounded-2xl p-4">
+          <li className="flex gap-4 items-center bg-ink text-ink-foreground outline-card rounded-2xl p-4">
             <span className="font-display text-3xl text-lime">11</span>
             <span>The real result lands back in the original iMessage group.</span>
           </li>
@@ -824,15 +824,24 @@ function Index() {
       </section>
 
       {/* CTA + FOOTER */}
-      <section className="px-5 py-16 text-center bg-lime text-lime-foreground border-t-2 border-foreground">
-        <h2 className="font-display text-5xl md:text-7xl tracking-tight text-balance">
-          Add @agent to your group.
-        </h2>
-        <StartLink className="inline-block mt-6 bg-primary text-primary-foreground px-8 py-4 rounded-full font-bold text-lg outline-card shadow-[var(--shadow-hard-lg)]">
-          Get your beta spot
-        </StartLink>
-        <SpotsMeter className="mt-6" />
-        <p className="mt-8 text-xs uppercase tracking-[0.15em] opacity-60">
+      <section className="relative overflow-hidden px-5 pt-24 pb-12 text-center border-t border-border">
+        <div
+          aria-hidden
+          className="absolute inset-x-0 -bottom-40 mx-auto h-[28rem] max-w-4xl glow-hero pointer-events-none"
+        />
+        <div className="relative">
+          <h2 className="font-display text-4xl md:text-6xl text-balance">
+            Add @agent to your group.
+          </h2>
+          <p className="mt-4 text-muted-foreground">
+            One number, added to the chat you already have.
+          </p>
+          <StartLink className="inline-block mt-8 bg-primary text-primary-foreground px-8 py-3.5 rounded-lg font-medium text-lg shadow-[var(--shadow-hard-primary)] hover:brightness-110 transition">
+            Get your beta spot ↗
+          </StartLink>
+          <SpotsMeter className="mt-8" />
+        </div>
+        <p className="relative mt-16 text-xs text-muted-foreground/70">
           plansaroundus · conversations shown are demo examples, not real bookings
         </p>
       </section>

@@ -6,7 +6,7 @@ import { api, session, type Me } from "@/lib/api";
 export function Logo() {
   return (
     <Link to="/" className="flex items-center gap-2">
-      <div className="size-7 rounded-lg bg-foreground text-primary font-bold grid place-items-center text-sm">
+      <div className="size-8 rounded-full bg-gradient-to-br from-primary to-lime text-primary-foreground font-bold grid place-items-center text-sm shadow-[var(--shadow-hard-primary)]">
         @
       </div>
       <span className="font-bold tracking-tight text-lg">plansaroundus</span>
@@ -82,7 +82,7 @@ export function PageTitle({
   return (
     <div className="mb-6">
       {kicker ? (
-        <span className="inline-block bg-foreground text-background text-[11px] font-bold uppercase tracking-[0.18em] px-2.5 py-1 rounded-full mb-3">
+        <span className="inline-block border border-border bg-card/60 text-muted-foreground text-xs font-medium px-3 py-1 rounded-full mb-4">
           {kicker}
         </span>
       ) : null}
