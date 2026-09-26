@@ -1,6 +1,10 @@
-# DivHacks 26 — NYC crime data on Tiger
+# DivHacks 26 — Around Me iMessage agent
 
-Hackathon weekend starter for **Concrete Jungle**. Public [NYPD complaint data](https://data.cityofnewyork.us/Public-Safety/NYPD-Complaint-Data-Current-Year-To-Date-/5uac-w243) (NYC Open Data, no login) lands in a **Tiger Cloud** Timescale hypertable so you can query by time, borough, precinct, and offense.
+Hackathon project for **Concrete Jungle**: one Photon iMessage agent that combines
+NYC events, restaurants, historical safety context, and real routes. Public
+[NYPD complaint data](https://data.cityofnewyork.us/Public-Safety/NYPD-Complaint-Data-Current-Year-To-Date-/5uac-w243)
+and official city events land in Tiger Data; Gemini routes intent between the
+skills, and Google Maps Platform supplies factual places and directions.
 
 Fits **Hack the City** (messy urban data, visual + actionable) and **Know Your City**.
 
@@ -113,6 +117,61 @@ Text the iMessage line a place, optionally with a time: `Columbia University at 
 No webhook is required for this listener-based milestone. If the service later
 moves to a serverless host, use Spectrum Cloud’s signed-webhook adapter and
 deduplicate at-least-once deliveries before triggering financial side effects.
+
+## Unified four-skill agent
+
+The Photon listener now sends every addressed message through one Gemini intent
+router. The router dispatches only the skills needed for that turn:
+
+- `safety`: historical NYPD complaint context from Tiger Data
+- `events`: NYC Parks and permitted events from Tiger Data, optionally enriched by Tavily
+- `food`: verified restaurants from Google Places API (New)
+- `route`: travel time and a directions link from Google Routes API
+
+Gemini selects only IDs returned by these skills. Names, times, counts,
+distances, and URLs are rendered from structured API results so the model cannot
+invent places or city-data facts.
+
+### Event schema and ingestion
+
+Apply the shared event table after the NYPD schema, then load the two official
+NYC event feeds:
+
+```powershell
+psql $env:DATABASE_URL -f sql/004_city_events.sql
+python scripts/ingest_events.py
+```
+
+Run `ingest_events.py` daily on the deployment host. Rows without usable
+coordinates are retained for source coverage but excluded from nearby searches.
+
+### Required service configuration
+
+Copy the new names from `.env.example` into the untracked `.env`:
+
+```dotenv
+GOOGLE_MAPS_API_KEY=       # Places API (New) and Routes API
+TAVILY_API_KEY=            # optional event enrichment
+```
+
+Keep `CHAT_PROVIDER=terminal` while developing and switch to `imessage` only for
+the shared Photon demo. Restrict the Google key to Places and Routes APIs and
+never commit any API key.
+
+### Team module boundaries
+
+- Alan owns `src/skills/safetySkill.ts` and the NYPD/Tiger query.
+- The events owner owns `src/skills/eventsSkill.ts`, `scripts/ingest_events.py`, and `sql/004_city_events.sql`.
+- Keith owns `src/agent/intent.ts`, `src/agent/orchestrate.ts`, and food ranking.
+- Rohan owns `src/skills/routeSkill.ts` and Google Routes behavior.
+- Only `src/index.ts` consumes Photon messages or sends user-visible replies.
+
+Before merging a skill branch:
+
+```powershell
+npm run typecheck
+npm test
+```
 
 ## How should I get there?
 
@@ -236,4 +295,4 @@ data actually supported them.
 - Location pins are parsed when they contain NYC coordinates; other attachments are ignored.
 - Ambiguous chains like “Joe’s Pizza” ask one short clarification.
 - Destinations outside NYC are labeled; the agent will not invent a route.
-- “What’s happening around me?” is a different capability and is not handled here.
+- Event, food, and safety requests use the unified skill orchestrator; transportation requests use the dedicated context-aware handler.

@@ -188,7 +188,7 @@ export class TransportationService {
         const usable =
           grounded.grounded &&
           groundedText &&
-          (routes.length === 0 || groundedTextMatchesRoutes(groundedText, routes));
+          groundedTextMatchesRoutes(groundedText, routes);
         if (usable) {
           return {
             handled: true,
@@ -207,6 +207,16 @@ export class TransportationService {
               partySize: intent.partySize ?? ctx.partySize,
               sources: destination.sources,
             }),
+          };
+        }
+        if (grounded.grounded && grounded.sources.length > 0) {
+          const safeSummary =
+            `Origin: ${displayName(origin.place)}. Destination: ${displayName(destination.place)}. ` +
+            "Google Maps found both places, but I couldn’t verify route details.";
+          return {
+            handled: true,
+            acknowledgement: "👀",
+            reply: formatGroundedDirections(safeSummary, grounded.sources),
           };
         }
         logTransportError("gemini.ungrounded", new Error("Maps grounding metadata missing"));
