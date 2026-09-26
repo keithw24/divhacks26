@@ -4,7 +4,7 @@ import { terminal } from "spectrum-ts/providers/terminal";
 import { handleInboundMessage } from "./agent/inbound.js";
 import { suggestNext } from "./agent/suggest.js";
 import { errorCategory } from "./agent/turn.js";
-import { lastLocation, recordLocation, recordMessage, transcript } from "./chat/context.js";
+import { lastLocation, locationsForSpace, recordLocation, recordMessage, transcript } from "./chat/context.js";
 import { senderDisplayName } from "./chat/invoke.js";
 import { parseLatLng } from "./chat/location.js";
 import { config } from "./config.js";
@@ -12,6 +12,7 @@ import { createBackboardMemoryService } from "./memory/backboard.js";
 import { openAgentStateStore } from "./store/state.js";
 import { createPaymentRuntime } from "./payments/runtime.js";
 import { createReservationRuntime } from "./reservations/runtime.js";
+import { createMeetupRuntime } from "./meetup/runtime.js";
 import { createTransportationServiceFromEnv } from "./transport/factory.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled, wantsVoiceReply } from "./voice/index.js";
 
@@ -21,9 +22,15 @@ const transport = createTransportationServiceFromEnv({
   geminiApiKey: config.geminiApiKey,
   geminiModel: config.geminiModel,
   googleMapsApiKey: config.googleMapsApiKey,
+  databaseUrl: config.databaseUrl,
 });
 const spaceSenders = new Map<string, (text: string) => Promise<unknown>>();
 const agentState = openAgentStateStore(config.agentStatePath);
+const meetup = createMeetupRuntime({
+  googleMapsApiKey: config.googleMapsApiKey,
+  timeZone: config.timezone,
+  stateStore: agentState,
+});
 const reservations = createReservationRuntime({
   callMode: config.reservationCallMode,
   mockScenario: config.reservationMockScenario,
@@ -250,6 +257,8 @@ for await (const [space, message] of app.messages) {
       ].filter(Boolean),
       reservations: reservations.orchestrator,
       payments: payments.service,
+      meetup: meetup.service,
+      liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
       suggest: (input) => suggestNext(input),
       transcript: () => transcript(space.id),

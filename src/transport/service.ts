@@ -17,6 +17,7 @@ import { displayName, hasCoordinates, lookupGazetteer } from "./locations.js";
 import { logDurationSource, logTransportError } from "./log.js";
 import { collectRoutes } from "./routing.js";
 import { prefersSaferSlowerRoute } from "../formatReport.js";
+import { asksDirectionsHome } from "../safetyIntent.js";
 import type { BlockSafetyReport } from "../safety.js";
 import { applyRoutePreferences, type RoutePreferences } from "./preferences.js";
 import {
@@ -151,6 +152,7 @@ export class TransportationService {
         reply: "Where’s home? A neighborhood or nearest intersection works.",
       });
     }
+    const destinationKnown = destination.status === "resolved" && Boolean(destination.place);
     const destinationStep = chooseTransportStep({
       destinationAmbiguous: destination.status === "ambiguous",
       originAmbiguous: false,
@@ -223,7 +225,7 @@ export class TransportationService {
     if (request.preferences?.preferTransit && !request.preferences.explicitRequest && !modes.includes("TRANSIT")) {
       modes = ["TRANSIT", ...modes];
     }
-    const safer = await this.saferSlowerIfNeeded(origin.place, destination.place, request.text, modes);
+    const safer = await this.saferSlowerIfNeeded(origin.place, request.text, intent.kind, modes);
     modes = safer.modes;
     const routePrefs: RoutePreferences = {
       ...request.preferences,
@@ -369,33 +371,25 @@ export class TransportationService {
 
   private async saferSlowerIfNeeded(
     origin: PlaceLocation,
-    destination: PlaceLocation,
     when: string,
+    kind: ReturnType<typeof extractTransportIntent>["kind"],
     modes: TravelMode[],
   ): Promise<{ modes: TravelMode[]; preferSaferSlower: boolean }> {
     if (!this.safetyLookup || !hasCoordinates(origin)) {
       return { modes, preferSaferSlower: false };
     }
+    if (!asksDirectionsHome(when) && kind !== "walk-check") {
+      return { modes, preferSaferSlower: false };
+    }
     try {
-      const [here, home] = await Promise.all([
-        this.safetyLookup({
-          latitude: origin.latitude!,
-          longitude: origin.longitude!,
-          label: displayName(origin),
-          when,
-        }),
-        hasCoordinates(destination)
-          ? this.safetyLookup({
-              latitude: destination.latitude!,
-              longitude: destination.longitude!,
-              label: displayName(destination),
-              when,
-            })
-          : Promise.resolve(null),
-      ]);
-      const tradeTime = prefersSaferSlowerRoute(here) || prefersSaferSlowerRoute(home);
-      if (!tradeTime) return { modes, preferSaferSlower: false };
-      const next = modes.includes("TRANSIT") ? modes : ["TRANSIT", ...modes];
+      const here = await this.safetyLookup({
+        latitude: origin.latitude!,
+        longitude: origin.longitude!,
+        label: displayName(origin),
+        when,
+      });
+      if (!prefersSaferSlowerRoute(here)) return { modes, preferSaferSlower: false };
+      const next: TravelMode[] = modes.includes("TRANSIT") ? modes : ["TRANSIT", ...modes];
       return {
         modes: ["TRANSIT", ...next.filter((mode) => mode !== "TRANSIT")],
         preferSaferSlower: true,
@@ -557,6 +551,9 @@ function preferenceLines(prefs?: RoutePreferences): string[] {
   if (!prefs) return [];
   const lines = [...(prefs.notes ?? [])];
   if (prefs.avoidBus && !lines.some((line) => /\bbus\b/i.test(line))) lines.push("Avoid the bus.");
+  if (prefs.preferSaferSlower) {
+    lines.push("Prefer transit over walking even if it takes longer; this hour or area is less safe than typical NYC.");
+  }
   return lines;
 }
 

@@ -1,7 +1,8 @@
 import { config } from "../config.js";
 import type { Location, Recommendation, UserIntent } from "../domain/contracts.js";
+import { prefersSaferSlowerRoute } from "../formatReport.js";
 import { geocodeNyc } from "../geocode.js";
-import { wantsSafetySketch } from "../safetyIntent.js";
+import { asksDirectionsHome, wantsSafetySketch } from "../safetyIntent.js";
 import { findEvents } from "../skills/eventsSkill.js";
 import { findFood } from "../skills/foodSkill.js";
 import { getRoute } from "../skills/routeSkill.js";
@@ -58,7 +59,8 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   const now = input.now ?? new Date();
   const intent = await parseIntent(input.question, sharedLocation(input));
   const origin = await resolveOrigin(intent, input);
-  const wantsSafety = wantsSafetySketch(input.question) || intent.needs.includes("safety");
+  const homeTrip = asksDirectionsHome(input.question);
+  const wantsSafety = wantsSafetySketch(input.question) || intent.needs.includes("safety") || homeTrip;
   if (!origin) {
     console.info(wantsSafety ? "tiger: skipped (no NYC origin)" : "tiger: skipped (not a safety prompt)");
     if (input.fallback) return input.fallback();
@@ -98,8 +100,9 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   );
 
   let explicitDestination = intent.destination;
-  if (!explicitDestination && intent.destinationQuery) {
-    const geocoded = await geocodeNyc(intent.destinationQuery).catch(() => null);
+  const destQuery = intent.destinationQuery?.trim();
+  if (!explicitDestination && destQuery && !/^home$/i.test(destQuery)) {
+    const geocoded = await geocodeNyc(destQuery).catch(() => null);
     if (geocoded) {
       explicitDestination = {
         label: geocoded.label,
@@ -117,24 +120,30 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   if (!wantsSafety) {
     console.info("tiger: skipped (not a safety prompt)");
   }
-  const safetyPromise = wantsSafety
-    ? getSafety({
+  const safety = wantsSafety
+    ? await getSafety({
         origin: safetyTarget,
         when: input.question,
         databaseUrl: config.databaseUrl,
         now,
       })
-    : Promise.resolve(undefined);
-  const routePromise = intent.needs.includes("route") && destination
-    ? getRoute({
-        origin,
-        destination,
-        travelMode: intent.travelMode,
-        departureTime: now.toISOString(),
-        apiKey: config.googleMapsApiKey,
-      })
-    : Promise.resolve(undefined);
-  const [safety, route] = await Promise.all([safetyPromise, routePromise]);
+    : undefined;
+  const tradeTimeForSafety =
+    Boolean(intent.needs.includes("route") && destination) && prefersSaferSlowerRoute(safety?.data);
+  const travelMode = tradeTimeForSafety && intent.travelMode === "WALK" ? "TRANSIT" : intent.travelMode;
+  const route =
+    intent.needs.includes("route") && destination
+      ? await getRoute({
+          origin,
+          destination,
+          travelMode,
+          departureTime: now.toISOString(),
+          apiKey: config.googleMapsApiKey,
+        })
+      : undefined;
+  if (tradeTimeForSafety && route?.data) {
+    route.data.summary = `${route.data.summary} — slightly longer transit instead of walking this hour`;
+  }
 
   const warnings = [
     ...(food && food.status !== "ok" ? food.warnings : []),
