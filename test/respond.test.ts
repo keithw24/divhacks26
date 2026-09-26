@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { formatSafetyReply } from "../src/formatReport.js";
 import { parseCoordinates, locationQueryFromMessage } from "../src/geocode.js";
 import { parseRequestedHour } from "../src/safety.js";
+import { wantsSafetySketch } from "../src/safetyIntent.js";
 
 describe("location parsing", () => {
   it("reads NYC coordinates", () => {
@@ -17,8 +18,27 @@ describe("location parsing", () => {
     );
   });
 
+  it("does not treat clock phrases as the place", () => {
+    expect(locationQueryFromMessage("is columbia safe at 11pm")).toBe(
+      "Columbia University",
+    );
+  });
+
   it("parses a requested hour", () => {
     expect(parseRequestedHour("Columbia at 9pm", 11)).toBe(21);
+  });
+});
+
+describe("wantsSafetySketch", () => {
+  it("fires on safety wording", () => {
+    expect(wantsSafetySketch("is Columbia safe at 11pm")).toBe(true);
+    expect(wantsSafetySketch("how sketchy is this block")).toBe(true);
+  });
+
+  it("stays off for hangout prompts", () => {
+    expect(wantsSafetySketch("what should we do near Columbia")).toBe(false);
+    expect(wantsSafetySketch("what's a good dinner spot")).toBe(false);
+    expect(wantsSafetySketch("what should we do at night")).toBe(false);
   });
 });
 
@@ -49,10 +69,26 @@ describe("formatSafetyReply", () => {
           { offense: "HARRASSMENT 2", lawCategory: "VIOLATION", n: 13 },
         ],
         precincts: [{ precinct: 26, borough: "MANHATTAN", n: 40 }],
+        shootings: { blockCount: 0, neighborhoodCount: 1, hourBlockCount: 0, hourNeighborhoodCount: 0 },
+        collisions: {
+          blockCount: 0,
+          neighborhoodCount: 12,
+          hourBlockCount: 0,
+          hourNeighborhoodCount: 1,
+          pedCycHurt: 3,
+        },
+        lights: {
+          blockCount: 0,
+          neighborhoodCount: 8,
+          hourBlockCount: 0,
+          hourNeighborhoodCount: 0,
+          openNeighborhood: 2,
+        },
       },
     );
     expect(text).toContain("Columbia University");
     expect(text).toContain("block midpoint");
     expect(text).toContain("2pm");
+    expect(text).toContain("Shootings");
   });
 });

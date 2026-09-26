@@ -8,10 +8,14 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx src/index.ts",
+    "dev:watch": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:maps-live": "tsx test/live/maps-live.ts",
+    "transport:demo": "tsx src/transport/demo.ts",
+    "transport:gemini-live": "tsx src/transport/gemini-live.ts"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",

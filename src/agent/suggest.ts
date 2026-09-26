@@ -1,15 +1,16 @@
-import { GoogleGenAI, type GenerateContentResponse } from "@google/genai";
+import type { GenerateContentResponse } from "@google/genai";
 import { config } from "../config.js";
 import type { LatLng } from "../chat/location.js";
+import { getGeminiClient } from "../gemini/client.js";
 import { formatSafetyReply } from "../formatReport.js";
 import { geocodeNyc } from "../geocode.js";
 import { currentHourEt, lookupBlockSafety, parseRequestedHour } from "../safety.js";
+import { wantsSafetySketch } from "../safetyIntent.js";
 import { systemPrompt } from "./prompt.js";
 
-let client: GoogleGenAI | undefined;
-function gemini(): GoogleGenAI {
+function gemini() {
   if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is not set (see .env.example)");
-  return (client ??= new GoogleGenAI({ apiKey: config.geminiApiKey }));
+  return getGeminiClient(config.geminiApiKey);
 }
 
 export interface SuggestInput {
@@ -66,13 +67,23 @@ export function placeLinks(response: GenerateContentResponse, reply: string): st
 }
 
 async function citySketchFor(input: SuggestInput): Promise<string | undefined> {
-  if (!config.databaseUrl) return undefined;
+  if (!wantsSafetySketch(input.question)) {
+    console.info("tiger: skipped (not a safety prompt)");
+    return undefined;
+  }
+  if (!config.databaseUrl) {
+    console.info("tiger: skipped (no DATABASE_URL)");
+    return undefined;
+  }
   let placeLabel = "shared pin";
   let lat = input.location?.latitude;
   let lon = input.location?.longitude;
   if (lat == null || lon == null) {
     const geo = await geocodeNyc(input.question).catch(() => null);
-    if (!geo) return undefined;
+    if (!geo) {
+      console.info(`tiger: skipped (geocode missed: ${JSON.stringify(input.question)})`);
+      return undefined;
+    }
     placeLabel = geo.label;
     lat = geo.latitude;
     lon = geo.longitude;
@@ -86,96 +97,68 @@ async function citySketchFor(input: SuggestInput): Promise<string | undefined> {
   );
 }
 
-const UNGROUNDED_NOTE =
-  "\n\nGoogle Maps is unavailable right now, so rely on your own knowledge: only suggest well-known, " +
-  "long-established places, and don't state exact hours — say \"usually open late\" or similar instead.";
-
-let warnedUngrounded = false;
-
-const status = (err: unknown) => (typeof err === "object" && err !== null ? (err as { status?: number }).status : undefined);
-const isQuotaError = (err: unknown) => status(err) === 429;
-
-/** Retry temporary Gemini failures (overloaded / server errors) with a short backoff. */
-async function withRetry<T>(fn: () => Promise<T>, delaysMs: number[]): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const code = status(err) ?? 0;
-      if (code < 500 || attempt >= delaysMs.length) throw err;
-      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
-    }
-  }
+function isRetryableModelError(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : String(err);
+  return /429|404|503|RESOURCE_EXHAUSTED|no longer available|exceeded your current quota|high demand/i.test(text);
 }
 
-type GenerateParams = Omit<Parameters<GoogleGenAI["models"]["generateContent"]>[0], "model">;
-
-// When the main model is overloaded, skip straight to the fallback for a while instead of waiting on it every message.
-const PRIMARY_COOLDOWN_MS = 60_000;
-let primaryDownUntil = 0;
-
-/**
- * Call Gemini on the configured model; if it's overloaded or unavailable (5xx, or 404 for a
- * retired model), use the fallback model instead. Quota errors (429) are passed through.
- */
-async function generate(params: GenerateParams): Promise<GenerateContentResponse> {
-  const { geminiModel: primary, geminiFallbackModel: fallback } = config;
-  const call = (model: string) => () => gemini().models.generateContent({ ...params, model });
-
-  if (!fallback || fallback === primary) return withRetry(call(primary), [1000, 3000]);
-
-  if (Date.now() >= primaryDownUntil) {
-    try {
-      return await withRetry(call(primary), [1000]);
-    } catch (err) {
-      const code = status(err) ?? 0;
-      if (code < 500 && code !== 404) throw err;
-      primaryDownUntil = Date.now() + PRIMARY_COOLDOWN_MS;
-      console.warn(`${primary} unavailable (${code}); using ${fallback} for the next minute.`);
-    }
+function fallbackReply(citySketch: string | undefined): string {
+  if (citySketch) {
+    return `${citySketch}\n\nGemini is unavailable right now, so this is the city-data sketch only.`;
   }
-  return withRetry(call(fallback), [1000, 3000]);
+  return "Gemini is unavailable right now (quota or retired model). Try GEMINI_MODEL=gemini-3.5-flash-lite in .env.";
 }
 
-/** Ask Gemini what the person/group should do next, grounded in Google Maps when the key allows it. */
+async function generateWithGemini(input: SuggestInput, citySketch: string | undefined, model: string, useMaps: boolean) {
+  return gemini().models.generateContent({
+    model,
+    contents: [{ role: "user", parts: [{ text: buildContext({ ...input, citySketch }) }] }],
+    config: {
+      systemInstruction: systemPrompt(input.isGroup),
+      ...(useMaps ? { tools: [{ googleMaps: {} }] } : {}),
+      ...(useMaps && input.location
+        ? {
+            toolConfig: {
+              retrievalConfig: { latLng: { latitude: input.location.latitude, longitude: input.location.longitude } },
+            },
+          }
+        : {}),
+    },
+  });
+}
+
+/** Ask Gemini what the person/group should do next, grounded in Google Maps. */
 export async function suggestNext(input: SuggestInput): Promise<string> {
   const citySketch = await citySketchFor(input).catch((err) => {
-    console.error("tiger sketch failed:", err);
+    console.error(`tiger sketch failed: ${err instanceof Error ? err.name : "Error"}`);
     return undefined;
   });
-  const request = {
-    contents: [{ role: "user", parts: [{ text: buildContext({ ...input, citySketch }) }] }],
-  };
-
-  let response: GenerateContentResponse;
-  try {
-    response = await generate({
-      ...request,
-      config: {
-        systemInstruction: systemPrompt(input.isGroup),
-        tools: [{ googleMaps: {} }],
-        ...(input.location && {
-          toolConfig: {
-            retrievalConfig: { latLng: { latitude: input.location.latitude, longitude: input.location.longitude } },
-          },
-        }),
-      },
-    });
-  } catch (err) {
-    // Maps grounding has its own quota (none on free-tier keys). Fall back to an ungrounded answer.
-    if (!isQuotaError(err)) throw err;
-    if (!warnedUngrounded) {
-      console.warn("Google Maps grounding hit a quota limit (429); answering without it. Use a billed Gemini key to enable it.");
-      warnedUngrounded = true;
-    }
-    response = await generate({
-      ...request,
-      config: { systemInstruction: systemPrompt(input.isGroup) + UNGROUNDED_NOTE },
-    });
+  if (citySketch) {
+    const first = citySketch.split("\n")[0] ?? "tiger sketch";
+    console.info(`tiger: queried nypd_complaints (${first})`);
   }
 
-  const reply = response.text?.trim();
-  if (!reply) return "Hmm, I couldn't come up with anything. Where are you right now?";
-  const links = placeLinks(response, reply);
-  return links.length ? `${reply}\n\n${links.join("\n")}` : reply;
+  const tried = new Set<string>();
+  const attempts: Array<{ model: string; useMaps: boolean }> = [
+    { model: config.geminiModel, useMaps: false },
+    { model: "gemini-3.5-flash-lite", useMaps: false },
+    { model: "gemini-flash-lite-latest", useMaps: false },
+  ];
+
+  for (const attempt of attempts) {
+    if (tried.has(attempt.model)) continue;
+    tried.add(attempt.model);
+    try {
+      const response = await generateWithGemini(input, citySketch, attempt.model, attempt.useMaps);
+      const reply = response.text?.trim();
+      if (!reply) continue;
+      const links = attempt.useMaps ? placeLinks(response, reply) : [];
+      return links.length ? `${reply}\n\n${links.join("\n")}` : reply;
+    } catch (err) {
+      console.error(`gemini ${attempt.model} failed:`, err);
+      if (!isRetryableModelError(err)) throw err;
+    }
+  }
+
+  return fallbackReply(citySketch);
 }
