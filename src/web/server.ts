@@ -13,9 +13,15 @@ export interface WebApiDeps {
   listMemories(phone: string): Promise<StoredMemory[]>;
   deleteMemory(phone: string, memoryId: string): Promise<boolean>;
   deleteAllMemories(phone: string): Promise<void>;
+  /** ElevenLabs post-call webhook, hosted on the same public port in production. */
+  handleElevenLabsWebhook?(
+    rawBody: string,
+    signature: string | undefined,
+  ): Promise<{ status: number; body: unknown }>;
 }
 
-const MAX_BODY = 16 * 1024;
+const MAX_JSON_BODY = 16 * 1024;
+const MAX_WEBHOOK_BODY = 1_500_000;
 /** Per-IP cap on code requests, on top of the per-number limits in auth. */
 const IP_WINDOW_MS = 60 * 60 * 1000;
 const IP_MAX_STARTS = 20;
@@ -28,6 +34,7 @@ class HttpError extends Error {
 
 export function createWebApiServer(deps: WebApiDeps): Server {
   const startsByIp = new Map<string, number[]>();
+  const startedAt = Date.now();
 
   const publicUser = (user: WebUser) => ({
     phone: maskPhone(user.phone),
@@ -39,6 +46,10 @@ export function createWebApiServer(deps: WebApiDeps): Server {
     const method = req.method ?? "GET";
     const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
 
+    if (method === "GET" && path === "/healthz") {
+      return { status: "ok", uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000) };
+    }
+    if (method === "GET" && path === "/readyz") return { status: "ready" };
     if (method === "GET" && path === "/api/stats") return deps.auth.stats();
 
     if (method === "POST" && path === "/api/auth/start") {
@@ -122,6 +133,7 @@ export function createWebApiServer(deps: WebApiDeps): Server {
   }
 
   return createServer(async (req, res) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
     const origin = req.headers.origin;
     if (origin && deps.allowedOrigins.includes(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
@@ -135,6 +147,23 @@ export function createWebApiServer(deps: WebApiDeps): Server {
       return;
     }
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
+    if (req.method === "POST" && path === "/webhooks/elevenlabs" && deps.handleElevenLabsWebhook) {
+      try {
+        const rawBody = await readBody(req, MAX_WEBHOOK_BODY);
+        const rawSignature = req.headers["elevenlabs-signature"];
+        const signature = Array.isArray(rawSignature) ? rawSignature[0] : rawSignature;
+        const result = await deps.handleElevenLabsWebhook(rawBody, signature);
+        res
+          .writeHead(result.status, { "Content-Type": "application/json", "Cache-Control": "no-store" })
+          .end(JSON.stringify(result.body));
+      } catch (error) {
+        const tooLarge = error instanceof HttpError && error.status === 413;
+        res
+          .writeHead(tooLarge ? 413 : 400, { "Content-Type": "application/json", "Cache-Control": "no-store" })
+          .end(JSON.stringify({ error: tooLarge ? "payload_too_large" : "bad_request" }));
+      }
+      return;
+    }
     try {
       const result = await route(req, res, path);
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(result));
@@ -148,18 +177,24 @@ export function createWebApiServer(deps: WebApiDeps): Server {
 }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
-  let size = 0;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new HttpError(413, "too_large");
-    chunks.push(chunk as Buffer);
-  }
-  if (!chunks.length) return {};
+  const raw = await readBody(req, MAX_JSON_BODY);
+  if (!raw) return {};
   try {
-    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    const parsed = JSON.parse(raw) as unknown;
     return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
   } catch {
     throw new HttpError(400, "invalid_json");
   }
+}
+
+async function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > maxBytes) throw new HttpError(413, "too_large");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
