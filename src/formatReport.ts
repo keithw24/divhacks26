@@ -1,4 +1,5 @@
 import type { BlockSafetyReport } from "./safety.js";
+import { safetyContextCard } from "./safetyContext.js";
 
 export type SafetyBand = "safer" | "typical" | "slightly elevated" | "elevated";
 
@@ -90,6 +91,7 @@ export function nycComparisonPhrase(report: BlockSafetyReport): string {
   return "Not enough city data for a safety reading.";
 }
 
-export function formatSafetyReply(_place: unknown, report: BlockSafetyReport): string {
-  return nycComparisonPhrase(report);
+/** User-facing safety text: the uncertainty-aware context card (no verdicts). */
+export function formatSafetyReply(_place: unknown, report: BlockSafetyReport, now = new Date()): string {
+  return safetyContextCard(report, now);
 }

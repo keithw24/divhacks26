@@ -42,6 +42,10 @@ export interface BlockSafetyReport {
   collisions: LayerCounts & { pedCycHurt: number };
   lights: LayerCounts & { openNeighborhood: number };
   baselines: SafetyBaselines;
+  /** Complaints citywide at this hour, same window (for the city baseline). */
+  cityHourComplaints?: number;
+  /** The date range the complaint data actually covers inside the query window. */
+  observation?: { start: string | null; end: string | null; days: number };
 }
 
 /** Complaint density here vs NYC / this borough / this area's typical hour (1 = even). */
@@ -168,7 +172,9 @@ WITH pt AS (
       WHERE (SELECT borough FROM area_borough) IS NOT NULL
         AND borough = (SELECT borough FROM area_borough)
         AND extract(hour from occurred_at AT TIME ZONE 'America/New_York')::int = (SELECT hour_et FROM pt)
-    )::int AS borough_hour_complaints
+    )::int AS borough_hour_complaints,
+    min(occurred_at) AS window_start,
+    max(occurred_at) AS window_end
   FROM nypd_complaints
   WHERE occurred_at >= now() - interval '2 years'
 )
@@ -220,7 +226,9 @@ SELECT jsonb_build_object(
   'cityComplaints', (SELECT complaints FROM citywide),
   'cityHourComplaints', (SELECT hour_complaints FROM citywide),
   'boroughComplaints', (SELECT borough_complaints FROM citywide),
-  'boroughHourComplaints', (SELECT borough_hour_complaints FROM citywide)
+  'boroughHourComplaints', (SELECT borough_hour_complaints FROM citywide),
+  'windowStart', (SELECT window_start FROM citywide),
+  'windowEnd', (SELECT window_end FROM citywide)
 ) AS report
 `;
 
@@ -357,5 +365,16 @@ export async function lookupBlockSafety(
       openNeighborhood: Number(lamp.openNeighborhood ?? 0),
     },
     baselines,
+    cityHourComplaints: Number(payload.cityHourComplaints ?? 0),
+    observation: observationWindow(payload.windowStart, payload.windowEnd),
   };
+}
+
+/** Days actually covered by the data (at least 1 when there is any data). */
+export function observationWindow(start: unknown, end: unknown): { start: string | null; end: string | null; days: number } {
+  const from = typeof start === "string" ? start : null;
+  const to = typeof end === "string" ? end : null;
+  if (!from || !to) return { start: from, end: to, days: 0 };
+  const days = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000));
+  return { start: from, end: to, days };
 }
