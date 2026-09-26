@@ -37,13 +37,7 @@ export function ChatWindow({
   );
 }
 
-export function Incoming({
-  tone = "blue",
-  children,
-}: {
-  tone?: Tone;
-  children: ReactNode;
-}) {
+export function Incoming({ tone = "blue", children }: { tone?: Tone; children: ReactNode }) {
   return (
     <div className="flex gap-2">
       <div className={cn("size-7 rounded-full shrink-0", avatarTone[tone])} />
