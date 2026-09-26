@@ -9,7 +9,7 @@ import { currentHourEt, lookupBlockSafety, parseRequestedHour } from "../safety.
 import { wantsSafetySketch } from "../safetyIntent.js";
 import { orchestrate } from "./orchestrate.js";
 import { systemPrompt } from "./prompt.js";
-import { isNotable, rankingHint, socialContextLines, type SocialRead } from "./social.js";
+import { isNotable, rankingHint, socialContextLines, withOpener, type SocialRead } from "./social.js";
 
 function gemini() {
   if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is not set (see .env.example)");
@@ -266,12 +266,18 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
     who: line.senderName || line.senderId,
     text: line.text,
   }));
-  return orchestrate({
+  // The Gemini fallback already writes in the right tone; templated skill answers get a short opener.
+  let modelWrote = false;
+  const answer = await orchestrate({
     question: input.question,
     transcript: fromGroup.length ? fromGroup : input.transcript,
     location: input.location,
     now: input.now,
-    fallback: () => suggestWithGemini(input),
+    fallback: () => {
+      modelWrote = true;
+      return suggestWithGemini(input);
+    },
     memoryContext: [untrustedMemory(input), rankingHint(input.social)].filter(Boolean).join("\n") || undefined,
   });
+  return modelWrote ? answer : withOpener(answer, input.social);
 }

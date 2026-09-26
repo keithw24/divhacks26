@@ -3,7 +3,8 @@ import type { ReservationHandlerResult, TurnActions, TurnOutcome } from "./turn.
 import { runConversationTurn } from "./turn.js";
 import { classifyMemory, isDurableMemory } from "./classify.js";
 import { checkInLine, checkInTopic, scheduleCheckIn, takeCheckIn } from "./checkin.js";
-import { isReplayVoiceRequest, localSocialRead, type SocialInput, type SocialRead } from "./social.js";
+import { isReplayVoiceRequest, localSocialRead, withOpener, type SocialInput, type SocialRead } from "./social.js";
+import { supportReply } from "./support.js";
 import { decisionConstraints, reconcileMemories, requestConcernsOthers } from "./decisions.js";
 import { logAgentTurn, logBackboardFailure, type AgentTurnLog } from "./log.js";
 import { sanitizeGroupReply, type AttributedMemory } from "./privacy.js";
@@ -198,13 +199,14 @@ export async function handleInboundMessage(
     }
   }
 
-  // One gentle follow-up line, only in 1:1 chats, only once.
-  let checkIn = message.isGroup ? undefined : takeCheckIn(deps.store, message.spaceId, senderId, now);
+  // One gentle follow-up line, only in 1:1 chats, only once. Taken lazily, so a venting reply
+  // (which shouldn't talk over the person) leaves it for the next turn.
+  let checkInDone = message.isGroup;
   const withCheckIn = (reply: string) => {
-    if (!checkIn) return reply;
-    const line = checkInLine(checkIn);
-    checkIn = undefined;
-    return `${line}\n\n${reply}`;
+    if (checkInDone) return reply;
+    checkInDone = true;
+    const topic = takeCheckIn(deps.store, message.spaceId, senderId, now);
+    return topic ? `${checkInLine(topic)}\n\n${reply}` : reply;
   };
   const recentText = group.recentMessages.map((line) => line.text).join("\n");
   const attributed: AttributedMemory[] = [
@@ -240,7 +242,7 @@ export async function handleInboundMessage(
         });
         if (result.usedGemini) geminiCalled = true;
         if (!result.reply) return result;
-        return { ...result, reply: withCheckIn(sanitizeGroupReply(result.reply, attributed, recentText)) };
+        return { ...result, reply: withCheckIn(withOpener(sanitizeGroupReply(result.reply, attributed, recentText), social)) };
       },
       suggest: async (input) => {
         geminiCalled = true;
@@ -267,6 +269,7 @@ export async function handleInboundMessage(
       transcript: () => deps.transcript(),
       location: deps.location,
       recordAssistant: (text, turnOutcome) => deps.recordAssistant(text, { social, outcome: turnOutcome }),
+      support: () => supportReply({ question, recentLines: socialInput.recentLines, social, isGroup: message.isGroup }),
       noteCoordinates: deps.noteCoordinates,
       handleReservation: deps.reservations
         ? (request) =>
@@ -332,6 +335,7 @@ export async function handleInboundMessage(
     outcome === "reservation" ||
     outcome === "ticketing" ||
     outcome === "meetup" ||
+    outcome === "support" ||
     outcome === "transport" ||
     outcome === "gemini" ||
     outcome === "failed";
@@ -363,6 +367,7 @@ function logSocialRead(read: SocialRead): void {
       groupDynamic: read.groupDynamic,
       onTheMove: read.onTheMove,
       wantsVoice: read.wantsVoice,
+      needsSupport: read.needsSupport,
       pattern: Boolean(read.durablePattern),
       confidence: Math.round(read.confidence * 100) / 100,
     })}`,
