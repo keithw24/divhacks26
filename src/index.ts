@@ -38,6 +38,7 @@ import { startWebRuntime } from "./web/runtime.js";
 import { createMailer } from "./web/email.js";
 import { readSocialContext } from "./agent/social.js";
 import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
+import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./deepspace/client.js";
 import { getPool } from "./safety.js";
 import { shouldSpeak } from "./voice/decide.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled } from "./voice/index.js";
@@ -419,6 +420,44 @@ const claims = createMessageClaimer({
 });
 console.info(`agent instance ${INSTANCE_ID} (message claims: ${config.chatProvider === "imessage" && config.databaseUrl && config.messageClaims ? "database" : "this process only"})`);
 
+// DeepSpace backend: identity, shared plans and cross-channel notifications.
+const deepspace =
+  config.chatProvider === "imessage" && config.deepspaceApiUrl && config.deepspaceChannelSecret
+    ? createDeepSpaceClient({ baseUrl: config.deepspaceApiUrl, secret: config.deepspaceChannelSecret })
+    : undefined;
+console.info(deepspace ? `DeepSpace backend: ${config.deepspaceApiUrl}` : "DeepSpace backend: off (set DEEPSPACE_API_URL and DEEPSPACE_CHANNEL_SECRET).");
+if (deepspace) {
+  startOutboxPoller({
+    client: deepspace,
+    channel: "imessage",
+    intervalMs: config.deepspaceOutboxPollMs,
+    send: async (item) => {
+      const chat = await imessage(app as never).space.create(item.externalId);
+      await chat.send(item.body);
+      recordMessage(chat.id, config.agentName, item.body);
+    },
+  });
+}
+
+/** Tell the backend who is talking. Fails open: the agent still answers if DeepSpace is down. */
+async function checkInWithBackend(space: Space, message: Message, who: string, text: string): Promise<InboundResult | null> {
+  if (!deepspace || who === "someone") return null;
+  return deepspace
+    .inbound({
+      deliveryId: message.id,
+      channel: "imessage",
+      externalId: who,
+      conversationId: space.id,
+      displayName: senderDisplayName(message.sender),
+      text,
+      receivedAt: message.timestamp.toISOString(),
+    })
+    .catch((error) => {
+      console.error(`deepspace inbound failed: ${error instanceof Error ? error.message.slice(0, 160) : "Error"}`);
+      return null;
+    });
+}
+
 async function processMessages(items: { space: Space; message: Message }[]) {
   const { space, message } = items[items.length - 1]!;
 
@@ -438,6 +477,17 @@ async function processMessages(items: { space: Space; message: Message }[]) {
   }
   if (!texts.length) return;
   const text = texts.join("\n");
+
+  const backend = await checkInWithBackend(space, message, who, text);
+  if (backend?.duplicate) return;
+  if (backend?.reply) {
+    // The backend handled it (e.g. "LINK 123456"); don't also run the agent on it.
+    recordMessage(space.id, who, text);
+    const sent = await message.reply(backend.reply).catch(() => undefined);
+    if (sent == null) await space.send(backend.reply).catch(() => undefined);
+    recordMessage(space.id, config.agentName, backend.reply);
+    return;
+  }
 
   const isVoice = message.content.type === "voice";
   if (message.content.type !== "text") {

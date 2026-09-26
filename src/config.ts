@@ -30,6 +30,14 @@ export const config = {
   databaseUrl: env("DATABASE_URL"),
   /** With DATABASE_URL, only one running agent answers each message. MESSAGE_CLAIMS=off disables it. */
   messageClaims: env("MESSAGE_CLAIMS", "on").toLowerCase() !== "off",
+  /**
+   * DeepSpace backend (backend/). When both are set, this agent acts as the iMessage
+   * channel adapter: it forwards who is talking, lets the backend handle "LINK 123456",
+   * and delivers queued plan notifications. Unset = the agent runs exactly as before.
+   */
+  deepspaceApiUrl: env("DEEPSPACE_API_URL"),
+  deepspaceChannelSecret: env("DEEPSPACE_CHANNEL_SECRET"),
+  deepspaceOutboxPollMs: Math.max(5000, Number(env("DEEPSPACE_OUTBOX_POLL_MS", "15000")) || 15000),
   backboardApiKey: env("BACKBOARD_API_KEY"),
   backboardMemoryMode: memoryMode(env("BACKBOARD_MEMORY_MODE", "Auto")),
   backboardMemoryPro: env("BACKBOARD_MEMORY_PRO", "false").toLowerCase() === "true",
