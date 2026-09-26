@@ -14,13 +14,16 @@ export function wantsVoiceReply(mode: typeof config.voiceReplies, inboundWasVoic
 /** Transcribe an inbound voice memo. Returns null when voice is disabled or nothing was said. */
 export async function transcribeVoiceMemo(memo: { read(): Promise<Buffer>; mimeType: string }): Promise<string | null> {
   if (!voiceEnabled()) return null;
-  const prepared = await prepareForTranscription(await memo.read(), memo.mimeType);
+  const raw = await memo.read();
+  const prepared = await prepareForTranscription(raw, memo.mimeType);
   const text = await transcribe(prepared.audio, {
     apiKey: config.elevenLabsApiKey,
     model: config.elevenLabsSttModel,
     filename: prepared.filename,
     mimeType: prepared.mimeType,
   });
+  // Metadata only: no transcript text in logs.
+  console.info(`voice.in ${JSON.stringify({ mimeType: memo.mimeType, bytes: raw.length, sentAs: prepared.mimeType, transcriptChars: text.length })}`);
   return text || null;
 }
 
@@ -61,7 +64,9 @@ export async function sendVoiceReply(space: Space, reply: string): Promise<void>
   if (await hasFfmpeg()) {
     const { audio, seconds } = await mp3ToM4a(mp3);
     await space.send(voice(audio, { name: "reply.m4a", mimeType: "audio/mp4", ...(seconds && { duration: Math.round(seconds) }) }));
+    console.info(`voice.out ${JSON.stringify({ format: "m4a", bytes: audio.length, seconds: seconds && Math.round(seconds) })}`);
   } else {
     await space.send(voice(mp3, { name: "reply.mp3", mimeType: "audio/mpeg" }));
+    console.info(`voice.out ${JSON.stringify({ format: "mp3", bytes: mp3.length })}`);
   }
 }

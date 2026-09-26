@@ -194,6 +194,11 @@ for await (const [space, message] of app.messages) {
   if (text === null) continue;
 
   const isVoice = message.content.type === "voice";
+  if (message.content.type !== "text") {
+    // Which kind of non-text message arrived (e.g. voice vs audio attachment) — metadata only.
+    const c = message.content as { type: string; mimeType?: string };
+    console.info(`inbound.content ${JSON.stringify({ type: c.type, mimeType: c.mimeType, answerable: text !== UNHEARD_VOICE_MEMO })}`);
+  }
   const canInvoke = message.content.type === "text" || (isVoice && text !== UNHEARD_VOICE_MEMO);
   const location = lastLocation(space.id);
   spaceSenders.set(space.id, (replyText) => space.send(replyText));

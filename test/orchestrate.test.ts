@@ -9,6 +9,9 @@ vi.mock("../src/skills/eventsSkill.js", () => ({ findEvents: vi.fn() }));
 vi.mock("../src/skills/foodSkill.js", () => ({ findFood: vi.fn() }));
 vi.mock("../src/skills/routeSkill.js", () => ({ getRoute: vi.fn() }));
 vi.mock("../src/skills/safetySkill.js", () => ({ getSafety: vi.fn() }));
+vi.mock("../src/agent/safetySummary.js", () => ({
+  summarizeSafety: vi.fn(async () => "Safer than NYC average"),
+}));
 vi.mock("../src/geocode.js", () => ({ geocodeNyc: vi.fn(async () => null) }));
 
 import { renderResponse, rankRecommendations } from "../src/agent/compose.js";
