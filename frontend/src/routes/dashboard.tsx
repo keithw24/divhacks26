@@ -94,7 +94,7 @@ function Dashboard() {
         sub="Everything happens in iMessage. To keep the beta private, @agent's number is only sent by email."
       />
 
-      <Card className="bg-foreground text-background shadow-[var(--shadow-hard-primary)]">
+      <Card className="bg-ink text-ink-foreground shadow-[var(--shadow-hard-primary)]">
         <div className="text-xs font-bold uppercase tracking-[0.15em] opacity-70">
           @agent's number
         </div>
