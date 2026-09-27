@@ -19,6 +19,7 @@ import { isAdapterChannel, type OutboxAck } from '../domain/contracts'
 import { ackOutbox, claimOutbox, handleInbound, listWalletDirectory, notifyPaymentReceived, parseInbound } from '../domain/channels'
 import { ServiceError } from '../domain/store'
 import { createActionTools } from './action-routes.js'
+import { siteFor } from './site-routes.js'
 
 /** Identity the adapter's writes are attributed to in logs and `createdBy`. */
 export const CHANNEL_ADAPTER_USER = 'system:channel-adapter'
@@ -75,7 +76,15 @@ export function registerChannelRoutes(app: Hono<AppContext>): void {
     try {
       const message = parseInbound(JSON.parse(auth.body))
       const tools = createActionTools(c.env, CHANNEL_ADAPTER_USER, '')
-      const result = await handleInbound(tools, message)
+      // Website sign-in codes are checked first; without a site secret, skip them.
+      let confirmSiteCode: ((id: string, text: string) => Promise<string | null>) | undefined
+      try {
+        const { site } = siteFor(c.env)
+        confirmSiteCode = (id, text) => site.confirmPhoneText(id, text)
+      } catch {
+        confirmSiteCode = undefined
+      }
+      const result = await handleInbound(tools, message, new Date(), confirmSiteCode)
       // Metadata only: never log message text or phone numbers.
       console.info(
         `[channels] inbound ${JSON.stringify({ channel: message.channel, duplicate: result.duplicate, linked: Boolean(result.userId), handled: Boolean(result.reply) })}`,

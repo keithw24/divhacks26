@@ -3,10 +3,14 @@
  * the Node agent's website API used, now stored in DeepSpace:
  *
  *   1. email a 6-digit code        2. trade it for a short-lived challenge
- *   3. text a code over iMessage   4. verify it → account + session token
+ *   3. show "Text CODE 123456 to @agent"; the person texts it from their phone
+ *   4. the website polls until that text arrives → account + session token
  *
- * The iMessage code is queued in notification_outbox; the Photon agent
- * delivers it. Codes, challenges and sessions are stored only as hashes.
+ * The phone step is reversed on purpose: an inbound text from the person
+ * always reaches the bot (Photon allows it), while a bot's first text to an
+ * unknown number may not. The agent passes the text to /api/channels/inbound,
+ * which calls confirmPhoneText; the sender's address is the proof of the
+ * number. Codes, challenges and sessions are stored only as hashes.
  * These accounts are separate from DeepSpace's built-in sign-in.
  */
 
@@ -56,7 +60,15 @@ export interface SiteDeps {
   secret: string
   maxUsers: number
   sendEmailCode(email: string, code: string): Promise<void>
+  /** @agent's iMessage number, shown only after the email is verified. */
+  agentNumber?: string
   now?: () => number
+}
+
+/** "CODE 482913", "code: 482913" or just "482913" from the person's phone. */
+export function parsePhoneCodeText(text: string): string | null {
+  const match = /^\s*(?:code[:\s]*)?(\d{3})[\s-]?(\d{3})\s*$/i.exec(text)
+  return match ? `${match[1]}${match[2]}` : null
 }
 
 /** US numbers only for now: "(917) 782-4515" → "+19177824515". */
@@ -120,6 +132,7 @@ interface CodeRow {
   expiresAt: number
   attempts: number
   sends: unknown
+  verifiedAt?: number
 }
 
 const BUDGETS = new Set<Budget>(['free', 'low', 'medium', 'high'])
@@ -198,7 +211,7 @@ export function createSite(deps: SiteDeps) {
   }
 
   /** Issue and deliver a code under `key`, with a resend cooldown and an hourly cap. */
-  async function issueCode(key: string, deliver: (code: string) => Promise<void>): Promise<void> {
+  async function issueCode(key: string, deliver: (code: string) => Promise<void>): Promise<string> {
     const t = now()
     const existing = await findOne<CodeRow>(store, 'site_codes', { key })
     const recent = numberArray(existing?.data.sends).filter((at) => t - at < HOUR).sort((a, b) => a - b)
@@ -207,7 +220,14 @@ export function createSite(deps: SiteDeps) {
       throw new ServiceError('rate_limited', 'Wait a moment before asking for another code.')
     }
     const code = sixDigits()
-    const data = { key, hash: await hmacHex(deps.secret, `${key}:${code}`), expiresAt: t + CODE_TTL_MS, attempts: 0, sends: [...recent, t] }
+    const data = {
+      key,
+      hash: await hmacHex(deps.secret, `${key}:${code}`),
+      expiresAt: t + CODE_TTL_MS,
+      attempts: 0,
+      sends: [...recent, t],
+      verifiedAt: 0,
+    }
     const recordId = existing ? existing.recordId : await insert(store, 'site_codes', data)
     if (existing) await patch(store, 'site_codes', recordId, data)
     try {
@@ -217,6 +237,7 @@ export function createSite(deps: SiteDeps) {
       await patch(store, 'site_codes', recordId, { hash: '', expiresAt: 0, sends: recent })
       throw new ServiceError('send_failed', "Couldn't send the code. Try again.")
     }
+    return code
   }
 
   /** Check and consume a code. */
@@ -288,35 +309,72 @@ export function createSite(deps: SiteDeps) {
       return { challenge }
     },
 
-    /** Step 3: queue an iMessage code, only with a verified email that fits this number. */
-    async startPhone(challenge: unknown, rawPhone: unknown): Promise<{ ok: true }> {
+    /**
+     * Step 3: a code for the person to text to @agent from this number.
+     * Nothing is sent from here; see confirmPhoneText.
+     */
+    async startPhone(challenge: unknown, rawPhone: unknown): Promise<{ ok: true; code: string; agentNumber: string | null }> {
       const phone = normalizeUsPhone(rawPhone)
       if (!phone) throw new ServiceError('invalid_phone', 'Enter a US mobile number.')
       const verified = await challengeEmail(challenge)
       if (!verified) throw new ServiceError('challenge_expired', 'Start again with your email.')
       await assertPairing(verified.email, phone)
-      await issueCode(`phone:${phone}`, async (code) => {
-        await insert(store, 'notification_outbox', {
-          userId: `site:${phone}`,
-          channel: 'imessage',
-          externalId: phone,
-          body: `${code} is your plansaroundus sign-in code. It expires in 10 minutes. If you didn't ask for it, ignore this text.`,
-          status: 'pending',
-          attempts: 0,
-        })
-      })
-      return { ok: true }
+      const code = await issueCode(`phone:${phone}`, async () => {})
+      return { ok: true, code, agentNumber: deps.agentNumber || null }
     },
 
-    /** Step 4: verify the iMessage code, create the account if new, and start a session. */
-    async verifyPhone(challenge: unknown, rawPhone: unknown, rawCode: unknown) {
+    /**
+     * An inbound iMessage, relayed by the agent. Returns the bot's reply when
+     * the text is a sign-in code, or null when it's an ordinary message.
+     * The sender's address proves the number; the code ties it to the sign-in.
+     */
+    async confirmPhoneText(externalId: string, text: string): Promise<string | null> {
+      const code = parsePhoneCodeText(text)
+      if (!code) return null
+      const phone = normalizeUsPhone(externalId)
+      if (!phone) {
+        return "Text the code from the phone number you entered on the website (not an email address)."
+      }
+      const pending = await findOne<CodeRow>(store, 'site_codes', { key: `phone:${phone}` })
+      if (!pending?.data.hash) {
+        return "I don't see a sign-in waiting for this number. Start again at plansaroundus.tech/signin."
+      }
+      if (now() > Number(pending.data.expiresAt)) {
+        return 'That code expired. Go back to the website for a new one.'
+      }
+      const attempts = Number(pending.data.attempts ?? 0)
+      if (attempts >= MAX_ATTEMPTS) return 'Too many tries. Go back to the website for a new code.'
+      const expected = await hmacHex(deps.secret, `phone:${phone}:${code}`)
+      if (!constantTimeEqual(expected, pending.data.hash)) {
+        await patch(store, 'site_codes', pending.recordId, { attempts: attempts + 1 })
+        return "That code doesn't match. Check the one on the website and try again."
+      }
+      await patch(store, 'site_codes', pending.recordId, { hash: '', verifiedAt: now() })
+      return "You're verified! Head back to plansaroundus.tech, it'll finish signing you in. I'm @agent. Text me here any time you want to plan something."
+    },
+
+    /**
+     * Step 4: the website polls this. `{ pending: true }` until the person's
+     * text arrives, then creates the account if new and starts a session.
+     */
+    async verifyPhone(challenge: unknown, rawPhone: unknown): Promise<{ pending: true } | { token: string; user: PublicSiteUser }> {
       const phone = normalizeUsPhone(rawPhone)
       if (!phone) throw new ServiceError('invalid_phone', 'Enter a US mobile number.')
       const verified = await challengeEmail(challenge)
       if (!verified) throw new ServiceError('challenge_expired', 'Start again with your email.')
-      // Re-checked: someone may have taken the last spot since the code was sent.
+      const pending = await findOne<CodeRow>(store, 'site_codes', { key: `phone:${phone}` })
+      const at = Number(pending?.data.verifiedAt ?? 0)
+      if (!pending || !at) {
+        if (!pending || now() > Number(pending.data.expiresAt)) {
+          throw new ServiceError('expired', 'That code expired. Get a new one.')
+        }
+        return { pending: true }
+      }
+      if (now() - at > CODE_TTL_MS) throw new ServiceError('expired', 'That code expired. Get a new one.')
+      // Re-checked: someone may have taken the last spot since the code was shown.
       await assertPairing(verified.email, phone)
-      await checkCode(`phone:${phone}`, rawCode)
+      // One sign-in per text.
+      await patch(store, 'site_codes', pending.recordId, { verifiedAt: 0, expiresAt: 0 })
       await patch(store, 'site_challenges', verified.recordId, { expiresAt: 0 })
       let row = await userRow(phone)
       if (!row) {

@@ -109,10 +109,18 @@ export const api = {
   startEmail: (email: string) => call<{ ok: true }>("POST", "/api/auth/email/start", { email }),
   verifyEmail: (email: string, code: string) =>
     call<{ challenge: string }>("POST", "/api/auth/email/verify", { email, code }),
+  // The person texts this code to @agent from their phone (inbound always reaches the bot).
   startPhone: (challenge: string, phone: string) =>
-    call<{ ok: true }>("POST", "/api/auth/phone/start", { challenge, phone }),
-  verifyPhone: (challenge: string, phone: string, code: string) =>
-    call<{ token: string; user: Me }>("POST", "/api/auth/phone/verify", { challenge, phone, code }),
+    call<{ ok: true; code: string; agentNumber: string | null }>("POST", "/api/auth/phone/start", {
+      challenge,
+      phone,
+    }),
+  // Polled: { pending: true } until that text arrives.
+  verifyPhone: (challenge: string, phone: string) =>
+    call<{ pending: true } | { token: string; user: Me }>("POST", "/api/auth/phone/verify", {
+      challenge,
+      phone,
+    }),
   joinWaitlist: (challenge: string, phone?: string, name?: string) =>
     call<{ position: number }>("POST", "/api/waitlist", { challenge, phone, name }),
   integrations: () =>

@@ -88,7 +88,7 @@ async function sendWithOwnResend(
   console.info('[site] email sent')
 }
 
-function siteFor(env: Env) {
+export function siteFor(env: Env) {
   const secret = env.SITE_AUTH_SECRET || env.CHANNEL_ADAPTER_SECRET
   if (!secret) throw new ServiceError('site_unconfigured', 'Set SITE_AUTH_SECRET for the website.')
   const tools = createActionTools(env, SITE_USER, '')
@@ -98,6 +98,7 @@ function siteFor(env: Env) {
       store: tools,
       secret,
       maxUsers: Number(env.BETA_MAX_USERS ?? 100) || 100,
+      agentNumber: env.AGENT_NUMBER,
       sendEmailCode: (email, code) =>
         sendEmail(tools, env, {
           to: email,
@@ -180,7 +181,8 @@ export function registerSiteRoutes(app: Hono<AppContext>): void {
     `${PREFIX}/auth/phone/verify`,
     handle(async (c) => {
       const body = await readJson(c)
-      return siteFor(c.env).site.verifyPhone(body.challenge, body.phone, body.code)
+      // Polled by the website until the person texts the code to @agent.
+      return siteFor(c.env).site.verifyPhone(body.challenge, body.phone)
     }),
   )
   app.post(

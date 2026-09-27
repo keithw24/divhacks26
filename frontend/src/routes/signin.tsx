@@ -27,7 +27,8 @@ const inputClass =
 
 /**
  * Two-factor sign-in (same flow for new and returning users):
- * email → emailed code → phone → code over iMessage.
+ * email → emailed code → phone → the person texts a code to @agent (reversed on purpose:
+ * a text from the person always reaches the bot; the bot's first text to a new number may not).
  * The agent's number is never shown here; verified users get it by email.
  */
 function SignIn() {
@@ -43,6 +44,7 @@ function SignIn() {
   const [busy, setBusy] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [position, setPosition] = useState<number>();
+  const [phoneCode, setPhoneCode] = useState<{ code: string; agentNumber: string | null }>();
 
   // Already signed in → skip ahead.
   useEffect(() => {
@@ -96,23 +98,47 @@ function SignIn() {
 
   const sendPhoneCode = () =>
     run(async () => {
-      await api.startPhone(challenge, digits);
+      const result = await api.startPhone(challenge, digits);
+      setPhoneCode({ code: result.code, agentNumber: result.agentNumber });
       setStep("phoneCode");
-      setCode("");
       setCooldown(RESEND_SECONDS);
     });
 
-  const verifyPhone = (value: string) =>
-    run(async () => {
+  // Wait for the person's text to reach @agent, then finish signing in on our own.
+  useEffect(() => {
+    if (step !== "phoneCode" || !phoneCode) return;
+    let stopped = false;
+    const check = async () => {
       try {
-        const { token, user } = await api.verifyPhone(challenge, digits, value);
-        session.set(token);
-        queryClient.setQueryData(["me"], user);
-        await navigate({ to: user.onboarded ? "/dashboard" : "/onboarding" });
-      } finally {
-        setCode("");
+        const result = await api.verifyPhone(challenge, digits);
+        if (stopped || !("token" in result)) return;
+        stopped = true;
+        session.set(result.token);
+        queryClient.setQueryData(["me"], result.user);
+        await navigate({ to: result.user.onboarded ? "/dashboard" : "/onboarding" });
+      } catch (err) {
+        if (stopped) return;
+        if (err instanceof ApiError && err.code === "challenge_expired") {
+          stopped = true;
+          setStep("email");
+          setError(errorMessage(err));
+        } else if (
+          err instanceof ApiError &&
+          ["expired", "full", "account_mismatch"].includes(err.code)
+        ) {
+          stopped = true;
+          if (err.code === "full") setStep("waitlist");
+          else setError(errorMessage(err));
+        }
+        // Network blips: keep waiting.
       }
-    });
+    };
+    const timer = setInterval(() => void check(), 3000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [step, phoneCode, challenge, digits, navigate, queryClient]);
 
   const joinWaitlist = () =>
     run(async () => {
@@ -144,7 +170,7 @@ function SignIn() {
           <PageTitle
             kicker="Sign in · 1 of 2"
             title="Start with your email."
-            sub="We'll email you a 6-digit code. Once you're in, we email you @agent's number too."
+            sub="We'll email you a 6-digit code. Then you'll text @agent once from your iPhone to finish."
           />
           <Card>
             <form
@@ -206,7 +232,7 @@ function SignIn() {
           <PageTitle
             kicker="Sign in · 2 of 2"
             title="Now your iPhone number."
-            sub="The number you'll text @agent from. We'll send a second code over iMessage."
+            sub="The number you'll text @agent from. Next you'll text @agent a code from it."
           />
           <Card>
             <form
@@ -242,27 +268,24 @@ function SignIn() {
                 className={`${buttonPrimary} w-full mt-5`}
                 disabled={busy || digits.length !== 10}
               >
-                {busy ? "Sending…" : "Text me a code"}
+                {busy ? "Getting a code…" : "Get my code"}
               </button>
             </form>
           </Card>
         </>
       )}
 
-      {step === "phoneCode" && (
-        <CodeStep
-          kicker="Check iMessage"
-          title="Enter the iMessage code."
-          sub={`We texted a 6-digit code to +1 ${phone}.`}
-          code={code}
-          setCode={setCode}
-          onSubmit={(v) => void verifyPhone(v)}
-          onResend={() => void sendPhoneCode()}
+      {step === "phoneCode" && phoneCode && (
+        <TextCodeStep
+          code={phoneCode.code}
+          agentNumber={phoneCode.agentNumber}
+          phone={phone}
+          onNewCode={() => void sendPhoneCode()}
           onBack={() => {
             setStep("phone");
+            setPhoneCode(undefined);
             setError(undefined);
           }}
-          backLabel="Use a different number"
           busy={busy}
           cooldown={cooldown}
           error={error}
@@ -382,6 +405,82 @@ function CodeStep(props: {
           onClick={props.onBack}
         >
           {props.backLabel}
+        </button>
+      </Card>
+    </>
+  );
+}
+
+/** "+19175550142" → "+1 (917) 555-0142". */
+function prettyUsNumber(e164: string): string {
+  const d = e164.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+  return d.length === 10 ? `+1 (${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : e164;
+}
+
+/**
+ * "Text CODE 482913 to @agent". Waiting happens in the parent, which polls
+ * the backend until the text arrives and then signs the person in.
+ */
+function TextCodeStep(props: {
+  code: string;
+  agentNumber: string | null;
+  phone: string;
+  onNewCode: () => void;
+  onBack: () => void;
+  busy: boolean;
+  cooldown: number;
+  error: string | undefined;
+}) {
+  const message = `CODE ${props.code}`;
+  // "?&body=" is understood by both iOS and Android Messages.
+  const smsHref = props.agentNumber
+    ? `sms:${props.agentNumber}?&body=${encodeURIComponent(message)}`
+    : undefined;
+  return (
+    <>
+      <PageTitle
+        kicker="Text @agent"
+        title="Text this code to @agent."
+        sub={`Send it from +1 ${props.phone} in iMessage. This page moves on by itself once it arrives.`}
+      />
+      <Card>
+        <div className="text-sm text-muted-foreground">Send this message</div>
+        <div
+          className="mt-2 font-mono text-3xl md:text-4xl font-bold tracking-[0.15em] select-all"
+          aria-label={`CODE ${props.code.split("").join(" ")}`}
+        >
+          {message}
+        </div>
+        <div className="mt-4 text-sm text-muted-foreground">To @agent at</div>
+        <div className="mt-1 text-xl font-bold">
+          {props.agentNumber ? prettyUsNumber(props.agentNumber) : "@agent's number"}
+        </div>
+        {smsHref && (
+          <a href={smsHref} className={`${buttonPrimary} inline-flex mt-6 w-full justify-center`}>
+            Open Messages and send
+          </a>
+        )}
+        <p className="mt-5 flex items-center gap-2 text-sm text-muted-foreground" role="status">
+          <span className="size-2 rounded-full bg-primary animate-blip" aria-hidden />
+          Waiting for your text… the code works for 10 minutes.
+        </p>
+        <FieldError id="code-error">{props.error}</FieldError>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            className={buttonSecondary}
+            disabled={props.busy || props.cooldown > 0}
+            onClick={props.onNewCode}
+          >
+            {props.cooldown > 0 ? `New code in ${props.cooldown}s` : "Get a new code"}
+          </button>
+        </div>
+        <button
+          type="button"
+          className="mt-4 text-sm font-medium underline underline-offset-4"
+          onClick={props.onBack}
+        >
+          Use a different number
         </button>
       </Card>
     </>
