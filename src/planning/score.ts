@@ -22,7 +22,7 @@ export function planBudgetRank(item: Recommendation): number | undefined {
 }
 
 function blob(item: Recommendation): string {
-  return `${item.name} ${item.description ?? ""} ${item.categories.join(" ")} ${item.location.label}`.toLowerCase();
+  return `${item.name} ${item.description ?? ""} ${(item.categories ?? []).join(" ")} ${item.location.label}`.toLowerCase();
 }
 
 function accessibilityState(item: Recommendation): "yes" | "no" | "unknown" {

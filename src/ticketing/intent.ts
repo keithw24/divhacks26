@@ -36,7 +36,11 @@ export interface TicketingContext {
   results: TicketEvent[];
   selected?: TicketEvent;
   hasPending: boolean;
-  awaiting?: { kind: "quantity" } | { kind: "choice"; action: "price" | "purchase" };
+  awaiting?:
+    | { kind: "quantity" }
+    | { kind: "choice"; action: "price" | "purchase" }
+    | { kind: "price"; eventId?: string }
+    | { kind: "details"; eventId?: string };
   /** Ticket conversation happened recently in this space. */
   fresh: boolean;
 }
@@ -295,6 +299,15 @@ export function classifyTicketingMessage(text: string, ctx: TicketingContext): T
   if (ctx.awaiting?.kind === "choice" && ref && cleaned.split(/\s+/).length <= 8) {
     if (ctx.awaiting.action === "purchase") return { kind: "purchase", ref, request, quantity, maxUnitPrice };
     return { kind: "price", ref, request, quantity, maxUnitPrice };
+  }
+
+  const isAffirmative =
+    CONFIRM.test(cleaned) ||
+    /^(?:yes|yep|yeah|yup|ya|sure|do it|go ahead|please|ok|okay|sounds good)(?: please)?$/i.test(cleaned);
+
+  // An affirmative reply when awaiting prices resolves to pricing for that event
+  if (isAffirmative && ctx.fresh && ctx.awaiting?.kind === "price") {
+    return { kind: "price", ref: { type: "current" }, request, quantity, maxUnitPrice };
   }
 
   const research = /\b(how much|find|look(?:ing)? for|search|check)\b/i.test(cleaned);

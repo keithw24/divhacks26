@@ -247,6 +247,10 @@ export interface TicketingState {
   selectedOffer?: TicketOffer;
   pendingPurchaseId?: string;
   /** The agent asked a follow-up question and the next short reply answers it. */
-  awaiting?: { kind: "quantity" } | { kind: "choice"; action: "price" | "purchase" };
+  awaiting?:
+    | { kind: "quantity" }
+    | { kind: "choice"; action: "price" | "purchase" }
+    | { kind: "price"; eventId?: string }
+    | { kind: "details"; eventId?: string };
   updatedAt: number;
 }
