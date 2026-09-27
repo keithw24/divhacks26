@@ -28,13 +28,13 @@ const STEPS = [
   {
     key: "food",
     title: "What works for you?",
-    sub: "Used whenever it suggests food or plans for your group. You can change this anytime.",
+    sub: "Used whenever it coordinates food or plans across people. You can change this anytime.",
   },
   { key: "voice", title: "Talk or text?", sub: "Voice memos go both ways." },
   {
     key: "wallet",
-    title: "Want a Testnet wallet?",
-    sub: "Only if you want to send or receive in iMessage. You can add one later.",
+    title: "Connect a Testnet wallet?",
+    sub: "Optional. Only needed to send or receive in iMessage — skip it and add one later.",
   },
 ] as const;
 
@@ -47,7 +47,7 @@ function Onboarding() {
   const [wantWallet, setWantWallet] = useState<boolean | null>(null);
   const [nameError, setNameError] = useState<string>();
   const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<false | "saving" | "wallet">(false);
 
   useEffect(() => {
     if (me?.preferences) setPrefs(me.preferences);
@@ -57,13 +57,9 @@ function Onboarding() {
   const current = STEPS[step] ?? STEPS[0];
   const last = step === STEPS.length - 1;
 
-  async function next() {
+  async function next(skipWallet = false) {
     if (step === 0 && !prefs.name.trim()) {
       setNameError("Add your first name to continue.");
-      return;
-    }
-    if (last && wantWallet === null) {
-      setError("Choose whether you want a Testnet wallet.");
       return;
     }
     setNameError(undefined);
@@ -71,7 +67,9 @@ function Onboarding() {
       setStep(step + 1);
       return;
     }
-    setBusy(true);
+    // The wallet is opt-in: no choice, or "Skip", means no wallet.
+    const createWallet = !skipWallet && wantWallet === true;
+    setBusy(createWallet ? "wallet" : "saving");
     setError(undefined);
     try {
       await api.savePreferences(prefs);
@@ -82,11 +80,18 @@ function Onboarding() {
         ),
         api.startChat().catch(() => undefined),
       ]);
-      if (wantWallet) {
-        await api.createWallet();
-      }
+      // A failed wallet never blocks sign-up; the dashboard offers a retry.
+      const wallet = createWallet
+        ? await api.createWallet().then(
+            () => "created" as const,
+            () => "failed" as const,
+          )
+        : undefined;
       await queryClient.invalidateQueries({ queryKey: ["me"] });
-      await navigate({ to: "/dashboard", search: { welcome: emailed ? "emailed" : "saved" } });
+      await navigate({
+        to: "/dashboard",
+        search: { welcome: emailed ? "emailed" : "saved", ...(wallet && { wallet }) },
+      });
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -143,20 +148,30 @@ function Onboarding() {
               type="button"
               className={buttonSecondary}
               onClick={() => setStep(step - 1)}
-              disabled={busy}
+              disabled={busy !== false}
             >
               Back
             </button>
           )}
-          <button type="submit" className={`${buttonPrimary} flex-1`} disabled={busy}>
+          {last && wantWallet === true && (
+            <button
+              type="button"
+              className={buttonSecondary}
+              onClick={() => void next(true)}
+              disabled={busy !== false}
+            >
+              Skip for now
+            </button>
+          )}
+          <button type="submit" className={`${buttonPrimary} flex-1`} disabled={busy !== false}>
             {busy
-              ? wantWallet
+              ? busy === "wallet"
                 ? "Creating wallet…"
                 : "Saving…"
               : last
                 ? wantWallet
                   ? "Create wallet and email me the number"
-                  : "Finish and email me the number"
+                  : "Finish without a wallet"
                 : "Continue"}
           </button>
         </div>

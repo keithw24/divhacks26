@@ -80,7 +80,11 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
       return { status: "unavailable", data: empty, sources: [], warnings: [`${skill} is temporarily unavailable.`] };
     } finally { call.retrievedAt = new Date().toISOString(); }
   }
-  const intent = await parseIntent(input.question, sharedLocation(input));
+  const recent = input.transcript.slice(-8).map(({ who, text }) => `${who}: ${text}`);
+  const intent = await parseIntent(input.question, sharedLocation(input), recent);
+  // Small talk, feelings and follow-ups have nothing to look up: let the conversational
+  // model answer with the chat history instead of demanding a location.
+  if (intent.conversational && input.fallback) return input.fallback();
   const origin = await resolveOrigin(intent, input);
   const homeTrip = asksDirectionsHome(input.question);
   const wantsSafety = wantsSafetySketch(input.question) || intent.needs.includes("safety") || homeTrip;

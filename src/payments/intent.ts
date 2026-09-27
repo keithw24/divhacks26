@@ -10,8 +10,10 @@ export type PaymentMessage =
       memo: string | null;
     }
   | { kind: "confirm" }
+  | { kind: "decline" }
   | { kind: "cancel" }
   | { kind: "dispute" }
+  | { kind: "amount_only"; amount: AmountParse }
   | { kind: "query_max" }
   | { kind: "set_max"; amount: AmountParse }
   | {
@@ -32,19 +34,40 @@ const CONFIRM = new Set([
   "pay it",
   "yes send it",
   "yes pay it",
+  "go ahead",
 ]);
 
-const CANCEL = new Set([
+const DECLINE = new Set([
   "no",
   "nope",
   "nah",
-  "cancel",
-  "never mind",
-  "nevermind",
+  "decline",
+  "don't send it",
+  "dont send it",
+  "do not send it",
+  "not that much",
+  "change the amount",
   "don't",
   "dont",
   "do not",
   "stop",
+  "cancel",
+]);
+
+const ZERO_OR_CANCEL = new Set([
+  "$0",
+  "0",
+  "zero",
+  "nothing",
+  "none",
+  "i don't want to send anything",
+  "i dont want to send anything",
+  "never mind",
+  "nevermind",
+  "cancel it",
+  "cancel the payment",
+  "dont send anything",
+  "don't send anything",
 ]);
 
 function tidy(text: string): string {
@@ -67,20 +90,32 @@ export function classifyPaymentMessage(text: string): PaymentMessage {
   const lower = cleaned.toLowerCase();
   if (CONFIRM.has(lower)) return { kind: "confirm" };
   if (isDispute(lower)) return { kind: "dispute" };
-  if (CANCEL.has(lower)) return { kind: "cancel" };
+  if (ZERO_OR_CANCEL.has(lower)) return { kind: "cancel" };
+  if (DECLINE.has(lower)) return { kind: "cancel" };
   const limit = parseLimit(cleaned);
   if (limit) return limit;
   const change = parseChange(cleaned);
   if (change) return change;
   const request = parseRequest(cleaned);
   if (request) return request;
+  if (looksLikeAmount(cleaned) || /^(\$?\d[\d.,]*(?:\s*(?:dollars?|bucks|usd))?)(?:\s+instead)?$/i.test(cleaned)) {
+    const amt = parseAmount(cleaned.replace(/\s+instead$/i, ""));
+    return { kind: "amount_only", amount: amt };
+  }
   return { kind: "none" };
 }
 
 /** New payment requests and edits take the turn before reservation/transport. Bare yes/no do not. */
 export function paymentInterrupts(text: string): boolean {
   const kind = classifyPaymentMessage(text).kind;
-  return kind === "request" || kind === "change" || kind === "set_max" || kind === "query_max" || kind === "dispute";
+  return (
+    kind === "request" ||
+    kind === "change" ||
+    kind === "set_max" ||
+    kind === "query_max" ||
+    kind === "dispute" ||
+    kind === "amount_only"
+  );
 }
 
 export function shouldAskModel(text: string): boolean {
@@ -144,6 +179,32 @@ function parseLimit(text: string): PaymentMessage | null {
 }
 
 function parseChange(text: string): PaymentMessage | null {
+  // Both recipient + amount change: must have "actually" or "instead"
+  // e.g. "actually send $15 to Alex", "send $15 to Alex instead", "actually send Alex $15", "send Alex $15 instead"
+  const hasActually = /^actually\s+/i.test(text);
+  const hasInstead = /\s+instead$/i.test(text);
+
+  if (hasActually || hasInstead) {
+    const stripped = text.replace(/^actually\s+/i, "").replace(/\s+instead$/i, "").trim();
+    const both1 = stripped.match(/^(?:please\s+)?(?:send|pay|give)\s+(?:it\s+to\s+)?([^\d$]+?)\s+(?:for\s+)?(\$?\d[\d.,]*(?:\s*(?:dollars?|bucks|usd))?)$/i);
+    if (both1?.[1] && both1?.[2] && !looksLikeAmount(both1[1])) {
+      return {
+        kind: "change",
+        recipientName: both1[1].trim(),
+        amount: parseAmount(both1[2]),
+      };
+    }
+
+    const both2 = stripped.match(/^(?:please\s+)?(?:send|pay|give)\s+(\$?\d[\d.,]*(?:\s*(?:dollars?|bucks|usd))?)\s+to\s+([^\d$]+?)$/i);
+    if (both2?.[1] && both2?.[2] && !looksLikeAmount(both2[2])) {
+      return {
+        kind: "change",
+        recipientName: both2[2].trim(),
+        amount: parseAmount(both2[1]),
+      };
+    }
+  }
+
   const amount = text.match(
     /^(?:actually\s+)?(?:please\s+)?(?:make it|change it to|change the amount to|make that|it should be|should be|that's|thats|the amount is|correct(?: amount)?(?: is)?)\s+(.+)$/i,
   );
@@ -157,7 +218,10 @@ function parseChange(text: string): PaymentMessage | null {
     return { kind: "change", amount: parseAmount(rest) };
   }
 
-  const toPerson = text.match(/^(?:actually\s+)?send it to\s+([\p{L}][\p{L}'-]*)(?:\s+instead)?$/iu);
+  const toPerson =
+    text.match(/^(?:actually\s+)?(?:send it to|send to)\s+([\p{L}][\p{L}'-]*)(?:\s+instead)?$/iu) ??
+    text.match(/^(?:actually\s+)?(?:switch to)\s+([\p{L}][\p{L}'-]*)(?:\s+instead)?$/iu) ??
+    text.match(/^send\s+([\p{L}][\p{L}'-]*)\s+instead$/iu);
   if (toPerson?.[1]) return { kind: "change", recipientName: toPerson[1] };
 
   const memo = text.match(/^(?:actually\s+)?for\s+(.+?)\s+instead$/i) ?? text.match(/^actually\s+for\s+(.+)$/i);

@@ -1,8 +1,11 @@
 import { parseAmount, looksLikeAmount, type AmountParse } from "./amount.js";
 import {
   alreadySentText,
+  askNewAmountText,
+  cancelledPaymentText,
   confirmationText,
   correctionPromptText,
+  expiredConfirmationText,
   failureText,
   formatUsd,
   missingDestinationText,
@@ -16,13 +19,19 @@ import {
   xrplSuccessText,
   xrplUnconfirmedText,
 } from "./format.js";
-import { assertAmountMatchesUtterance, assertSendableUsd, guardedPaymentProvider } from "./guardrails.js";
+import {
+  assertAmountMatchesUtterance,
+  assertSendableUsd,
+  guardedPaymentProvider,
+  validateConfirmationGuardrail,
+} from "./guardrails.js";
 import { classifyPaymentMessage, shouldAskModel, type PaymentMessage } from "./intent.js";
 import { assertConfirmedTransfer } from "./prepare.js";
 import { extractPersonMentions, isPronoun, type RecipientDirectory } from "./recipients.js";
 import { PaymentStore } from "./state.js";
 import { testnetExplorerLink } from "./xrpl/explorer.js";
 import type { CustomerSettlementPort } from "./xrpl/settlement.js";
+import type { PaymentAuditLog } from "./xrpl/audit.js";
 import type { DepositExecuteInput, DepositExecuteResult, DepositPaymentPort, DepositSyncInput } from "./deposit-port.js";
 import type {
   PaymentInterpreter,
@@ -55,6 +64,8 @@ export interface PaymentServiceOptions {
     paymentId: string;
     explorerUrl?: string;
   }) => Promise<void> | void;
+  audit?: PaymentAuditLog;
+  intentTtlMs?: number;
 }
 
 export class PaymentService implements DepositPaymentPort {
@@ -65,7 +76,12 @@ export class PaymentService implements DepositPaymentPort {
   private readonly timeoutMs: number;
   private readonly interpreter?: PaymentInterpreter;
   private readonly settlement?: CustomerSettlementPort;
+<<<<<<< HEAD
   private readonly onPersonSettled?: PaymentServiceOptions["onPersonSettled"];
+=======
+  private readonly audit?: PaymentAuditLog;
+  private readonly intentTtlMs: number;
+>>>>>>> 6585e28552a2c171f06a1e26c5958887ae048aa7
 
   constructor(options: PaymentServiceOptions) {
     this.maxUsd = options.maxUsd ?? 500;
@@ -75,7 +91,12 @@ export class PaymentService implements DepositPaymentPort {
     this.timeoutMs = options.timeoutMs ?? 20_000;
     this.interpreter = options.interpreter;
     this.settlement = options.settlement;
+<<<<<<< HEAD
     this.onPersonSettled = options.onPersonSettled;
+=======
+    this.audit = options.audit;
+    this.intentTtlMs = options.intentTtlMs ?? 10 * 60 * 1000;
+>>>>>>> 6585e28552a2c171f06a1e26c5958887ae048aa7
   }
 
   get payments(): PaymentStore {
@@ -112,7 +133,8 @@ export class PaymentService implements DepositPaymentPort {
       (classified.kind === "confirm" ||
         classified.kind === "cancel" ||
         classified.kind === "change" ||
-        classified.kind === "dispute")
+        classified.kind === "dispute" ||
+        classified.kind === "decline")
     ) {
       return { handled: false };
     }
@@ -125,15 +147,34 @@ export class PaymentService implements DepositPaymentPort {
 
     const active = this.store.active(input.spaceId);
     if (!active) return { handled: false };
+    if (active.status === "AWAITING_NEW_AMOUNT") {
+      if (classified.kind === "cancel") return this.cancel(input, active);
+      if (classified.kind === "decline") return this.finish(input, askNewAmountText());
+      if (classified.kind === "amount_only") return this.handleNewAmount(input, active, classified.amount);
+      if (classified.kind === "change") return this.change(input, active, classified);
+      if (looksLikeAmount(input.text)) {
+        const amt = parseAmount(input.text);
+        return this.handleNewAmount(input, active, amt);
+      }
+      return { handled: false };
+    }
+
     if (classified.kind === "none") {
       const correction = this.correctionFromBareAmount(input, active);
       if (correction) return correction;
       return { handled: false };
     }
     if (classified.kind === "confirm") return this.confirm(input, active);
+    if (classified.kind === "decline") return this.decline(input, active);
     if (classified.kind === "cancel") return this.cancel(input, active);
     if (classified.kind === "dispute") return this.disputeAmount(input, active);
     if (classified.kind === "change") return this.change(input, active, classified);
+    if (classified.kind === "amount_only") {
+      if (active.status === "AWAITING_CONFIRMATION" && active.purpose !== "RESERVATION_DEPOSIT") {
+        return this.change(input, active, { kind: "change", amount: classified.amount });
+      }
+      return this.handleNewAmount(input, active, classified.amount);
+    }
     return { handled: false };
   }
 
@@ -199,7 +240,11 @@ export class PaymentService implements DepositPaymentPort {
     if (existing?.status === "AWAITING_CONFIRMATION" && existing.purpose === "RESERVATION_DEPOSIT") {
       return this.finish(input, "There's a reservation deposit waiting. Say yes to pay it, or no to cancel.");
     }
-    if (existing?.status === "AWAITING_CONFIRMATION") this.store.cancel(existing);
+    if (existing?.status === "AWAITING_CONFIRMATION" || existing?.status === "AWAITING_NEW_AMOUNT") {
+      this.store.cancel(existing);
+    }
+
+    const expiresAt = new Date(Date.now() + this.intentTtlMs).toISOString();
 
     const record = this.store.create({
       photonSpaceId: input.spaceId,
@@ -209,6 +254,8 @@ export class PaymentService implements DepositPaymentPort {
       destination: resolved.recipient.rippleDestination,
       amountUsd: fields.amount.value,
       memo: fields.memo,
+      currency: "USD",
+      expiresAt,
       confirmationPhase: "confirm_amount",
       ...customerFields,
     });
@@ -219,6 +266,30 @@ export class PaymentService implements DepositPaymentPort {
       status: record.status,
       recipientName: record.recipientName,
     });
+    if (this.audit) {
+      this.audit.appendEvent({
+        paymentId: record.id,
+        spaceId: input.spaceId,
+        customerId: record.senderCustomerId ?? record.initiatorId,
+        eventType: "PAYMENT_PROPOSED",
+        metadata: {
+          recipientName: record.recipientName,
+          requestedAmountUsd: record.amountUsd,
+          currency: record.currency ?? "USD",
+        },
+      });
+      this.audit.appendEvent({
+        paymentId: record.id,
+        spaceId: input.spaceId,
+        customerId: record.senderCustomerId ?? record.initiatorId,
+        eventType: "CONFIRMATION_PROMPTED",
+        metadata: {
+          prompt: confirmationText(record),
+          recipientName: record.recipientName,
+          amountUsd: record.amountUsd,
+        },
+      });
+    }
     return this.finish(input, confirmationText(record));
   }
 
@@ -226,12 +297,23 @@ export class PaymentService implements DepositPaymentPort {
     if (!authorized(input, active)) {
       return this.finish(input, `Only ${who(active)} can confirm that.`);
     }
-    if (active.status === "SUCCEEDED") return this.finish(input, alreadySentText(active));
+    if (input.spaceId !== active.photonSpaceId) {
+      return this.finish(input, "Only in the original chat can that be confirmed.");
+    }
+    if (active.status === "SUCCEEDED" || active.status === "VALIDATED") return this.finish(input, alreadySentText(active));
     if (active.status === "FAILED") return this.finish(input, failureText(active.amountUsd));
-    if (active.status === "PROCESSING") return this.finish(input, progressText(active));
+    if (active.status === "PROCESSING" || active.status === "EXECUTING") return this.finish(input, progressText(active));
     if (active.status !== "AWAITING_CONFIRMATION") return { handled: false };
     if (active.confirmationPhase === "awaiting_correction") {
       return this.finish(input, correctionPromptText(active));
+    }
+
+    if (active.expiresAt && new Date(active.expiresAt).getTime() <= Date.now()) {
+      this.store.cancel(active);
+      return this.finish(
+        input,
+        expiredConfirmationText({ recipientName: active.recipientName, amountUsd: active.amountUsd }),
+      );
     }
 
     const capBlock = this.capReply(active.amountUsd, input);
@@ -273,7 +355,42 @@ export class PaymentService implements DepositPaymentPort {
       return { handled: true, reply: progressText(active), acknowledgement: "👍" };
     }
 
-    const claimed = this.store.claimProcessing(active.id);
+    const confirmed = this.store.confirm(active.id, input.senderId, input.spaceId);
+    if (!confirmed) {
+      const current = this.store.get(active.id) ?? active;
+      return this.finish(input, current.status === "SUCCEEDED" ? alreadySentText(current) : progressText(current));
+    }
+
+    const guardrail = validateConfirmationGuardrail(
+      {
+        amountUsd: confirmed.amountUsd,
+        recipientName: confirmed.recipientName,
+        destination: confirmed.destination,
+        currency: confirmed.currency ?? "USD",
+        senderId: input.senderId,
+        spaceId: input.spaceId,
+      },
+      confirmed,
+    );
+    if (!guardrail.ok) {
+      this.store.markResult(confirmed.id, "FAILED", { providerStatus: "guardrail" });
+      return this.finish(input, rejectedText(guardrail.reply));
+    }
+
+    if (this.audit) {
+      this.audit.appendEvent({
+        paymentId: confirmed.id,
+        spaceId: confirmed.photonSpaceId,
+        customerId: confirmed.senderCustomerId ?? confirmed.initiatorId,
+        eventType: "USER_CONFIRMED",
+        metadata: {
+          recipientName: confirmed.recipientName,
+          amountUsd: confirmed.amountUsd,
+        },
+      });
+    }
+
+    const claimed = this.store.claimProcessing(confirmed.id);
     if (!claimed) {
       const current = this.store.get(active.id) ?? active;
       const reply = current.status === "SUCCEEDED" ? alreadySentText(current) : progressText(current);
@@ -292,6 +409,8 @@ export class PaymentService implements DepositPaymentPort {
           idempotencyKey: claimed.idempotencyKey,
           recipientName: claimed.recipientName,
           maxUsd: this.maxFor(input),
+          confirmed: true,
+          confirmationId: claimed.id,
         }),
         this.timeoutMs,
       );
@@ -532,12 +651,116 @@ export class PaymentService implements DepositPaymentPort {
     return { cancelled: true };
   }
 
+  private decline(input: PaymentTurnInput, active: PaymentRecord): PaymentTurnResult {
+    if (!authorized(input, active)) return this.finish(input, `Only ${who(active)} can decline that.`);
+    if (active.status !== "AWAITING_CONFIRMATION" && active.status !== "AWAITING_NEW_AMOUNT") {
+      return this.finish(input, progressText(active));
+    }
+    this.store.setAwaitingNewAmount(active.id);
+    logPayment("payment_declined", { paymentId: active.id, spaceId: active.photonSpaceId });
+    if (this.audit) {
+      this.audit.appendEvent({
+        paymentId: active.id,
+        spaceId: active.photonSpaceId,
+        customerId: active.senderCustomerId ?? active.initiatorId,
+        eventType: "USER_DECLINED",
+        metadata: { recipientName: active.recipientName, amountUsd: active.amountUsd },
+      });
+    }
+    return this.finish(input, askNewAmountText());
+  }
+
   private cancel(input: PaymentTurnInput, active: PaymentRecord): PaymentTurnResult {
     if (!authorized(input, active)) return this.finish(input, `Only ${who(active)} can cancel that.`);
-    if (active.status !== "AWAITING_CONFIRMATION") return this.finish(input, progressText(active));
+    if (active.status !== "AWAITING_CONFIRMATION" && active.status !== "AWAITING_NEW_AMOUNT") {
+      return this.finish(input, progressText(active));
+    }
     this.store.cancel(active);
     logPayment("payment_cancelled", { paymentId: active.id, spaceId: active.photonSpaceId });
-    return this.finish(input, "Okay, I won't send it.");
+    if (this.audit) {
+      this.audit.appendEvent({
+        paymentId: active.id,
+        spaceId: active.photonSpaceId,
+        customerId: active.senderCustomerId ?? active.initiatorId,
+        eventType: "PAYMENT_CANCELLED",
+        metadata: { recipientName: active.recipientName, amountUsd: active.amountUsd },
+      });
+    }
+    return this.finish(input, cancelledPaymentText());
+  }
+
+  private handleNewAmount(
+    input: PaymentTurnInput,
+    active: PaymentRecord,
+    amountParse: AmountParse,
+  ): PaymentTurnResult {
+    if (!authorized(input, active)) return this.finish(input, `Only ${who(active)} can change that.`);
+    if (active.status !== "AWAITING_CONFIRMATION" && active.status !== "AWAITING_NEW_AMOUNT") {
+      return this.finish(input, progressText(active));
+    }
+    if (!amountParse.ok) {
+      if (amountParse.reason === "zero") {
+        this.store.cancel(active);
+        if (this.audit) {
+          this.audit.appendEvent({
+            paymentId: active.id,
+            spaceId: active.photonSpaceId,
+            customerId: active.senderCustomerId ?? active.initiatorId,
+            eventType: "PAYMENT_CANCELLED",
+            metadata: { recipientName: active.recipientName, amountUsd: 0 },
+          });
+        }
+        return this.finish(input, cancelledPaymentText());
+      }
+      if (amountParse.reason === "negative") {
+        return this.finish(input, "I can only send a positive amount.");
+      }
+      return this.finish(input, "I didn't catch the amount.");
+    }
+    const capBlock = this.capReply(amountParse.value, input);
+    if (capBlock) return this.finish(input, capBlock);
+
+    this.store.cancel(active);
+    const expiresAt = new Date(Date.now() + this.intentTtlMs).toISOString();
+    const created = this.store.create({
+      photonSpaceId: input.spaceId,
+      initiatorId: input.senderId || active.initiatorId,
+      initiatorName: input.senderName || active.initiatorName,
+      recipientName: active.recipientName,
+      destination: active.destination,
+      amountUsd: amountParse.value,
+      memo: active.memo,
+      settlement: active.settlement,
+      senderCustomerId: active.senderCustomerId,
+      recipientCustomerId: active.recipientCustomerId,
+      expiresAt,
+      currency: active.currency ?? "USD",
+    });
+    if (this.audit) {
+      this.audit.appendEvent({
+        paymentId: created.id,
+        spaceId: input.spaceId,
+        customerId: created.senderCustomerId ?? created.initiatorId,
+        eventType: "PAYMENT_REVISED",
+        metadata: {
+          previousPaymentId: active.id,
+          recipientName: created.recipientName,
+          amountUsd: created.amountUsd,
+        },
+      });
+      this.audit.appendEvent({
+        paymentId: created.id,
+        spaceId: input.spaceId,
+        customerId: created.senderCustomerId ?? created.initiatorId,
+        eventType: "CONFIRMATION_PROMPTED",
+        metadata: {
+          prompt: confirmationText(created),
+          recipientName: created.recipientName,
+          amountUsd: created.amountUsd,
+        },
+      });
+    }
+    return this.finish(input, confirmationText(created));
   }
 
   private change(
@@ -546,7 +769,13 @@ export class PaymentService implements DepositPaymentPort {
     classified: Extract<PaymentMessage, { kind: "change" }>,
   ): PaymentTurnResult {
     if (!authorized(input, active)) return this.finish(input, `Only ${who(active)} can change that.`);
-    if (active.status !== "AWAITING_CONFIRMATION") return this.finish(input, progressText(active));
+    if (
+      active.status !== "AWAITING_CONFIRMATION" &&
+      active.status !== "AWAITING_NEW_AMOUNT" &&
+      active.status !== "CONFIRMED"
+    ) {
+      return this.finish(input, progressText(active));
+    }
 
     let amountUsd = active.amountUsd;
     let recipientName = active.recipientName;
@@ -558,8 +787,6 @@ export class PaymentService implements DepositPaymentPort {
       const amountReply = this.amountReply(classified.amount, input);
       if (amountReply) return this.finish(input, amountReply);
       if (classified.amount.ok) {
-        const quoted = assertAmountMatchesUtterance(input.text, classified.amount.value);
-        if (!quoted.ok) return this.finish(input, quoted.reply);
         amountUsd = classified.amount.value;
       }
     }
@@ -576,11 +803,15 @@ export class PaymentService implements DepositPaymentPort {
     if (classified.memo) memo = classified.memo;
 
     const updated = this.store.updateIfAwaiting(active.id, (draft) => {
+      draft.status = "AWAITING_CONFIRMATION";
+      draft.confirmedAt = undefined;
+      draft.confirmedAmount = undefined;
       draft.amountUsd = amountUsd;
       draft.recipientName = recipientName;
       draft.destination = destination;
       draft.memo = memo;
       draft.confirmationPhase = "confirm_amount";
+      draft.expiresAt = new Date(Date.now() + this.intentTtlMs).toISOString();
       if (draft.settlement) draft.recipientCustomerId = recipientCustomerId;
     });
     if (!updated) return this.finish(input, progressText(active));
@@ -589,6 +820,30 @@ export class PaymentService implements DepositPaymentPort {
       spaceId: input.spaceId,
       amountUsd: updated.amountUsd,
     });
+    if (this.audit) {
+      this.audit.appendEvent({
+        paymentId: updated.id,
+        spaceId: input.spaceId,
+        customerId: updated.senderCustomerId ?? updated.initiatorId,
+        eventType: "PAYMENT_REVISED",
+        metadata: {
+          previousPaymentId: active.id,
+          recipientName: updated.recipientName,
+          amountUsd: updated.amountUsd,
+        },
+      });
+      this.audit.appendEvent({
+        paymentId: updated.id,
+        spaceId: input.spaceId,
+        customerId: updated.senderCustomerId ?? updated.initiatorId,
+        eventType: "CONFIRMATION_PROMPTED",
+        metadata: {
+          prompt: confirmationText(updated),
+          recipientName: updated.recipientName,
+          amountUsd: updated.amountUsd,
+        },
+      });
+    }
     return this.finish(input, confirmationText(updated));
   }
 

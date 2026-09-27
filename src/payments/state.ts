@@ -4,8 +4,14 @@ import type { PaymentPersistence } from "../store/state.js";
 import type { PaymentRecord, PaymentStatus } from "./types.js";
 
 const STATUSES = new Set<PaymentStatus>([
+  "PROPOSED",
   "AWAITING_CONFIRMATION",
+  "AWAITING_NEW_AMOUNT",
+  "CONFIRMED",
+  "EXECUTING",
   "PROCESSING",
+  "SUBMITTED",
+  "VALIDATED",
   "SUCCEEDED",
   "FAILED",
   "CANCELLED",
@@ -102,10 +108,44 @@ export class PaymentStore {
     this.touch();
   }
 
-  /** One winner. A second caller sees PROCESSING and must not submit. */
-  claimProcessing(id: string): PaymentRecord | undefined {
+  setAwaitingNewAmount(id: string): PaymentRecord | undefined {
+    const current = this.byId.get(id);
+    if (!current || (current.status !== "AWAITING_CONFIRMATION" && current.status !== "AWAITING_NEW_AMOUNT")) return undefined;
+    const next: PaymentRecord = {
+      ...current,
+      status: "AWAITING_NEW_AMOUNT",
+      updatedAt: new Date().toISOString(),
+    };
+    this.byId.set(id, next);
+    this.touch();
+    return structuredClone(next);
+  }
+
+  confirm(id: string, senderId?: string, spaceId?: string): PaymentRecord | undefined {
     const current = this.byId.get(id);
     if (!current || current.status !== "AWAITING_CONFIRMATION") return undefined;
+    const now = new Date().toISOString();
+    const next: PaymentRecord = {
+      ...current,
+      status: "CONFIRMED",
+      confirmedAt: now,
+      confirmedAmount: current.amountUsd,
+      confirmedRecipientName: current.recipientName,
+      confirmedDestination: current.destination,
+      confirmedCurrency: current.currency ?? "USD",
+      confirmedSenderId: senderId ?? current.initiatorId,
+      confirmedSpaceId: spaceId ?? current.photonSpaceId,
+      updatedAt: now,
+    };
+    this.byId.set(id, next);
+    this.touch();
+    return structuredClone(next);
+  }
+
+  /** One winner. A second caller sees PROCESSING/EXECUTING and must not submit. */
+  claimProcessing(id: string): PaymentRecord | undefined {
+    const current = this.byId.get(id);
+    if (!current || (current.status !== "AWAITING_CONFIRMATION" && current.status !== "CONFIRMED")) return undefined;
     const next: PaymentRecord = { ...current, status: "PROCESSING", updatedAt: new Date().toISOString() };
     this.byId.set(id, next);
     this.touch();
@@ -114,10 +154,16 @@ export class PaymentStore {
 
   updateIfAwaiting(id: string, mutate: (draft: PaymentRecord) => void): PaymentRecord | undefined {
     const current = this.byId.get(id);
-    if (!current || current.status !== "AWAITING_CONFIRMATION") return undefined;
+    if (
+      !current ||
+      (current.status !== "AWAITING_CONFIRMATION" &&
+        current.status !== "AWAITING_NEW_AMOUNT" &&
+        current.status !== "CONFIRMED")
+    ) {
+      return undefined;
+    }
     const next: PaymentRecord = { ...current, updatedAt: new Date().toISOString() };
     mutate(next);
-    next.status = "AWAITING_CONFIRMATION";
     this.byId.set(id, next);
     this.touch();
     return structuredClone(next);

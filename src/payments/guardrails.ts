@@ -68,7 +68,88 @@ export function guardedPaymentProvider(inner: PaymentProvider, maxUsd: () => num
   };
 }
 
-function centsDisplay(value: number): string {
+export function centsDisplay(value: number): string {
   const cents = Math.round(value * 100);
   return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2);
+}
+
+export interface PaymentConfirmationRecord {
+  id: string;
+  status: string;
+  confirmedAt?: string;
+  expiresAt?: string;
+  confirmedAmount?: number;
+  confirmedRecipientName?: string;
+  confirmedDestination?: string;
+  confirmedCurrency?: string;
+  confirmedSenderId?: string;
+  confirmedSpaceId?: string;
+  amountUsd: number;
+  recipientName: string;
+  destination: string;
+  currency?: string;
+  initiatorId: string;
+  photonSpaceId: string;
+}
+
+export function validateConfirmationGuardrail(
+  submission: {
+    amountUsd: number;
+    recipientName?: string;
+    destination?: string;
+    currency?: string;
+    senderId?: string;
+    spaceId?: string;
+  },
+  record: PaymentConfirmationRecord,
+  now = Date.now(),
+): { ok: true } | { ok: false; reply: string; reasonCode: string } {
+  if (record.status !== "CONFIRMED" && record.status !== "PROCESSING" && record.status !== "EXECUTING") {
+    return { ok: false, reasonCode: "NOT_CONFIRMED", reply: "Payment has not been confirmed." };
+  }
+  if (record.expiresAt && new Date(record.expiresAt).getTime() <= now) {
+    return {
+      ok: false,
+      reasonCode: "CONFIRMATION_EXPIRED",
+      reply: "That payment confirmation request expired. Tell me if you'd still like to send it.",
+    };
+  }
+  if (!record.confirmedAt) {
+    return { ok: false, reasonCode: "MISSING_CONFIRMATION", reply: "Payment was not confirmed." };
+  }
+  if (submission.amountUsd <= 0 || !Number.isFinite(submission.amountUsd)) {
+    return { ok: false, reasonCode: "INVALID_AMOUNT", reply: "I can only send a positive amount." };
+  }
+  if (record.confirmedAmount == null || Math.abs(submission.amountUsd - record.confirmedAmount) > 1e-6) {
+    return { ok: false, reasonCode: "AMOUNT_MISMATCH", reply: "Payment amount does not match the confirmed amount." };
+  }
+  if (Math.abs(submission.amountUsd - record.amountUsd) > 1e-6) {
+    return { ok: false, reasonCode: "AMOUNT_MISMATCH", reply: "Payment amount does not match the proposed amount." };
+  }
+  if (
+    submission.recipientName &&
+    record.confirmedRecipientName &&
+    submission.recipientName.trim().toLowerCase() !== record.confirmedRecipientName.trim().toLowerCase()
+  ) {
+    return { ok: false, reasonCode: "RECIPIENT_MISMATCH", reply: "Recipient does not match the confirmed recipient." };
+  }
+  if (
+    submission.destination &&
+    record.confirmedDestination &&
+    submission.destination.trim() !== record.confirmedDestination.trim()
+  ) {
+    return { ok: false, reasonCode: "DESTINATION_MISMATCH", reply: "Destination wallet does not match the confirmed wallet." };
+  }
+  const curr = (submission.currency ?? "USD").toUpperCase();
+  const confCurr = (record.confirmedCurrency ?? record.currency ?? "USD").toUpperCase();
+  if (curr !== confCurr) {
+    return { ok: false, reasonCode: "CURRENCY_MISMATCH", reply: "Currency does not match the confirmed currency." };
+  }
+  if (submission.senderId && record.confirmedSenderId && submission.senderId !== record.confirmedSenderId) {
+    return { ok: false, reasonCode: "SENDER_MISMATCH", reply: "Sender does not match the confirming user." };
+  }
+  if (submission.spaceId && record.confirmedSpaceId && submission.spaceId !== record.confirmedSpaceId) {
+    return { ok: false, reasonCode: "SPACE_MISMATCH", reply: "Conversation space does not match the confirmation." };
+  }
+  return { ok: true };
 }

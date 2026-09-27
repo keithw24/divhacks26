@@ -7,8 +7,14 @@ export interface PaymentExtraction {
 }
 
 export type PaymentStatus =
+  | "PROPOSED"
   | "AWAITING_CONFIRMATION"
+  | "AWAITING_NEW_AMOUNT"
+  | "CONFIRMED"
+  | "EXECUTING"
   | "PROCESSING"
+  | "SUBMITTED"
+  | "VALIDATED"
   | "SUCCEEDED"
   | "FAILED"
   | "CANCELLED";
@@ -24,6 +30,7 @@ export interface PaymentRecord {
   recipientName: string;
   destination: string;
   amountUsd: number;
+  currency?: string;
   memo: string | null;
   transactionId?: string;
   providerStatus?: string;
@@ -33,6 +40,15 @@ export interface PaymentRecord {
   submittedDrops?: string;
   createdAt: string;
   updatedAt: string;
+  expiresAt?: string;
+  confirmationMessage?: string;
+  confirmedAt?: string;
+  confirmedAmount?: number;
+  confirmedRecipientName?: string;
+  confirmedDestination?: string;
+  confirmedCurrency?: string;
+  confirmedSenderId?: string;
+  confirmedSpaceId?: string;
   /** Person transfers are the default. Reservation deposits are merchant payments linked to a booking. */
   purpose?: "PERSON_TRANSFER" | "RESERVATION_DEPOSIT";
   recipientKind?: "PERSON" | "MERCHANT";
@@ -57,6 +73,8 @@ export interface PaymentSendInput {
   recipientName?: string;
   /** Effective cap for this submit. Must not exceed the process default. */
   maxUsd?: number;
+  confirmed?: boolean;
+  confirmationId?: string;
 }
 
 export interface PaymentResult {

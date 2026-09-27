@@ -27,6 +27,18 @@ export function correctionPromptText(input: { recipientName: string; amountUsd: 
   );
 }
 
+export function askNewAmountText(): string {
+  return "How much would you like to send instead?";
+}
+
+export function cancelledPaymentText(): string {
+  return "Okay, I won't send it.";
+}
+
+export function expiredConfirmationText(input: { recipientName: string; amountUsd: number }): string {
+  return `That payment confirmation request expired. Tell me if you'd still like to send ${formatUsd(input.amountUsd)} to ${input.recipientName}.`;
+}
+
 export function successText(input: {
   recipientName: string;
   amountUsd: number;

@@ -11,6 +11,7 @@ import { PaymentStore } from "./state.js";
 import type { PaymentProvider } from "./types.js";
 import type { CustomerSettlementPort } from "./xrpl/settlement.js";
 import type { PaymentServiceOptions } from "./service.js";
+import type { PaymentAuditLog } from "./xrpl/audit.js";
 
 export interface PaymentRuntimeEnv {
   mode: PaymentsMode;
@@ -29,7 +30,12 @@ export interface PaymentRuntimeEnv {
   nessieBaseUrl?: string;
   nessieCustomerId?: string;
   nessieAccountId?: string;
+<<<<<<< HEAD
   onPersonSettled?: PaymentServiceOptions["onPersonSettled"];
+=======
+  audit?: PaymentAuditLog;
+  intentTtlMs?: number;
+>>>>>>> 6585e28552a2c171f06a1e26c5958887ae048aa7
 }
 
 export function createPaymentRuntime(env: PaymentRuntimeEnv) {
@@ -46,7 +52,12 @@ export function createPaymentRuntime(env: PaymentRuntimeEnv) {
     timeoutMs: env.timeoutMs,
     interpreter,
     settlement: env.mode === "ripple_test" || env.mode === "nessie_ripple" ? env.settlement : undefined,
+<<<<<<< HEAD
     onPersonSettled: env.onPersonSettled,
+=======
+    audit: env.audit,
+    intentTtlMs: env.intentTtlMs,
+>>>>>>> 6585e28552a2c171f06a1e26c5958887ae048aa7
   });
   return { service, provider };
 }

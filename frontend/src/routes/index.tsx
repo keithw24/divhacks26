@@ -1,28 +1,48 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { AgentTag, ChatWindow, Incoming, Outgoing } from "@/components/site/chat";
+import {
+  AgentTag,
+  ChatWindow,
+  Incoming,
+  Outgoing,
+  PrivateThreadCard,
+  CoordinatedActionCard,
+  MultiThreadArchitectureDiagram,
+} from "@/components/site/chat";
 import { useHasSession } from "@/components/site/shell";
 import { IntegrationStatus } from "@/components/site/integration-status";
 import { XrplTestnetSection } from "@/components/site/xrpl-testnet";
 import { api } from "@/lib/api";
+import {
+  ArrowDown,
+  ArrowRight,
+  Lock,
+  ShieldCheck,
+  Ticket,
+  Utensils,
+  CreditCard,
+  Users,
+} from "lucide-react";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "plansaroundus — the @agent that lives in your iMessage group chat" },
+      {
+        title: "plansaroundus — Message the agent privately. It coordinates everyone involved.",
+      },
       {
         name: "description",
         content:
-          "plansaroundus is an action layer for iMessage. Mention @agent and it uses group context and personal memory to plan, call restaurants, and send confirmed payments — without leaving the chat.",
+          "From dinner plans to concert tickets and payments, the agent talks to each person individually through separate 1:1 threads and coordinates the action across everyone involved.",
       },
       {
         property: "og:title",
-        content: "plansaroundus — the @agent that lives in your iMessage group chat",
+        content: "plansaroundus — Message the agent privately. It coordinates everyone involved.",
       },
       {
         property: "og:description",
         content:
-          "Your group chat can actually get things done. @agent reads the thread, remembers preferences, and can call a restaurant to arrange a reservation.",
+          "From dinner plans to concert tickets and payments, the agent talks to each person individually and coordinates the action across everyone involved.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -35,7 +55,7 @@ function SectionTitle({ kicker, title, sub }: { kicker?: string; title: string; 
   return (
     <div>
       {kicker ? (
-        <span className="inline-block border border-border bg-card/60 text-muted-foreground text-xs font-medium px-3 py-1 rounded-full mb-4">
+        <span className="inline-block bg-foreground text-background text-[11px] font-bold uppercase tracking-[0.18em] px-2.5 py-1 rounded-full mb-3">
           {kicker}
         </span>
       ) : null}
@@ -53,7 +73,7 @@ function FlowStep({
   tone: "ink" | "primary" | "sky" | "lime" | "blue" | "paper";
 }) {
   const tones = {
-    ink: "bg-ink text-ink-foreground",
+    ink: "bg-foreground text-background",
     primary: "bg-primary text-primary-foreground",
     sky: "bg-sky text-sky-foreground",
     lime: "bg-lime text-lime-foreground",
@@ -109,246 +129,609 @@ function StartLink({ className, children }: { className: string; children: React
 }
 
 function Connector() {
-  return <div className="w-px h-5 bg-gradient-to-b from-primary/70 to-border" />;
+  return <div className="w-0.5 h-5 bg-foreground" />;
 }
 
 function Index() {
   return (
     <div className="bg-background text-foreground">
-      <nav className="sticky top-0 z-50 flex items-center justify-between px-5 md:px-10 py-4 border-b border-border bg-background/70 backdrop-blur-xl">
+      <nav className="sticky top-0 z-50 flex items-center justify-between px-5 py-3 border-b border-border bg-background/85 backdrop-blur-md">
         <div className="flex items-center gap-2">
-          <div className="size-8 rounded-full bg-gradient-to-br from-primary to-lime text-primary-foreground font-bold grid place-items-center text-sm shadow-[var(--shadow-hard-primary)]">
+          <div className="size-7 rounded-lg bg-foreground text-primary font-bold grid place-items-center text-sm">
             @
           </div>
           <span className="font-bold tracking-tight text-lg">plansaroundus</span>
         </div>
-        <div className="hidden md:flex items-center gap-7 text-sm text-muted-foreground">
-          <a className="hover:text-foreground transition-colors" href="#how">
+        <div className="hidden md:flex items-center gap-6 text-sm font-medium">
+          <a className="hover:text-primary" href="#how">
             How it works
           </a>
-          <a className="hover:text-foreground transition-colors" href="#safety">
-            Safety
+          <a className="hover:text-primary" href="#tickets">
+            Tickets
           </a>
-          <a className="hover:text-foreground transition-colors" href="#xrpl">
-            XRPL Testnet
+          <a className="hover:text-primary" href="#restaurants">
+            Restaurants
           </a>
-          <a className="hover:text-foreground transition-colors" href="#integrations">
-            Integrations
+          <a className="hover:text-primary" href="#payments">
+            Payments
           </a>
-          <a className="hover:text-foreground transition-colors" href="#architecture">
+          <a className="hover:text-primary" href="#architecture">
             Architecture
           </a>
+          <a className="hover:text-primary" href="#xrpl">
+            XRPL Testnet
+          </a>
         </div>
-        <StartLink className="bg-card/60 text-foreground px-4 py-2 rounded-lg text-sm font-medium outline-card hover:border-primary/60 hover:bg-card transition-colors">
+        <StartLink className="bg-primary text-primary-foreground px-4 py-2 rounded-full text-sm font-bold outline-card shadow-[var(--shadow-hard)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
           Get @agent
         </StartLink>
       </nav>
 
       {/* HERO */}
-      <section className="relative overflow-hidden px-5 pt-24 md:pt-32 pb-16">
-        <div
-          aria-hidden
-          className="absolute inset-x-0 top-24 mx-auto h-[34rem] max-w-5xl glow-hero pointer-events-none"
-        />
-        <div className="relative max-w-5xl mx-auto text-center">
-          <span className="inline-flex items-center gap-2 border border-border bg-card/60 backdrop-blur text-muted-foreground text-xs font-medium px-3 py-1 rounded-full mb-6 animate-rise">
-            <span className="size-1.5 rounded-full bg-primary animate-blip" />
-            Lives in your iMessage group chat
+      <section className="relative overflow-hidden px-5 pt-16 pb-12">
+        <div className="absolute inset-0 grid place-items-center select-none pointer-events-none">
+          <span className="font-display text-[22vw] leading-none text-lime/20 tracking-tighter whitespace-nowrap">
+            1:1 AGENT
           </span>
-          <h1 className="font-display text-5xl md:text-7xl leading-[1.02] text-balance animate-rise [animation-delay:80ms] bg-gradient-to-b from-foreground to-foreground/70 bg-clip-text text-transparent">
-            Your group chat can actually get things done.
+        </div>
+        <div className="relative max-w-5xl mx-auto text-center">
+          <div className="inline-flex items-center gap-2 bg-blue text-blue-foreground text-xs font-bold uppercase tracking-[0.15em] px-3.5 py-1.5 rounded-full outline-card mb-5 animate-rise shadow-sm">
+            <Lock className="size-3.5" />
+            <span>Private 1:1 threads · Coordinating across everyone</span>
+          </div>
+          <h1 className="font-display text-5xl sm:text-7xl md:text-8xl leading-[0.92] tracking-tight text-balance animate-rise [animation-delay:80ms]">
+            Message the agent privately. It coordinates everyone involved.
           </h1>
-          <p className="max-w-[58ch] mx-auto mt-6 text-base md:text-lg text-pretty text-muted-foreground animate-rise [animation-delay:160ms]">
-            plansaroundus is an action layer for iMessage. It understands the conversation,
-            remembers the people in it, and turns what the group wants into real actions — calls,
-            payments, plans — right in the same thread. Not another chatbot to open.
+          <p className="max-w-[62ch] mx-auto mt-6 text-lg md:text-xl text-pretty text-muted-foreground animate-rise [animation-delay:160ms]">
+            From dinner plans to concert tickets and payments, the agent talks to each person
+            individually and coordinates the action across everyone involved. No shared noise, no
+            repeating yourself, and no exposed private messages.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3 animate-rise [animation-delay:240ms]">
-            <StartLink className="bg-primary text-primary-foreground px-6 py-3 rounded-lg font-medium shadow-[var(--shadow-hard-primary)] hover:brightness-110 transition">
-              Get your beta spot ↗
+            <StartLink className="bg-foreground text-background px-6 py-3 rounded-full font-bold outline-card shadow-[var(--shadow-hard-primary)] hover:translate-x-[2px] hover:translate-y-[2px] transition-all">
+              Get your beta spot
             </StartLink>
             <a
-              className="bg-card/60 text-foreground px-6 py-3 rounded-lg font-medium outline-card hover:bg-card transition-colors"
-              href="#demo"
+              className="bg-sky text-sky-foreground px-6 py-3 rounded-full font-bold outline-card hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+              href="#tickets"
             >
-              Walk through the demo
+              See ticket coordination
             </a>
           </div>
           <SpotsMeter className="mt-8 animate-rise [animation-delay:320ms]" />
         </div>
       </section>
 
-      {/* 1. NATIVE iMESSAGE */}
-      <section id="how" className="px-5 py-10">
-        <div className="max-w-md mx-auto">
-          <ChatWindow title="Group · Dinner tonight">
-            <Incoming tone="blue">I'm starving but have zero energy to plan</Incoming>
-            <Incoming tone="lime">same, somewhere downtown?</Incoming>
-            <Incoming tone="sky">@agent where should we get dinner tonight?</Incoming>
-            <Outgoing>
-              <AgentTag /> on it — you're both downtown and Priya's off shellfish, so I'm looking
-              there first.
-            </Outgoing>
-            <Outgoing variant="sky">Three spots open at 8. Want me to narrow it down?</Outgoing>
-          </ChatWindow>
+      {/* CORE SHOWCASE: CONCERT TICKETS (EXAMPLE 1 FROM USER SPEC) */}
+      <section id="tickets" className="px-5 py-12 max-w-6xl mx-auto">
+        <SectionTitle
+          kicker="Private coordination model"
+          title="3 private threads feeding into one coordinated action."
+          sub="Rohan privately messages the agent to organize tickets for Friday. The agent reaches out to Alex and Maya individually, gathers their confirmations, and purchases all 3 tickets."
+        />
+
+        {/* Visual Model Banner */}
+        <div className="mt-6 bg-card outline-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
+          <div className="flex items-center gap-2">
+            <span className="bg-primary text-primary-foreground font-bold px-2.5 py-1 rounded-full outline-card">
+              Model
+            </span>
+            <span className="font-bold text-foreground">
+              User → Agent ├── Rohan / Alex / Maya → Coordinated Action
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <ShieldCheck className="size-4 text-primary" />
+            <span>Separate 1:1 threads · Never a shared channel</span>
+          </div>
         </div>
-        <div className="max-w-4xl mx-auto mt-10">
-          <SectionTitle
-            kicker="Native assistant"
-            title="It answers inside the chat you already have."
-            sub="Photon carries messages between iMessage and the assistant. @agent replies in the same conversation — no separate app, no moving the group somewhere else."
+
+        {/* 3 Separate iMessage Conversations */}
+        <div className="mt-8 grid md:grid-cols-3 gap-5 items-stretch">
+          {/* Thread 1: Rohan */}
+          <PrivateThreadCard
+            participant="Rohan"
+            avatarToneColor="blue"
+            tag="Organizer"
+            subtitle="Rohan messages the agent individually"
+          >
+            <Incoming tone="blue" sender="Rohan">
+              Can you get tickets for me, Alex, and Maya for the concert Friday?
+            </Incoming>
+            <Outgoing sender="@agent">
+              <AgentTag /> On it. I'll message Alex and Maya privately to confirm availability and
+              pricing.
+            </Outgoing>
+            <div className="py-1 text-center">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground bg-background px-2.5 py-0.5 rounded-full outline-card">
+                After private check-ins
+              </span>
+            </div>
+            <Outgoing sender="@agent" variant="sky">
+              Alex and Maya are both in. Tickets are $82 each. Want me to purchase yours?
+            </Outgoing>
+            <Incoming tone="blue" sender="Rohan">
+              Yes, grab all 3!
+            </Incoming>
+          </PrivateThreadCard>
+
+          {/* Thread 2: Alex */}
+          <PrivateThreadCard
+            participant="Alex"
+            avatarToneColor="lime"
+            tag="Participant"
+            subtitle="Separate private conversation"
+          >
+            <Outgoing sender="@agent">
+              <AgentTag /> Rohan is organizing tickets for Friday. Are you in?
+            </Outgoing>
+            <Incoming tone="lime" sender="Alex">
+              Yep.
+            </Incoming>
+            <Outgoing sender="@agent" variant="sky">
+              Awesome. Tickets are $82 each. Adding your seat to the order.
+            </Outgoing>
+            <Incoming tone="lime" sender="Alex">
+              Sounds good, thanks!
+            </Incoming>
+          </PrivateThreadCard>
+
+          {/* Thread 3: Maya */}
+          <PrivateThreadCard
+            participant="Maya"
+            avatarToneColor="sky"
+            tag="Participant"
+            subtitle="Separate private conversation"
+          >
+            <Outgoing sender="@agent">
+              <AgentTag /> Rohan is organizing tickets for Friday. Are you in?
+            </Outgoing>
+            <Incoming tone="sky" sender="Maya">
+              Yes, under $100.
+            </Incoming>
+            <Outgoing sender="@agent" variant="sky">
+              Found floor seats at $82. Reserving your ticket now!
+            </Outgoing>
+            <Incoming tone="sky" sender="Maya">
+              Perfect!
+            </Incoming>
+          </PrivateThreadCard>
+        </div>
+
+        {/* Convergence Indicator */}
+        <div className="my-6 flex flex-col items-center justify-center gap-1.5">
+          <div className="flex items-center gap-2 bg-foreground text-background outline-card px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider shadow-sm">
+            <span>Conversations converge internally</span>
+            <ArrowDown className="size-3.5 text-lime" />
+          </div>
+          <div className="w-0.5 h-6 bg-foreground" />
+        </div>
+
+        {/* Converged Coordinated Action Card */}
+        <div className="max-w-2xl mx-auto">
+          <CoordinatedActionCard
+            title="Concert Tickets · Sabrina Carpenter"
+            participantsCount={3}
+            threadsCount={3}
+            confirmedCount="3/3"
+            participants={[
+              {
+                name: "Rohan",
+                status: "Confirmed",
+                detail: "Organizer · Authorized $82",
+                tone: "blue",
+              },
+              { name: "Alex", status: "Confirmed", detail: "“Yep” · Seat assigned", tone: "lime" },
+              {
+                name: "Maya",
+                status: "Confirmed",
+                detail: "“Yes, under $100” · Budget satisfied",
+                tone: "sky",
+              },
+            ]}
+            actionStatus="3 Tickets Purchased"
+            actionDetail="Confirmed booking #SC-9042 · $246 settled · Individual passes delivered privately"
+            actionTone="primary"
           />
-          <div className="mt-6 grid md:grid-cols-3 gap-3">
-            <div className="bg-card outline-card rounded-2xl p-4">
-              <div className="font-bold">Directed at the assistant</div>
-              <div className="text-sm text-muted-foreground mt-1">
-                A message with @agent is a request it should answer.
-              </div>
+        </div>
+      </section>
+
+      {/* 1. HOW IT WORKS: INDIVIDUAL 1:1 MESSAGING */}
+      <section id="how" className="px-5 py-12 max-w-4xl mx-auto">
+        <SectionTitle
+          kicker="How it works"
+          title="Private 1:1 threads. Zero shared noise."
+          sub="You never need to add the agent into a shared channel. You text the agent in private. The agent reaches out to each person in their own private thread, collects their response, and coordinates the final outcome."
+        />
+        <div className="mt-8 grid md:grid-cols-3 gap-4">
+          <div className="bg-card outline-card rounded-2xl p-5 shadow-[var(--shadow-hard)]">
+            <div className="size-8 rounded-full bg-blue text-blue-foreground outline-card grid place-items-center font-bold text-xs mb-3">
+              1
             </div>
-            <div className="bg-card outline-card rounded-2xl p-4">
-              <div className="font-bold">A direct conversation</div>
-              <div className="text-sm text-muted-foreground mt-1">
-                One-on-one chats with the assistant work the same way.
-              </div>
+            <div className="font-bold text-base">Private 1:1 messaging</div>
+            <div className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+              Every message with @agent is strictly between that person and the assistant. No shared
+              channels or broadcast pings.
             </div>
-            <div className="bg-card outline-card rounded-2xl p-4">
-              <div className="font-bold">Everything else</div>
-              <div className="text-sm text-muted-foreground mt-1">
-                Normal group messages provide context without triggering a reply.
-              </div>
+          </div>
+          <div className="bg-card outline-card rounded-2xl p-5 shadow-[var(--shadow-hard)]">
+            <div className="size-8 rounded-full bg-lime text-lime-foreground outline-card grid place-items-center font-bold text-xs mb-3">
+              2
+            </div>
+            <div className="font-bold text-base">Internal coordination</div>
+            <div className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+              The agent coordinates preferences, availability, dietary constraints, and approvals
+              behind the scenes without leaking messages.
+            </div>
+          </div>
+          <div className="bg-card outline-card rounded-2xl p-5 shadow-[var(--shadow-hard)]">
+            <div className="size-8 rounded-full bg-primary text-primary-foreground outline-card grid place-items-center font-bold text-xs mb-3">
+              3
+            </div>
+            <div className="font-bold text-base">Coordinated shared action</div>
+            <div className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+              Once everyone's constraints are met and approvals are in, the agent executes the final
+              action and notifies each person separately.
             </div>
           </div>
         </div>
       </section>
 
-      {/* 2. GROUP CONTEXT */}
-      <section className="px-5 py-12 max-w-4xl mx-auto">
+      {/* 2. RESTAURANT PLANNING (EXAMPLE 2 FROM USER SPEC) */}
+      <section id="restaurants" className="px-5 py-12 max-w-5xl mx-auto">
         <SectionTitle
-          kicker="Group context"
-          title="Nobody has to repeat the plan."
-          sub="Where you are, where you're headed, who's coming, timing, how people want to travel — it's already in the thread, so @agent reads it from there."
+          kicker="Restaurant coordination"
+          title="One request. Individual diner check-ins. Done."
+          sub="One person asks the agent to organize dinner. The agent messages each diner individually to collect availability and dietary needs, then places the reservation call."
         />
-        <div className="mt-6 grid md:grid-cols-2 gap-6 items-center">
-          <ChatWindow title="Group · Saturday">
-            <Incoming tone="blue">Let's meet at Columbia.</Incoming>
-            <Incoming tone="lime">Then head to Times Square?</Incoming>
-            <Incoming tone="sky">@agent how should we get there?</Incoming>
-            <Outgoing>
-              <AgentTag /> Starting from Columbia and heading to Times Square — want the subway or a
-              ride? I'll pull options for how you all prefer to travel.
-            </Outgoing>
-          </ChatWindow>
-          <div className="space-y-3">
-            <div className="bg-card outline-card rounded-2xl p-4">
-              <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                Resolved from the chat
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2 text-sm font-bold">
-                <span className="bg-sky text-sky-foreground outline-card rounded-full px-3 py-1">
-                  “there” = Times Square
-                </span>
-                <span className="bg-lime text-lime-foreground outline-card rounded-full px-3 py-1">
-                  start = Columbia
-                </span>
-                <span className="bg-blue text-blue-foreground outline-card rounded-full px-3 py-1">
-                  3 people
-                </span>
-              </div>
-            </div>
-            <p className="text-muted-foreground text-pretty">
-              Context comes from recent messages in that conversation, so a short question gets a
-              full answer.
-            </p>
-          </div>
-        </div>
-      </section>
 
-      {/* 3. PERSONAL MEMORY */}
-      <section className="px-5 py-12 max-w-4xl mx-auto">
-        <SectionTitle
-          kicker="Personal memory"
-          title="It stops asking you the same things."
-          sub="Backboard keeps a memory store per person. It doesn't do the thinking — it hands the useful bits to Gemini, which writes the answer."
-        />
-        <div className="mt-6 flex flex-wrap gap-2">
-          {[
-            ["no shellfish", "bg-lime text-lime-foreground"],
-            ["usually starts at Columbia", "bg-sky text-sky-foreground"],
-            ["prefers the subway", "bg-primary text-primary-foreground"],
-            ["group likes Italian", "bg-blue text-blue-foreground"],
-            ["we picked Carbone last time", "bg-ink text-ink-foreground"],
-          ].map(([label, tone]) => (
-            <span
-              key={label}
-              className={`${tone} outline-card px-4 py-2 rounded-full text-sm font-bold`}
+        <div className="mt-8 grid md:grid-cols-2 gap-6 items-start">
+          <div className="space-y-4">
+            <PrivateThreadCard
+              participant="Rohan (Organizer)"
+              avatarToneColor="blue"
+              tag="Host"
+              subtitle="Private thread ↔ @agent"
             >
-              {label}
+              <Incoming tone="blue" sender="Rohan">
+                Can you organize dinner for me, Elena, and David at Carbone around 8?
+              </Incoming>
+              <Outgoing sender="@agent">
+                <AgentTag /> Got it. I'll reach out to Elena and David individually to check their
+                timing and dietary preferences.
+              </Outgoing>
+              <Outgoing sender="@agent" variant="sky">
+                Both confirmed for 8:00 PM! Elena wants Italian, David is vegetarian (Carbone has
+                plenty of options). Ready for me to call Carbone?
+              </Outgoing>
+              <Incoming tone="blue" sender="Rohan">
+                Yes, call them!
+              </Incoming>
+            </PrivateThreadCard>
+
+            <PrivateThreadCard
+              participant="David (Diner)"
+              avatarToneColor="sky"
+              tag="Guest"
+              subtitle="Private thread ↔ @agent"
+            >
+              <Outgoing sender="@agent">
+                <AgentTag /> Rohan is organizing dinner tonight at Carbone around 8. Are you free,
+                and any dietary restrictions?
+              </Outgoing>
+              <Incoming tone="sky" sender="David">
+                I'm in! Strictly vegetarian for me.
+              </Incoming>
+              <Outgoing sender="@agent" variant="sky">
+                Noted in your private profile. I'll make sure the table accommodates vegetarian
+                options.
+              </Outgoing>
+            </PrivateThreadCard>
+          </div>
+
+          <div className="space-y-4">
+            <PrivateThreadCard
+              participant="Elena (Diner)"
+              avatarToneColor="lime"
+              tag="Guest"
+              subtitle="Private thread ↔ @agent"
+            >
+              <Outgoing sender="@agent">
+                <AgentTag /> Rohan is organizing dinner tonight at Carbone around 8. Are you free?
+              </Outgoing>
+              <Incoming tone="lime" sender="Elena">
+                Yes! 8 works great for me.
+              </Incoming>
+              <Outgoing sender="@agent" variant="sky">
+                Great! Adding you to the reservation count.
+              </Outgoing>
+            </PrivateThreadCard>
+
+            <div className="bg-foreground text-background outline-card rounded-3xl p-5 shadow-[var(--shadow-hard-primary)]">
+              <div className="flex items-center justify-between pb-3 border-b border-background/20">
+                <span className="text-xs font-mono uppercase tracking-wider text-background/70">
+                  Coordinated Result
+                </span>
+                <span className="bg-lime text-lime-foreground text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">
+                  3/3 confirmed
+                </span>
+              </div>
+              <div className="mt-3 space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span>Rohan (Host)</span>
+                  <span className="text-lime font-bold">✓ Confirmed</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Elena (Guest)</span>
+                  <span className="text-lime font-bold">✓ Confirmed (8pm)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>David (Guest)</span>
+                  <span className="text-lime font-bold">✓ Confirmed (Vegetarian)</span>
+                </div>
+              </div>
+              <div className="mt-4 pt-3 border-t border-background/20">
+                <div className="text-xs text-background/70 font-mono">Next Coordinated Action:</div>
+                <div className="font-display text-xl text-lime mt-1">
+                  ElevenLabs AI Phone Call Placed
+                </div>
+                <div className="text-xs text-background/80 mt-1">
+                  Table for 3 at 8:00 PM confirmed with Carbone host.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 3. AI PHONE CALLS (ElevenLabs) */}
+      <section id="call" className="px-5 py-12 max-w-4xl mx-auto">
+        <SectionTitle
+          kicker="AI phone calls"
+          title="It calls the restaurant directly."
+          sub="Once all participants have confirmed privately, the assistant holds a natural voice phone conversation with restaurant staff to secure the booking."
+        />
+        <div className="mt-6 grid md:grid-cols-2 gap-4">
+          <div className="bg-foreground text-background rounded-3xl p-6 outline-card">
+            <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+              <span className="size-3 rounded-full bg-primary animate-blip" />
+              Calling Carbone…
+            </div>
+            <div className="font-display text-5xl mt-4 tracking-tight">00:42</div>
+            <div className="text-background/60 text-sm mt-2">
+              “Hi — I'd like a table for three at 8pm tonight, under Rohan.”
+            </div>
+          </div>
+          <div className="bg-card text-foreground rounded-3xl p-6 outline-card">
+            <span className="bg-lime text-lime-foreground text-xs font-bold uppercase tracking-wider px-2 py-1 rounded-full">
+              Reservation confirmed
+            </span>
+            <div className="font-bold text-xl mt-3">Carbone · Saturday 8:00 PM</div>
+            <div className="text-muted-foreground text-sm mt-1">
+              3 people · confirmed by the restaurant on the phone call
+            </div>
+            <div className="text-xs text-muted-foreground mt-3 font-mono">
+              Individual confirmation cards sent privately to Rohan, Elena, and David.
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2 text-xs">
+          {[
+            "Private 1:1 request",
+            "Individual confirmations gathered",
+            "ElevenLabs call placed",
+            "Restaurant confirms table",
+            "Separate 1:1 confirmations sent",
+          ].map((s, i, a) => (
+            <span key={s} className="flex items-center gap-2">
+              <span className="bg-card outline-card rounded-full px-3 py-1 font-bold">{s}</span>
+              {i < a.length - 1 ? <span className="font-bold">→</span> : null}
             </span>
           ))}
+        </div>
+      </section>
+
+      {/* 4. PAYMENTS / MERCHANTS (EXAMPLE 3 FROM USER SPEC) */}
+      <section id="payments" className="px-5 py-12 max-w-5xl mx-auto">
+        <SectionTitle
+          kicker="Conversational payments"
+          title="Customer ↔ Agent and Merchant ↔ Agent. Separate threads."
+          sub="For a transaction involving a customer and merchant, the agent communicates separately with each. Each person gets their own private thread and only sees information relevant to them."
+        />
+
+        <div className="mt-8 grid md:grid-cols-2 gap-6 items-start">
+          {/* Thread 1: Customer */}
+          <PrivateThreadCard
+            participant="Customer (Rohan)"
+            avatarToneColor="blue"
+            tag="Customer ↔ Agent"
+            subtitle="Private payment authorization"
+          >
+            <Incoming tone="blue" sender="Rohan">
+              Ready to pay the $82 deposit for the Carbone table.
+            </Incoming>
+            <Outgoing sender="@agent">
+              <AgentTag /> Carbone has requested an $82 reservation deposit. Do you want to send $82
+              from your XRPL Testnet wallet?
+            </Outgoing>
+            <Incoming tone="blue" sender="Rohan">
+              yes
+            </Incoming>
+            <Outgoing sender="@agent" variant="sky">
+              Sent $82 to Carbone. XRPL Testnet Tx: 4F2A...89B1 validated on ledger.
+            </Outgoing>
+          </PrivateThreadCard>
+
+          {/* Thread 2: Merchant */}
+          <PrivateThreadCard
+            participant="Merchant (Carbone)"
+            avatarToneColor="lime"
+            tag="Merchant ↔ Agent"
+            subtitle="Private merchant receipt"
+          >
+            <Outgoing sender="@agent">
+              <AgentTag /> Incoming reservation deposit: $82 from customer Rohan for 8:00 PM party
+              of 3.
+            </Outgoing>
+            <Outgoing sender="@agent" variant="sky">
+              Payment validated on XRPL Testnet ledger (ledger index 914208). Funds settled.
+            </Outgoing>
+            <Incoming tone="lime" sender="Carbone">
+              Deposit of $82 received. Table is confirmed and locked in.
+            </Incoming>
+          </PrivateThreadCard>
+        </div>
+
+        {/* Coordinated Settlement Card */}
+        <div className="mt-6 max-w-xl mx-auto">
+          <CoordinatedActionCard
+            title="Payment · $82 (Reservation Deposit)"
+            participantsCount={2}
+            threadsCount={2}
+            confirmedCount="Settled"
+            participants={[
+              {
+                name: "Customer (Rohan)",
+                status: "Authorized",
+                detail: "Explicit yes confirmation",
+                tone: "blue",
+              },
+              {
+                name: "Merchant (Carbone)",
+                status: "Ready",
+                detail: "Table reservation linked",
+                tone: "lime",
+              },
+              {
+                name: "XRPL Testnet",
+                status: "Settled",
+                detail: "Ledger validated · Wallet-to-wallet",
+                tone: "sky",
+              },
+            ]}
+            actionStatus="Payment Completed · $82"
+            actionDetail="Settled on XRPL Testnet ledger · Both parties updated in private threads"
+            actionTone="blue"
+          />
+        </div>
+      </section>
+
+      {/* 5. PRIVACY & ISOLATED MEMORY */}
+      <section className="px-5 py-12 max-w-4xl mx-auto">
+        <SectionTitle
+          kicker="Isolated memory"
+          title="Preferences stay private to the person they belong to."
+          sub="Backboard keeps an isolated memory store per person. When coordinating multiple people, @agent checks each participant's saved preferences without revealing one person's private notes to another."
+        />
+        <div className="mt-6 grid sm:grid-cols-3 gap-3">
+          <div className="bg-card outline-card rounded-2xl p-4">
+            <div className="flex items-center gap-2">
+              <span className="size-6 rounded-full bg-blue text-blue-foreground outline-card grid place-items-center text-xs font-bold">
+                R
+              </span>
+              <span className="font-bold text-sm">Rohan's private memory</span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5 text-xs font-bold">
+              <span className="bg-sky text-sky-foreground px-2.5 py-1 rounded-full outline-card">
+                starts at Columbia
+              </span>
+              <span className="bg-primary text-primary-foreground px-2.5 py-1 rounded-full outline-card">
+                prefers subway
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-card outline-card rounded-2xl p-4">
+            <div className="flex items-center gap-2">
+              <span className="size-6 rounded-full bg-lime text-lime-foreground outline-card grid place-items-center text-xs font-bold">
+                E
+              </span>
+              <span className="font-bold text-sm">Elena's private memory</span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5 text-xs font-bold">
+              <span className="bg-lime text-lime-foreground px-2.5 py-1 rounded-full outline-card">
+                no shellfish
+              </span>
+              <span className="bg-secondary text-secondary-foreground px-2.5 py-1 rounded-full outline-card">
+                likes Italian
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-card outline-card rounded-2xl p-4">
+            <div className="flex items-center gap-2">
+              <span className="size-6 rounded-full bg-sky text-sky-foreground outline-card grid place-items-center text-xs font-bold">
+                D
+              </span>
+              <span className="font-bold text-sm">David's private memory</span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5 text-xs font-bold">
+              <span className="bg-lime text-lime-foreground px-2.5 py-1 rounded-full outline-card">
+                strict vegetarian
+              </span>
+              <span className="bg-blue text-blue-foreground px-2.5 py-1 rounded-full outline-card">
+                budget: under $100
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="mt-8 bg-card outline-card rounded-3xl p-6">
           <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground mb-4">
-            Where memory sits in the loop
+            Where memory sits in the private coordination loop
           </div>
           <div className="flex flex-col items-center gap-2">
-            <FlowStep label="iMessage" tone="ink" />
+            <FlowStep label="Private 1:1 iMessage request" tone="ink" />
             <Connector />
-            <FlowStep label="Photon" tone="blue" />
+            <FlowStep label="Photon message router" tone="blue" />
             <Connector />
-            <FlowStep label="Conversation context" tone="paper" />
+            <FlowStep label="Isolated Backboard memory per person" tone="sky" />
             <Connector />
-            <FlowStep label="Backboard memory" tone="sky" />
+            <FlowStep label="Gemini synthesizes constraints internally" tone="lime" />
             <Connector />
-            <FlowStep label="Gemini" tone="lime" />
-            <Connector />
-            <FlowStep label="Response sent through Photon" tone="primary" />
-            <Connector />
-            <FlowStep label="iMessage" tone="ink" />
+            <FlowStep label="Individual 1:1 follow-ups sent to each participant" tone="primary" />
           </div>
         </div>
-        <p className="text-sm text-muted-foreground mt-4 max-w-[60ch]">
-          Memories stay tied to the person they belong to. For a group question, @agent can pull
-          what's relevant about several participants at once.
-        </p>
       </section>
 
-      {/* 4. TRANSPORTATION */}
+      {/* 6. ARCHITECTURE */}
+      <section id="architecture" className="px-5 py-12 max-w-5xl mx-auto">
+        <SectionTitle
+          kicker="Architecture"
+          title="Independent private conversations. One coordination engine."
+          sub="Instead of a shared channel where everyone's messages collide, each participant communicates over an independent private line. The agent orchestrates actions internally."
+        />
+        <div className="mt-8">
+          <MultiThreadArchitectureDiagram />
+        </div>
+      </section>
+
+      {/* 7. TRANSPORTATION */}
       <section className="px-5 py-12 max-w-4xl mx-auto">
         <SectionTitle
           kicker="Getting places"
-          title="Transportation, handled."
-          sub="Gemini does the reasoning; Google Maps grounding supplies real places and location context. When exact route or timing data isn't available, @agent says so instead of guessing."
+          title="Transportation across separate locations, handled."
+          sub="When coordinating meetups, the agent privately checks where each person is starting from and calculates optimal routes using Google Maps grounding."
         />
         <div className="mt-6 bg-card outline-card rounded-3xl p-5 shadow-[var(--shadow-hard-lime)] flex flex-wrap items-center gap-5">
-          <div className="size-14 rounded-2xl bg-ink text-lime font-display text-2xl grid place-items-center shrink-0">
+          <div className="size-14 rounded-2xl bg-foreground text-lime font-display text-2xl grid place-items-center shrink-0">
             ↗
           </div>
           <div className="flex-1 min-w-[12rem]">
-            <div className="font-bold text-lg">Columbia → Times Square</div>
+            <div className="font-bold text-lg">Columbia & Midtown → Times Square</div>
             <div className="text-muted-foreground text-sm">
-              Both places resolved via Maps grounding · example card, not live route data
+              Multiple starting locations resolved via Maps grounding · directions sent privately to
+              each person
             </div>
           </div>
           <div className="bg-primary text-primary-foreground px-4 py-2 rounded-full font-bold text-sm outline-card">
-            Send to chat
+            Directions sent
           </div>
-        </div>
-        <div className="mt-4 grid sm:grid-cols-2 gap-3 text-sm">
-          {[
-            "“How do we get there?”",
-            "“Should we walk or take the subway?”",
-            "“What's near us?”",
-            "“What station should we use?”",
-          ].map((q) => (
-            <div key={q} className="bg-card outline-card rounded-2xl px-4 py-3 font-medium">
-              {q}
-            </div>
-          ))}
         </div>
       </section>
 
-      {/* SAFETY (Tiger Data) */}
+      {/* 8. SAFETY (Tiger Data) */}
       <section id="safety" className="px-5 py-12 max-w-4xl mx-auto">
         <SectionTitle
           kicker="Stay aware"
@@ -356,15 +739,17 @@ function Index() {
           sub="@agent checks public NYPD complaint data stored in Tiger Data around the block you're on, at the hour you're asking about, and tells you how it compares to that area's usual pattern."
         />
         <div className="mt-6 grid md:grid-cols-2 gap-6 items-center">
-          <ChatWindow title="Group · Walking home">
-            <Incoming tone="blue">
+          <ChatWindow title="Private 1:1 · Walking home">
+            <Incoming tone="blue" sender="You">
               <AgentTag /> is it okay to walk through Washington Square at midnight?
             </Incoming>
-            <Outgoing>
+            <Outgoing sender="@agent">
               Historically quieter than its peak: fewer reports around midnight than around 4pm near
               the park. Stick to the lit paths on the west side.
             </Outgoing>
-            <Outgoing variant="sky">Historical NYPD reports, not a live safety score.</Outgoing>
+            <Outgoing sender="@agent" variant="sky">
+              Historical NYPD reports, not a live safety score.
+            </Outgoing>
           </ChatWindow>
           <div className="space-y-3">
             {[
@@ -390,15 +775,15 @@ function Index() {
         </div>
       </section>
 
-      {/* VOICE MEMOS (ElevenLabs) */}
+      {/* 9. VOICE MEMOS (ElevenLabs) */}
       <section id="voice" className="px-5 py-12 max-w-4xl mx-auto">
         <SectionTitle
           kicker="Talk or text"
-          title="Send a voice memo. Get one back."
+          title="Send a private voice memo. Get one back."
           sub="Hold the mic button in iMessage and just ask. ElevenLabs transcribes it, @agent answers in text (with links), then replies out loud as a voice memo."
         />
         <div className="mt-6 max-w-md">
-          <ChatWindow title="Direct · @agent">
+          <ChatWindow title="Private 1:1 · @agent">
             <div className="flex justify-end">
               <div
                 className="bg-primary text-primary-foreground px-4 py-3 rounded-[18px] rounded-tr-md flex items-center gap-3"
@@ -419,7 +804,7 @@ function Index() {
                 <span className="text-xs font-bold">0:06</span>
               </div>
             </div>
-            <Incoming tone="lime">
+            <Incoming tone="lime" sender="@agent">
               1. Caffe Reggio, 5 min walk: espresso and cannoli. 2. The Stand, 10 min: comedy
               tonight.
             </Incoming>
@@ -429,7 +814,7 @@ function Index() {
                 className="bg-bubble px-4 py-3 rounded-[18px] rounded-tl-md flex items-center gap-3"
                 aria-label="Voice reply, 0:14"
               >
-                <span className="size-6 rounded-full bg-ink text-ink-foreground grid place-items-center text-xs">
+                <span className="size-6 rounded-full bg-foreground text-background grid place-items-center text-xs">
                   ▶
                 </span>
                 <span className="flex items-end gap-[3px] h-5" aria-hidden="true">
@@ -448,123 +833,7 @@ function Index() {
         </div>
       </section>
 
-      {/* 5. RESTAURANT PLANNING */}
-      <section className="px-5 py-12 max-w-4xl mx-auto">
-        <SectionTitle
-          kicker="Restaurant planning"
-          title="From “we should get dinner” to an actual plan."
-          sub="No forms. @agent asks in conversation for whatever's missing — a name, a number, seating — before it acts."
-        />
-        <div className="mt-6 max-w-md">
-          <ChatWindow title="Group · Booking">
-            <Incoming tone="lime">@agent book Carbone for the 7 of us around 8</Incoming>
-            <Outgoing>
-              <AgentTag /> Got the place, party size and time. I still need a name and phone number
-              for the reservation.
-            </Outgoing>
-            <Incoming tone="blue">Rohan, 555-0142</Incoming>
-          </ChatWindow>
-        </div>
-      </section>
-
-      {/* 6. AI PHONE CALLS */}
-      <section id="call" className="px-5 py-12 max-w-4xl mx-auto">
-        <SectionTitle
-          kicker="AI phone calls"
-          title="It calls the restaurant."
-          sub="We're integrating ElevenLabs so the assistant can hold a natural phone conversation. Gemini decides what to say; ElevenLabs is the voice on the line."
-        />
-        <div className="mt-6 grid md:grid-cols-2 gap-4">
-          <div className="bg-ink text-ink-foreground rounded-3xl p-6 outline-card">
-            <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
-              <span className="size-3 rounded-full bg-primary animate-blip" />
-              Calling Carbone…
-            </div>
-            <div className="font-display text-5xl mt-4 tracking-tight">00:42</div>
-            <div className="text-background/60 text-sm mt-2">
-              “Hi — I'd like a table for seven at 8pm on Saturday, under Rohan.”
-            </div>
-          </div>
-          <div className="bg-card text-foreground rounded-3xl p-6 outline-card">
-            <span className="bg-lime text-lime-foreground text-xs font-bold uppercase tracking-wider px-2 py-1 rounded-full">
-              Reservation confirmed
-            </span>
-            <div className="font-bold text-xl mt-3">Carbone · Saturday 8:00 PM</div>
-            <div className="text-muted-foreground text-sm mt-1">
-              7 people · confirmed by the restaurant on the call
-            </div>
-            <div className="text-xs text-muted-foreground mt-3 font-mono">
-              example result card · nothing is reported as booked until the restaurant says so
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-2 text-xs">
-          {[
-            "Group chat",
-            "Missing details confirmed",
-            "ElevenLabs call",
-            "Restaurant's answer",
-            "Back into iMessage",
-          ].map((s, i, a) => (
-            <span key={s} className="flex items-center gap-2">
-              <span className="bg-card outline-card rounded-full px-3 py-1 font-bold">{s}</span>
-              {i < a.length - 1 ? <span className="font-bold">→</span> : null}
-            </span>
-          ))}
-        </div>
-      </section>
-
-      {/* PAYMENTS */}
-      <section id="payments" className="px-5 py-12 max-w-4xl mx-auto">
-        <SectionTitle
-          kicker="Conversational payments"
-          title="Settle up without leaving the chat."
-          sub="Every customer has their own XRPL Testnet wallet. Payments settle wallet to wallet on XRPL Testnet, and nothing is sent until the person asking says yes."
-        />
-        <div className="mt-6 grid md:grid-cols-2 gap-6 items-start">
-          <ChatWindow title="Group · Uber">
-            <Incoming tone="blue">I got the Uber, it was $40</Incoming>
-            <Incoming tone="lime">
-              <AgentTag /> send Keith $20 for it
-            </Incoming>
-            <Outgoing>
-              <AgentTag /> I'm about to send Keith $20. Confirm $20?
-            </Outgoing>
-            <Incoming tone="lime">yes</Incoming>
-            <Outgoing variant="sky">
-              Sent $20 to Keith. https://testnet.xrpl.org/transactions/…
-            </Outgoing>
-          </ChatWindow>
-          <div className="bg-card outline-card rounded-3xl p-5 shadow-[var(--shadow-hard-lime)]">
-            <ol className="space-y-2 text-sm">
-              {[
-                ["iMessage request", "bg-ink text-ink-foreground"],
-                ["Gemini reads recipient + amount + reason", "bg-lime text-lime-foreground"],
-                ["Explicit confirmation from the sender", "bg-primary text-primary-foreground"],
-                ["Deterministic policy check (no LLM)", "bg-card text-foreground"],
-                ["Signed from the sender's own Testnet wallet", "bg-blue text-blue-foreground"],
-                ["Validated ledger result + hash", "bg-sky text-sky-foreground"],
-                ["Reply in the same iMessage chat", "bg-ink text-ink-foreground"],
-              ].map(([label, tone], i) => (
-                <li key={label} className="flex items-center gap-3">
-                  <span
-                    className={`size-7 shrink-0 rounded-full outline-card grid place-items-center font-bold text-xs ${tone}`}
-                  >
-                    {i + 1}
-                  </span>
-                  <span className="font-medium">{label}</span>
-                </li>
-              ))}
-            </ol>
-            <div className="text-xs text-muted-foreground mt-4 font-mono">
-              demo example · settles in test XRP on XRPL Testnet, not a real-money transfer
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* XRPL TESTNET */}
+      {/* 10. XRPL TESTNET */}
       <section id="xrpl" className="px-5 py-12 max-w-4xl mx-auto">
         <SectionTitle
           kicker="Live settlement"
@@ -574,90 +843,7 @@ function Index() {
         <XrplTestnetSection />
       </section>
 
-      {/* CROSS-FEATURE */}
-      <section className="px-5 py-14 max-w-4xl mx-auto">
-        <SectionTitle
-          kicker="All together"
-          title="Discussion → decision → action. One thread."
-          sub="These aren't separate mini-apps. The same conversation can move from picking a place, to booking it, to paying, to getting there."
-        />
-        <div className="mt-8 bg-ink text-ink-foreground outline-card rounded-[28px] p-5 md:p-7 shadow-[var(--shadow-hard-primary)]">
-          <div className="font-mono text-xs uppercase tracking-wider text-background/60 mb-4">
-            Group · Friday night — demo example
-          </div>
-          <ol className="space-y-3">
-            {[
-              [
-                "“@agent where should we get dinner?”",
-                "Conversation context + Backboard preferences",
-                "bg-sky text-sky-foreground",
-              ],
-              [
-                "“Carbone sounds good. Can you book it?”",
-                "ElevenLabs calls the restaurant",
-                "bg-primary text-primary-foreground",
-              ],
-              [
-                "“They need a deposit.”",
-                "Assistant explains the required payment",
-                "bg-card text-foreground",
-              ],
-              [
-                "“Pay it.”",
-                "Asks for explicit confirmation → Ripple transaction",
-                "bg-blue text-blue-foreground",
-              ],
-              [
-                "“How do we get there?”",
-                "Gemini + Maps location context",
-                "bg-lime text-lime-foreground",
-              ],
-            ].map(([msg, what, tone]) => (
-              <li
-                key={msg}
-                className="grid md:grid-cols-[1fr_auto_1fr] gap-2 md:gap-4 items-center"
-              >
-                <div className="bg-background text-foreground rounded-[18px] rounded-tl-md px-4 py-2 text-sm font-medium">
-                  {msg}
-                </div>
-                <span className="hidden md:block font-bold text-lg">→</span>
-                <div className={`${tone} outline-card rounded-full px-4 py-2 text-sm font-bold`}>
-                  {what}
-                </div>
-              </li>
-            ))}
-          </ol>
-          <div className="mt-5 text-sm text-background/70">
-            All of this happens inside the same iMessage thread — nobody switches apps.
-          </div>
-        </div>
-      </section>
-
-      {/* 7. CONVERSATIONAL ACTIONS */}
-      <section className="px-5 py-12 max-w-4xl mx-auto">
-        <SectionTitle
-          kicker="Actions, not answers"
-          title="Conversation → context → reasoning → action."
-          sub="You shouldn't have to bounce between Maps, a restaurant site, a phone call, and the group chat to sort out one evening."
-        />
-        <div className="mt-6 grid sm:grid-cols-2 gap-3">
-          {[
-            ["“How do we get there?”", "Location context from Maps"],
-            ["“Where should we eat?”", "Group context + memory"],
-            ["“Can you reserve it?”", "AI phone call"],
-            ["“Send Keith $20 for it”", "Confirmed Ripple transaction"],
-            ["“What did we decide?”", "Conversation + memory retrieval"],
-            ["“Split it and book it”", "Several actions, one thread"],
-          ].map(([ask, result]) => (
-            <div key={ask} className="bg-card outline-card rounded-2xl p-4">
-              <div className="font-bold">{ask}</div>
-              <div className="text-sm text-muted-foreground mt-1">→ {result}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* 8. INTEGRATIONS */}
+      {/* 11. INTEGRATIONS */}
       <section id="integrations" className="px-5 py-12 max-w-4xl mx-auto">
         <SectionTitle kicker="Built with" title="One brain, many hands." />
         <IntegrationStatus />
@@ -668,30 +854,30 @@ function Index() {
               iMessage infrastructure
             </div>
             <ul className="mt-3 text-sm space-y-1 opacity-90">
-              <li>Receives iMessage conversations</li>
-              <li>Identifies spaces and group chats</li>
-              <li>Sends replies back to the right chat</li>
+              <li>Handles distinct private iMessage conversations</li>
+              <li>Routes individual messages to and from @agent</li>
+              <li>Sends replies directly to the right person's thread</li>
             </ul>
           </div>
           <div className="bg-lime text-lime-foreground outline-card rounded-2xl p-5">
             <div className="font-display text-2xl tracking-tight">Gemini</div>
             <div className="text-sm opacity-80 mt-1 font-bold uppercase tracking-wider">
-              Intelligence and reasoning
+              Intelligence and coordination
             </div>
             <ul className="mt-3 text-sm space-y-1 opacity-80">
               <li>Interprets natural-language requests</li>
-              <li>Reasons over recent conversation context</li>
-              <li>Handles intent and follow-up questions</li>
+              <li>Coordinates multiple participant constraints internally</li>
+              <li>Maintains conversational context without message cross-talk</li>
             </ul>
           </div>
           <div className="bg-sky text-sky-foreground outline-card rounded-2xl p-5">
             <div className="font-display text-2xl tracking-tight">Backboard</div>
             <div className="text-sm opacity-80 mt-1 font-bold uppercase tracking-wider">
-              Persistent user memory
+              Isolated user memory
             </div>
             <ul className="mt-3 text-sm space-y-1 opacity-80">
-              <li>Separate memory per person</li>
-              <li>Retrieves useful prior information</li>
+              <li>Strictly separate memory per person</li>
+              <li>Never reveals private preferences to other diners</li>
               <li>Supplies memory to Gemini when relevant</li>
             </ul>
           </div>
@@ -701,12 +887,12 @@ function Index() {
               Real-world location context
             </div>
             <ul className="mt-3 text-sm space-y-1 opacity-90">
-              <li>Place lookup and nearby locations</li>
-              <li>Transportation context</li>
+              <li>Place lookup and multi-origin routes</li>
+              <li>Optimal central meeting spots</li>
               <li>Grounded geographic information</li>
             </ul>
           </div>
-          <div className="bg-ink text-ink-foreground outline-card rounded-2xl p-5">
+          <div className="bg-foreground text-background outline-card rounded-2xl p-5">
             <div className="font-display text-2xl tracking-tight">ElevenLabs</div>
             <div className="text-sm opacity-70 mt-1 font-bold uppercase tracking-wider">
               Voice and phone interaction
@@ -734,116 +920,59 @@ function Index() {
               Payments and transactions
             </div>
             <ul className="mt-3 text-sm space-y-1 opacity-80">
-              <li>Executes test transactions</li>
-              <li>Turns conversational payment requests into actions</li>
-              <li>Returns transaction status to the agent</li>
-              <li>Requires confirmation before execution</li>
+              <li>Executes test transactions wallet to wallet</li>
+              <li>Coordinates customer authorizations and merchant confirmations</li>
+              <li>Returns individual status to each party's private thread</li>
+              <li>Requires explicit confirmation before execution</li>
             </ul>
           </div>
         </div>
       </section>
 
-      {/* 9. ARCHITECTURE */}
-      <section id="architecture" className="px-5 py-12 max-w-4xl mx-auto">
-        <SectionTitle kicker="Architecture" title="How it's wired." />
-        <div className="mt-6 bg-card outline-card rounded-3xl p-6">
-          <div className="flex flex-col items-center gap-2">
-            <FlowStep label="iMessage" tone="ink" />
-            <Connector />
-            <FlowStep label="Photon" tone="blue" />
-            <Connector />
-            <FlowStep label="Agent orchestrator" tone="primary" />
-            <Connector />
-            <div className="grid md:grid-cols-3 gap-3 w-full max-w-3xl items-start">
-              <div className="bg-sky text-sky-foreground outline-card rounded-xl p-3 text-center text-sm font-bold">
-                Backboard
-                <div className="font-normal opacity-70">user memory</div>
-              </div>
-              <div className="space-y-2">
-                <div className="bg-lime text-lime-foreground outline-card rounded-xl p-3 text-center text-sm font-bold">
-                  Gemini
-                  <div className="font-normal opacity-70">reasoning</div>
-                </div>
-                <div className="bg-background outline-card rounded-xl p-2 text-center text-xs font-bold ml-4">
-                  ↳ Maps grounding
-                  <div className="font-normal text-muted-foreground">places / location context</div>
-                </div>
-                <div className="bg-background outline-card rounded-xl p-2 text-center text-xs font-bold ml-4">
-                  ↳ Tiger Data
-                  <div className="font-normal text-muted-foreground">
-                    NYPD history / city events
-                  </div>
-                </div>
-              </div>
-              <div className="bg-ink text-ink-foreground outline-card rounded-xl p-3 text-sm font-bold">
-                <div className="text-center">Action layer</div>
-                <div className="mt-2 space-y-1.5">
-                  <div className="bg-primary text-primary-foreground rounded-lg px-2 py-1.5 text-xs">
-                    ElevenLabs <span className="font-normal opacity-80">→ restaurant calls</span>
-                  </div>
-                  <div className="bg-blue text-blue-foreground rounded-lg px-2 py-1.5 text-xs">
-                    Ripple <span className="font-normal opacity-80">→ payments</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <Connector />
-            <FlowStep label="Result" tone="paper" />
-            <Connector />
-            <FlowStep label="Photon" tone="blue" />
-            <Connector />
-            <FlowStep label="Original iMessage conversation" tone="ink" />
-          </div>
-        </div>
-      </section>
-
-      {/* 10. DEMO STORY */}
+      {/* 12. DEMO STORY */}
       <section id="demo" className="px-5 py-12 max-w-3xl mx-auto">
-        <SectionTitle kicker="Demo story" title="One night, start to finish." />
+        <SectionTitle kicker="Demo story" title="From one private text to a coordinated evening." />
         <ol className="mt-6 space-y-3">
           {[
-            "Friends are talking in an iMessage group chat.",
-            "Someone asks: “@agent find us somewhere for Italian tonight.”",
-            "It uses the conversation and each person's memory to suggest a fit.",
-            "The group picks a restaurant.",
-            "Someone says: “@agent book it for the 7 of us around 8.”",
-            "It already has most details and asks only for what's missing.",
-            "The ElevenLabs integration calls the restaurant.",
-            "Gemini runs the conversation logic during the call.",
-            "The restaurant confirms or turns down the requested time.",
-            "If a deposit is needed, @agent asks for confirmation, then Ripple runs the (test) transaction.",
+            "Rohan privately messages the agent: “Can you organize dinner for me, Elena, and David tonight?”",
+            "The agent opens separate 1:1 threads with Elena and David to gather availability and dietary preferences.",
+            "Each person responds in private — no noisy threads, no exposed personal notes.",
+            "Gemini synthesizes everyone's constraints and Backboard memory to find the best spot.",
+            "The agent sends options privately to Rohan; Rohan confirms Carbone at 8pm.",
+            "The agent reaches out to each diner privately to confirm attendance.",
+            "The ElevenLabs integration calls Carbone to reserve the table.",
+            "If a deposit is required, the agent privately prompts the customer for XRPL authorization.",
+            "XRPL Testnet validates and settles the payment wallet-to-wallet.",
+            "The restaurant confirms the reservation on the call.",
           ].map((step, i) => (
             <li key={step} className="flex gap-4 items-center bg-card outline-card rounded-2xl p-4">
               <span className="font-display text-3xl text-primary">{i + 1}</span>
               <span>{step}</span>
             </li>
           ))}
-          <li className="flex gap-4 items-center bg-ink text-ink-foreground outline-card rounded-2xl p-4">
+          <li className="flex gap-4 items-center bg-foreground text-background outline-card rounded-2xl p-4">
             <span className="font-display text-3xl text-lime">11</span>
-            <span>The real result lands back in the original iMessage group.</span>
+            <span>
+              Each participant receives their personalized confirmation in their own private thread.
+            </span>
           </li>
         </ol>
       </section>
 
       {/* CTA + FOOTER */}
-      <section className="relative overflow-hidden px-5 pt-24 pb-12 text-center border-t border-border">
-        <div
-          aria-hidden
-          className="absolute inset-x-0 -bottom-40 mx-auto h-[28rem] max-w-4xl glow-hero pointer-events-none"
-        />
-        <div className="relative">
-          <h2 className="font-display text-4xl md:text-6xl text-balance">
-            Add @agent to your group.
-          </h2>
-          <p className="mt-4 text-muted-foreground">
-            One number, added to the chat you already have.
-          </p>
-          <StartLink className="inline-block mt-8 bg-primary text-primary-foreground px-8 py-3.5 rounded-lg font-medium text-lg shadow-[var(--shadow-hard-primary)] hover:brightness-110 transition">
-            Get your beta spot ↗
-          </StartLink>
-          <SpotsMeter className="mt-8" />
-        </div>
-        <p className="relative mt-16 text-xs text-muted-foreground/70">
+      <section className="px-5 py-16 text-center bg-lime text-lime-foreground border-t-2 border-foreground">
+        <h2 className="font-display text-5xl md:text-7xl tracking-tight text-balance">
+          Message the agent privately.
+        </h2>
+        <p className="mt-4 text-base md:text-lg max-w-[50ch] mx-auto opacity-85 font-medium">
+          From dinner plans to concert tickets and payments, the agent talks to each person
+          individually and coordinates the action across everyone involved.
+        </p>
+        <StartLink className="inline-block mt-6 bg-primary text-primary-foreground px-8 py-4 rounded-full font-bold text-lg outline-card shadow-[var(--shadow-hard-lg)] hover:translate-x-[2px] hover:translate-y-[2px] transition-all">
+          Get your beta spot
+        </StartLink>
+        <SpotsMeter className="mt-6" />
+        <p className="mt-8 text-xs uppercase tracking-[0.15em] opacity-60">
           plansaroundus · conversations shown are demo examples, not real bookings
         </p>
       </section>

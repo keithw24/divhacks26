@@ -6,12 +6,13 @@
 
 import type { Store } from '../store'
 import { planSchemas } from '../../schemas/plans-schema'
+import { siteSchemas } from '../../schemas/site-schema'
 
 type Rec = { recordId: string; data: Record<string, unknown>; createdAt: string }
 
 export function createFakeStore(): Store & { rows(collection: string): Rec[] } {
   const tables = new Map<string, Rec[]>()
-  const uniqueOn = new Map(planSchemas.map((s) => [s.name, s.uniqueOn ?? []]))
+  const uniqueOn = new Map([...planSchemas, ...siteSchemas].map((s) => [s.name, s.uniqueOn ?? []]))
   let seq = 0
   const table = (name: string) => {
     if (!tables.has(name)) tables.set(name, [])

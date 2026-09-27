@@ -142,7 +142,8 @@ export function PreferencesFields({
           <fieldset>
             <legend className="font-bold mb-1">Food</legend>
             <p className="text-sm text-muted-foreground mb-3">
-              @agent filters suggestions for you (and for your group).
+              @agent filters suggestions for you and coordinates preferences across everyone
+              involved.
             </p>
             <div className="flex flex-wrap gap-2">
               {[...DIETARY, ...value.dietary.filter((d) => !DIETARY.includes(d))].map((d) => (

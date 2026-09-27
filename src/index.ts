@@ -100,7 +100,7 @@ const payments = createPaymentRuntime({
   nessieBaseUrl: config.nessieBaseUrl,
   nessieCustomerId: config.nessieCustomerId,
   nessieAccountId: config.nessieAccountId,
-  onPersonSettled: (event) => ledger.recordSettledPayment(event),
+  onPersonSettled: (event) => ledger.recordSettledPayment(event), audit: xrpl?.guard.audit,
 });
 const meetup = createMeetupRuntime({
   googleMapsApiKey: config.googleMapsApiKey,
