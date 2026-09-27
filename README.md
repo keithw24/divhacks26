@@ -1,4 +1,4 @@
-# DivHacks 26 — Around Me iMessage agent
+# DivHacks 26 — Around Us iMessage agent
 
 Hackathon project for **Concrete Jungle**: one Photon iMessage agent that combines
 NYC events, restaurants, historical safety context, and real routes. Public
