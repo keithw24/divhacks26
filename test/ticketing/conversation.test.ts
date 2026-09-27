@@ -65,6 +65,15 @@ describe("ticketing follow-ups", () => {
     expect(quote.reply).toContain("I found 3 tickets");
     expect(service.store.pending("space-a")?.quantity).toBe(3);
   });
+
+  it("answers 'yes' after 'Want ticket prices?' with actual prices for the event", async () => {
+    const { say } = ticketing();
+    const search = await say("space-a", "Phoebe Bridgers tickets");
+    expect(search.reply).toContain("Want ticket prices?");
+    const prices = await say("space-a", "Yes");
+    expect(prices.handled).toBe(true);
+    expect(prices.reply).toContain("start at $62");
+  });
 });
 
 describe("purchase confirmation", () => {

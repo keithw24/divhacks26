@@ -206,7 +206,7 @@ export class TicketingService {
       state.selectedOffer = undefined;
       state.requestedQuantity = undefined;
       state.maxPricePerTicket = request.maxPrice;
-      state.awaiting = undefined;
+      state.awaiting = shown.length === 1 && shown[0] ? { kind: "price", eventId: shown[0].id } : undefined;
     });
     if (shown.length === 1 && shown[0]) this.focus(input.spaceId, shown[0]);
     this.emit("ticket.search", { spaceId: input.spaceId, provider: this.options.provider.name, resultCount: result.events.length });

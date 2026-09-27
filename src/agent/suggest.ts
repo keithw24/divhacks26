@@ -43,6 +43,7 @@ export interface SuggestInput {
   userProfile?: { userId: string; displayName?: string; walletAddress: string; backboardLinked: boolean };
   /** Receives the Tiger report when the user asked about safety. */
   onSafetyReport?: (report: BlockSafetyReport) => void;
+  ticketProvider?: import("../ticketing/types.js").TicketProvider;
 }
 
 const clock = (d: Date) =>
@@ -319,6 +320,7 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
       ),
     ],
     onSafetyReport: input.onSafetyReport,
+    ticketProvider: input.ticketProvider,
   });
   return answer;
 }

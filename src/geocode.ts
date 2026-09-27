@@ -33,10 +33,12 @@ const TIME_RE =
  */
 export function locationQueryFromMessage(text: string): string {
   let q = text.replace(TIME_RE, " ");
-  const named = q.match(/\b(?:near|around|in)\s+(.+)/i);
-  const rest = named?.[1]?.trim() ?? "";
+  const named = q.match(/\b(?:near|around|in|visiting|going to|headed to|interested in|at)\s+(.+)/i);
+  let rest = named?.[1]?.trim() ?? "";
   if (rest && !/^\d{1,2}(?::\d{2})?\s*(?:am|pm)?$/i.test(rest)) {
-    q = rest;
+    rest = rest.replace(/[,;].*$/, "").trim();
+    rest = rest.replace(/\b(?:what's|whats|what is|anything|what should|what can|tell me|where|how is|how's|is there)\b.*$/i, "").trim();
+    if (rest.length >= 2) q = rest;
   }
   q = q.replace(/\b(?:is|how's|how is|how|what's|what is)\b/gi, " ");
   q = q.replace(

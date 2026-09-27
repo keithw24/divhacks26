@@ -94,11 +94,16 @@ export function detailsReply(event: TicketEvent, now: Date, timeZone: string): s
 
 export function priceReply(event: TicketEvent, quote: TicketPriceQuote, checkoutUrl?: string): string {
   const currency = quote.currency ?? event.currency ?? "USD";
-  if (quote.minPrice === undefined) {
+  const minPrice = quote.minPrice ?? event.minPrice;
+  if (minPrice === undefined) {
     const link = checkoutUrl ? ` Here's the official listing: ${checkoutUrl}` : "";
     return `I couldn't get ticket prices for ${event.name} right now.${link}`;
   }
-  const start = formatMoney(quote.minPrice, currency);
+  const start = formatMoney(minPrice, currency);
+  if (quote.minPrice === undefined && event.minPrice !== undefined) {
+    const link = checkoutUrl ? ` Here's the official listing: ${checkoutUrl}` : "";
+    return `Right now I can confirm tickets start at ${start}. I don't have the full seat-by-seat breakdown yet.${link}`;
+  }
   const feeNote = quote.allIn ? " all-in" : isUsEvent(event) ? " before fees" : "";
   if (quote.offers.length > 0) {
     const prices = distinctPrices(quote);
@@ -106,7 +111,7 @@ export function priceReply(event: TicketEvent, quote: TicketPriceQuote, checkout
     const fees = !quote.allIn && isUsEvent(event) ? " Those don't include mandatory fees, so the final price will be higher." : "";
     return `Tickets for ${event.name} currently start at ${start}${feeNote}.${options}${fees}`;
   }
-  const range = quote.maxPrice !== undefined && quote.maxPrice > quote.minPrice ? ` (up to ${formatMoney(quote.maxPrice, currency)})` : "";
+  const range = quote.maxPrice !== undefined && quote.maxPrice > minPrice ? ` (up to ${formatMoney(quote.maxPrice, currency)})` : "";
   const link = checkoutUrl ? ` I can't see exact seats from here, but you can choose seats on the official listing: ${checkoutUrl}` : "";
   return `Tickets for ${event.name} currently start around ${start}${feeNote}${range}.${link}`;
 }
