@@ -17,7 +17,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "lint": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "db:migrate": "tsx apps/agent/src/migrate.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

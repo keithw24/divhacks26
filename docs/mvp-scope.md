@@ -23,7 +23,7 @@ Nothing else ships on this branch until that works live.
 | 4–7 Skills ported with contract tests | Done (owners should review their package) |
 | 8 `parseIntent` + routing tests | Done (fake-Gemini tests; live Gemini checked manually) |
 | 9 `compose` + `check` | Done |
-| 10 Photon adapter + `app.chat_context` | Code done; **not yet run against Photon**; migration not applied |
+| 10 Photon adapter + `app.chat_context` | Code done; **not yet run against Photon**. Migration applied to Tiger 2026-09-27 (`npm run db:migrate`); memory verified across restarts |
 | 11 Deploy | `mvp/Dockerfile` + `mvp/compose.yaml` written; not deployed |
 | 12 Demo rehearsal | Blocked on a Google Maps key and Photon credentials |
 | 0 Hour-one checks | Gemini structured output ✓ and Tiger ✓ (live terminal run). Maps key, Photon and group chat not yet checked. |
