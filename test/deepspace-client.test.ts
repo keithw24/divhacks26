@@ -54,11 +54,21 @@ describe("DeepSpace channel client", () => {
 
   it("loads the wallet directory for Gemini without phone numbers", async () => {
     const fetcher = vi.fn(async (..._args: Parameters<typeof fetch>) =>
-      new Response(JSON.stringify({ people: [{ userId: "keith", xrplAddress: "rBQUYX8GqNYUdRJeSkuessmd6x4eiUW2JD" }] })),
+      new Response(JSON.stringify({ people: [{
+        userId: "keith",
+        displayName: "Keith",
+        xrplAddress: "rBQUYX8GqNYUdRJeSkuessmd6x4eiUW2JD",
+        photonIdentifier: "+19175550199",
+      }] })),
     );
     const client = createDeepSpaceClient({ baseUrl: "https://plans.example", secret: "s", fetcher: fetcher as typeof fetch, now: () => 0 });
     await expect(client.directory()).resolves.toEqual([
-      { userId: "keith", xrplAddress: "rBQUYX8GqNYUdRJeSkuessmd6x4eiUW2JD" },
+      {
+        userId: "keith",
+        displayName: "Keith",
+        xrplAddress: "rBQUYX8GqNYUdRJeSkuessmd6x4eiUW2JD",
+        photonIdentifier: "+19175550199",
+      },
     ]);
     const [url, init] = fetcher.mock.calls[0]!;
     expect(url).toBe("https://plans.example/api/channels/directory");

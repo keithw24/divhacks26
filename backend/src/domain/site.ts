@@ -37,6 +37,7 @@ export interface SitePreferences {
 }
 
 export interface SiteUser {
+  userId: string
   phone: string
   email: string
   createdAt: string
@@ -103,6 +104,11 @@ const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString
 
 export async function sha256Hex(value: string): Promise<string> {
   return hex(await crypto.subtle.digest('SHA-256', encoder.encode(value)))
+}
+
+/** Stable website identity that never embeds the person's phone number. */
+export async function siteUserId(phone: string): Promise<string> {
+  return `site:${(await sha256Hex(`plans-around-us:user:${phone}`)).slice(0, 32)}`
 }
 
 async function hmacHex(secret: string, value: string): Promise<string> {
@@ -208,7 +214,13 @@ export function createSite(deps: SiteDeps) {
 
   async function userRow(phone: string) {
     const row = await findOne<SiteUser & { preferences?: unknown }>(store, 'site_users', { phone })
-    return row ? { recordId: row.recordId, user: { ...row.data, preferences: readPreferences(row.data.preferences) } as SiteUser } : null
+    if (!row) return null
+    const userId = row.data.userId || (await siteUserId(phone))
+    if (!row.data.userId) await patch(store, 'site_users', row.recordId, { userId })
+    return {
+      recordId: row.recordId,
+      user: { ...row.data, userId, preferences: readPreferences(row.data.preferences) } as SiteUser,
+    }
   }
 
   async function userCount(): Promise<number> {
@@ -393,7 +405,12 @@ export function createSite(deps: SiteDeps) {
       await patch(store, 'site_challenges', verified.recordId, { expiresAt: 0 })
       let row = await userRow(phone)
       if (!row) {
-        await tryInsert(store, 'site_users', { phone, email: verified.email, createdAt: new Date(now()).toISOString() })
+        await tryInsert(store, 'site_users', {
+          userId: await siteUserId(phone),
+          phone,
+          email: verified.email,
+          createdAt: new Date(now()).toISOString(),
+        })
         row = await userRow(phone)
       }
       if (!row) throw new ServiceError('server_error', 'Could not create the account.')
@@ -433,7 +450,7 @@ export function createSite(deps: SiteDeps) {
     async startChat(user: SiteUser): Promise<void> {
       const name = user.preferences?.name
       await insert(store, 'notification_outbox', {
-        userId: `site:${user.phone}`,
+        userId: user.userId,
         channel: 'imessage',
         externalId: user.phone,
         body: `Hi${name ? ` ${name}` : ''}! This is @agent from plansaroundus. Add me to a group chat and mention @agent when you need a plan.`,

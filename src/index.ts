@@ -42,6 +42,7 @@ import { createMailer } from "./web/email.js";
 import { readSocialContext } from "./agent/social.js";
 import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
 import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./deepspace/client.js";
+import { startDeepSpaceProfileSync } from "./deepspace/profile-sync.js";
 import { createDirectoryCache, mergePeopleDirectory, type PeopleDirectoryEntry } from "./deepspace/directory.js";
 import { notifyPaymentReceived } from "./payments/notify.js";
 import { getPool } from "./safety.js";
@@ -493,6 +494,13 @@ const deepspace =
 console.info(deepspace ? `DeepSpace backend: ${config.deepspaceApiUrl}` : "DeepSpace backend: off (set DEEPSPACE_API_URL and DEEPSPACE_CHANNEL_SECRET).");
 if (deepspace) {
   paymentNotice.notifyDeepSpace = (input) => deepspace.notifyPayment(input);
+  if (tigerProfiles) {
+    startDeepSpaceProfileSync({
+      client: deepspace,
+      profiles: tigerProfiles,
+      intervalMs: config.deepspaceOutboxPollMs,
+    });
+  }
   startOutboxPoller({
     client: deepspace,
     channel: "imessage",
