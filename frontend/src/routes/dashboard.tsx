@@ -2,14 +2,7 @@ import { EvidenceHistory } from "@/components/site/evidence-history";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import {
-  AppPage,
-  buttonPrimary,
-  buttonSecondary,
-  Card,
-  PageTitle,
-  useMe,
-} from "@/components/site/shell";
+import { AppPage, buttonPrimary, Card, PageTitle, useMe } from "@/components/site/shell";
 import { api, errorMessage } from "@/lib/api";
 import { Lock, ShieldCheck } from "lucide-react";
 import { WalletStatusCard } from "@/components/site/wallet-card";
@@ -41,14 +34,13 @@ type SendState = { busy?: boolean; message?: string };
 
 /**
  * The agent's number is deliberately not on this page (or anywhere in the site's code):
- * it's emailed to the verified address, with a contact card attached.
+ * @agent texts the user first in iMessage, so its number arrives in their Messages app.
  */
 function Dashboard() {
   const me = useMe({ requireOnboarded: true });
   const queryClient = useQueryClient();
   const { welcome, wallet: walletResult } = Route.useSearch();
   const [copied, setCopied] = useState<string>();
-  const [email, setEmail] = useState<SendState>({});
   const [intro, setIntro] = useState<SendState>({});
   const [wallet, setWallet] = useState<SendState>({});
 
@@ -95,42 +87,36 @@ function Dashboard() {
           role="status"
           className="bg-lime text-lime-foreground outline-card rounded-2xl px-4 py-3 mb-6 font-bold"
         >
-          {welcome === "emailed"
-            ? `You're set. We emailed @agent's number to ${me.email}.`
-            : "You're set. Use the button below to get @agent's number by email."}
+          You're set. @agent will text you in iMessage in a moment.
         </div>
       )}
       <PageTitle
         kicker="Your @agent"
         title={name ? `Hey ${name}.` : "You're in."}
-        sub="Everything happens in private 1:1 threads in iMessage. To keep the beta private, @agent's number is only sent by email."
+        sub="Everything happens in private 1:1 threads in iMessage. @agent reaches out to you there first."
       />
 
       <Card className="bg-ink text-ink-foreground shadow-[var(--shadow-hard-primary)]">
-        <div className="text-xs font-bold uppercase tracking-[0.15em] opacity-70">
-          @agent's number
-        </div>
-        <div className="font-display text-3xl md:text-4xl tracking-tight mt-1">
-          Check your inbox
-        </div>
-        <p className="mt-2 text-background/75 text-sm">
-          Sent to <span className="font-bold text-background">{me.email}</span> with a contact card
-          to save. Please don't share it publicly: the beta is limited to 100 people.
+        <div className="text-xs font-bold uppercase tracking-[0.15em] opacity-70">Next step</div>
+        <div className="font-display text-3xl md:text-4xl tracking-tight mt-1">Check iMessage</div>
+        <p className="mt-2 text-ink-foreground/75 text-sm">
+          A message from @agent will pop up in iMessage from a new number, sent to{" "}
+          <span className="font-bold text-ink-foreground">{me.phone}</span>. Reply there to start,
+          and save the number as @agent. Please don't share it publicly: the beta is limited to 100
+          people.
         </p>
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button
             type="button"
             className={buttonPrimary}
-            disabled={email.busy}
-            onClick={() =>
-              void send(api.sendNumber, setEmail, "Sent. Check your inbox (and spam).")
-            }
+            disabled={intro.busy}
+            onClick={() => void send(api.startChat, setIntro, "Sent. Check iMessage.")}
           >
-            {email.busy ? "Sending…" : "Email it to me again"}
+            {intro.busy ? "Sending…" : "Text me again"}
           </button>
-          {email.message && (
+          {intro.message && (
             <span role="status" className="text-sm font-medium">
-              {email.message}
+              {intro.message}
             </span>
           )}
         </div>
@@ -302,7 +288,7 @@ function Dashboard() {
         </p>
         <ol className="mt-3 space-y-2">
           {[
-            "Open the contact card from the email and save it, so @agent shows up by name in your contacts.",
+            "Open the iMessage from @agent and save the number, so it shows up by name in your contacts.",
             "Message @agent privately with what you want to coordinate (e.g. “Can you get tickets for me, Alex, and Maya for the concert Friday?”).",
             "The agent reaches out to each person in their own separate 1:1 thread, gathers their response, and coordinates the final action.",
           ].map((step, i) => (
@@ -355,23 +341,6 @@ function Dashboard() {
             );
           }}
         />
-      </section>
-
-      <section className="mt-8 bg-card outline-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="font-bold">Want @agent to text you first?</div>
-          <div className="text-sm text-muted-foreground" role="status">
-            {intro.message ?? "It'll send you a private hello over iMessage."}
-          </div>
-        </div>
-        <button
-          type="button"
-          className={buttonSecondary}
-          onClick={() => void send(api.startChat, setIntro, "Sent. Check iMessage.")}
-          disabled={intro.busy}
-        >
-          {intro.busy ? "Sending…" : "Text me hello"}
-        </button>
       </section>
     </AppPage>
   );
