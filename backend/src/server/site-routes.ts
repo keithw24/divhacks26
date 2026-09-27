@@ -2,8 +2,10 @@
  * The website's API (plansaroundus.tech on Vercel), served from DeepSpace.
  *
  * Same paths and response shapes the site already calls, mounted under
- * /site so they don't collide with DeepSpace's own /api/auth/*. The site
- * points VITE_AGENT_API_URL at https://<app>.app.space/site.
+ * /api/site so they don't collide with DeepSpace's own /api/auth/*. It has to
+ * live under /api/*: on app.space only /api/* (and a few platform paths)
+ * reach the worker first; any other path gets the app's HTML shell. The site
+ * points VITE_AGENT_API_URL at https://<app>.app.space/api/site.
  *
  * Accounts live in the site_* collections (src/schemas/site-schema.ts),
  * separate from DeepSpace's built-in sign-in. Callers authenticate with the
@@ -20,7 +22,8 @@ import { createActionTools } from './action-routes.js'
 
 /** Identity the site's writes are attributed to in `createdBy`. */
 export const SITE_USER = 'system:website'
-const PREFIX = '/site/api'
+const BASE = '/api/site'
+const PREFIX = `${BASE}/api`
 const MAX_BODY_BYTES = 16 * 1024
 
 const STATUS: Record<string, number> = {
@@ -109,9 +112,9 @@ function signedIn(fn: (c: SiteContext, user: SiteUser, token: string, site: Retu
 
 export function registerSiteRoutes(app: Hono<AppContext>): void {
   // Bearer tokens, no cookies, so any origin may call these.
-  app.use('/site/*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type'], maxAge: 600 }))
+  app.use(`${BASE}/*`, cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type'], maxAge: 600 }))
 
-  app.get('/site/healthz', (c) => c.json({ status: 'ok', configured: Boolean(c.env.SITE_AUTH_SECRET || c.env.CHANNEL_ADAPTER_SECRET) }))
+  app.get(`${BASE}/healthz`, (c) => c.json({ status: 'ok', configured: Boolean(c.env.SITE_AUTH_SECRET || c.env.CHANNEL_ADAPTER_SECRET) }))
   app.get(`${PREFIX}/stats`, handle((c) => siteFor(c.env).site.stats()))
   // Live checks run in the agent; the site shows this as "not checked yet".
   app.get(`${PREFIX}/integrations`, (c) => c.json({ checkedAt: null, integrations: [] }))
