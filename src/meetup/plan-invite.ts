@@ -25,21 +25,64 @@ export interface PlanInviteInput {
   sendInvite: (photonSenderId: string, body: string) => Promise<void>;
   meetup?: Pick<MeetupService, "handleTurn">;
   now?: Date;
+  /** Extra invitees from Gemini intent when the user didn't say "with X". */
+  invitees?: string[];
 }
 
 export async function handlePlanInvite(input: PlanInviteInput): Promise<ReservationHandlerResult> {
-  if (!isPlanInviteRequest(input.text)) return { handled: false };
-  const names = extractInviteeNames(input.text);
+  const knownPeople = [
+    ...input.contacts.map((row) => row.displayName),
+    ...(input.tigerPeople ?? []).map((row) => row.displayName ?? ""),
+  ].filter(Boolean);
+  const names = mergeNames(extractInviteeNames(input.text, knownPeople), input.invitees);
+  if (!names.length || (!isPlanInviteRequest(input.text, knownPeople) && !input.invitees?.length)) {
+    return { handled: false };
+  }
   const senderKey = input.senderName?.trim().toLowerCase();
   const targets = names.filter((name) => name.toLowerCase() !== senderKey);
+  if (!targets.length) return { handled: false };
 
+  const plan = (await buildPlanText(input, resolveGuests(targets, input.contacts, input.senderId))).trim();
+  if (!plan) {
+    return {
+      handled: true,
+      acknowledgement: "👀",
+      reply: "I couldn't put a plan together yet. Tell me a neighborhood or time and I'll invite them.",
+    };
+  }
+
+  const notified = await notifySharedPlan({
+    names: targets,
+    senderId: input.senderId,
+    senderName: input.senderName,
+    plan,
+    contacts: input.contacts,
+    tigerPeople: input.tigerPeople,
+    sendInvite: input.sendInvite,
+  });
+  return {
+    handled: true,
+    acknowledgement: notified.acknowledgement,
+    reply: notified.reply,
+  };
+}
+
+export async function notifySharedPlan(input: {
+  names: string[];
+  senderId?: string;
+  senderName?: string;
+  plan: string;
+  contacts: InviteContact[];
+  tigerPeople?: Array<{ displayName?: string; userId: string }>;
+  sendInvite: (photonSenderId: string, body: string) => Promise<void>;
+}): Promise<{ reply: string; acknowledgement: string; sent: string[] }> {
   const sentNames: string[] = [];
   const missing: string[] = [];
   const ambiguous: string[] = [];
   const directoryOnly: string[] = [];
-  const resolved: InviteContact[] = [];
+  const guestBody = formatGuestInvite(input.senderName || "A friend", input.plan);
 
-  for (const name of targets) {
+  for (const name of input.names) {
     const match = resolveInviteContact(name, input.contacts);
     if (match === "ambiguous") {
       ambiguous.push(name);
@@ -50,36 +93,50 @@ export async function handlePlanInvite(input: PlanInviteInput): Promise<Reservat
       if (nameInTigerDirectory(name, input.tigerPeople ?? [])) directoryOnly.push(name);
       continue;
     }
-    resolved.push(match);
-  }
-
-  if (!targets.length) return { handled: false };
-
-  const plan = (await buildPlanText(input, resolved)).trim();
-  if (!plan) {
-    return {
-      handled: true,
-      acknowledgement: "👀",
-      reply: "I couldn't put a plan together yet. Tell me a neighborhood or time and I'll invite them.",
-    };
-  }
-
-  const guestBody = formatGuestInvite(input.senderName || "A friend", plan);
-  for (const contact of resolved) {
     try {
-      await input.sendInvite(contact.photonSenderId, guestBody);
-      sentNames.push(contact.displayName);
+      await input.sendInvite(match.photonSenderId, guestBody);
+      sentNames.push(match.displayName);
     } catch (error) {
       console.error(`plan invite send failed: ${error instanceof Error ? error.name : "Error"}`);
-      missing.push(contact.displayName);
+      missing.push(match.displayName);
     }
   }
 
   return {
-    handled: true,
+    sent: sentNames,
     acknowledgement: sentNames.length ? "👍" : "👀",
-    reply: formatHostInviteAck(plan, sentNames, missing, ambiguous, directoryOnly),
+    reply: formatHostInviteAck(input.plan, sentNames, missing, ambiguous, directoryOnly),
   };
+}
+
+export function planLooksSendable(plan: string): boolean {
+  const text = plan.trim();
+  if (text.length < 24) return false;
+  if (/where in nyc are you/i.test(text)) return false;
+  if (/couldn't put a plan together/i.test(text)) return false;
+  if (/couldn't find a verified match/i.test(text)) return false;
+  return true;
+}
+
+function mergeNames(left: string[], right?: string[]): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const name of [...left, ...(right ?? [])]) {
+    const key = name.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    names.push(name.trim());
+  }
+  return names.slice(0, 5);
+}
+
+function resolveGuests(names: string[], contacts: InviteContact[], senderId?: string): InviteContact[] {
+  const guests: InviteContact[] = [];
+  for (const name of names) {
+    const match = resolveInviteContact(name, contacts);
+    if (match && match !== "ambiguous" && match.photonSenderId !== senderId) guests.push(match);
+  }
+  return guests;
 }
 
 async function buildPlanText(input: PlanInviteInput, guests: InviteContact[]): Promise<string> {

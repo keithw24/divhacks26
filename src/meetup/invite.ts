@@ -31,28 +31,64 @@ const NAME_STOP = new Set([
 ]);
 
 const PLAN_CUE =
-  /\b(?:make (?:a |us )?plan|make plans|plan something|plan with|hang(?: out)?|get together|invite)\b/i;
+  /\b(?:make (?:a |us )?plan|make plans|plan something|plan with|plan a|hang(?: out)?|get together|invite)\b/i;
 const MEET_CUE = /\b(?:meet(?:ing)?(?:\s+up)?|meetup)\b/i;
+const SHARED_PLAN_CUE =
+  /\b(?:plan|dinner|lunch|brunch|hang|go out|night out|tonight|together|invite|meetup|meet up)\b/i;
 
-export function extractInviteeNames(text: string): string[] {
-  const match = text.match(
-    /\b(?:with|invite)\s+(.+?)(?:\s+(?:tonight|tomorrow|today|near|around|at\s+\d|for\s+)|[?.!]|$)/i,
-  );
-  if (!match?.[1]) return [];
+export function wantsSharedPlan(text: string): boolean {
+  return PLAN_CUE.test(text) || MEET_CUE.test(text) || SHARED_PLAN_CUE.test(text);
+}
+
+export function extractInviteeNames(text: string, knownPeople: string[] = []): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
-  for (const part of match[1].split(/\s*(?:,|&|and)\s*/i)) {
-    const name = part.replace(/[^A-Za-z'-]+/g, " ").trim();
+  const add = (raw: string) => {
+    const name = sanitizeInviteeName(raw);
+    if (!name) return;
     const key = name.toLowerCase();
-    if (name.length < 2 || NAME_STOP.has(key) || seen.has(key)) continue;
+    if (seen.has(key)) return;
     seen.add(key);
     names.push(name);
+  };
+
+  const withMatch = text.match(
+    /\b(?:with|invite)\s+(.+?)(?:\s+(?:tonight|tomorrow|today|near|around|at\s+\d|for\s+)|[?.!]|$)/i,
+  );
+  if (withMatch?.[1]) {
+    for (const part of withMatch[1].split(/\s*(?:,|&|and)\s*/i)) add(part);
+  }
+  const meAnd = text.match(/\bme and\s+([A-Za-z][A-Za-z'-]*)/i);
+  if (meAnd?.[1]) add(meAnd[1]);
+  const nameAndI = text.match(/\b([A-Za-z][A-Za-z'-]*)\s+and I\b/i);
+  if (nameAndI?.[1]) add(nameAndI[1]);
+  const forUs = text.match(/\bfor\s+([A-Za-z][A-Za-z'-]*)\s+and\s+(?:me|i)\b/i);
+  if (forUs?.[1]) add(forUs[1]);
+
+  if (wantsSharedPlan(text)) {
+    for (const person of knownPeople) {
+      const first = person.trim().split(/\s+/)[0] ?? "";
+      if (!sanitizeInviteeName(first)) continue;
+      if (new RegExp(`\\b${escapeRegExp(first)}\\b`, "i").test(text)) add(first);
+    }
   }
   return names.slice(0, 5);
 }
 
-export function isPlanInviteRequest(text: string): boolean {
-  return extractInviteeNames(text).length > 0 && (PLAN_CUE.test(text) || MEET_CUE.test(text));
+export function sanitizeInviteeName(raw: string): string | undefined {
+  const name = raw.replace(/[^A-Za-z'-]+/g, " ").trim();
+  const key = name.toLowerCase();
+  if (name.length < 2 || NAME_STOP.has(key)) return undefined;
+  if (/n't$|'re$|'s$|'m$|'ve$|'ll$|'d$/i.test(name)) return undefined;
+  return name;
+}
+
+export function isPlanInviteRequest(text: string, knownPeople: string[] = []): boolean {
+  return extractInviteeNames(text, knownPeople).length > 0 && wantsSharedPlan(text);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function planQuestionForInvite(text: string): string {

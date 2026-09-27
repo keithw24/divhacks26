@@ -8,6 +8,7 @@ import { suggestNext } from "./agent/suggest.js";
 import { errorCategory } from "./agent/turn.js";
 import { lastLocation, locationsForSpace, recordLocation, recordMessage, transcript } from "./chat/context.js";
 import { senderDisplayName } from "./chat/invoke.js";
+import { senderAddressField, resolvePhotonPersonId } from "./chat/identity.js";
 import { parseLatLng } from "./chat/location.js";
 import { setCalendarIcsBase } from "./calendar/links.js";
 import { config } from "./config.js";
@@ -549,7 +550,16 @@ async function processMessages(items: { space: Space; message: Message }[]) {
     config.chatProvider === "terminal"
       ? config.terminalAsGroup
       : (space as { type?: string }).type === "group";
-  const who = message.sender?.id ?? "someone";
+  const person = resolvePhotonPersonId({
+    senderId: message.sender?.id,
+    senderAddress: senderAddressField(message.sender),
+    senderKind: message.sender?.kind,
+    spaceId: space.id,
+  });
+  const who = person?.id ?? "someone";
+  if (person) {
+    console.info(`inbound.identity ${JSON.stringify({ source: person.source })}`);
+  }
 
   const texts: string[] = [];
   for (const item of items) {
@@ -562,7 +572,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
   if (!texts.length) return;
   const text = texts.join("\n");
 
-  const backend = await checkInWithBackend(space, message, who, text);
+  const backend = who !== "someone" ? await checkInWithBackend(space, message, who, text) : null;
   if (who !== "someone") {
     await onboarding.enroll({
       photonSenderId: who,
@@ -768,7 +778,12 @@ const inbox = new ConversationInbox<{ space: Space; message: Message }>({
   identify: ({ space, message }) => ({
     spaceId: space.id,
     messageId: message.id,
-    senderId: message.sender?.id ?? "someone",
+    senderId: resolvePhotonPersonId({
+      senderId: message.sender?.id,
+      senderAddress: senderAddressField(message.sender),
+      senderKind: message.sender?.kind,
+      spaceId: space.id,
+    })?.id ?? "someone",
     mergeable: message.content.type === "text",
   }),
   process: processMessages,

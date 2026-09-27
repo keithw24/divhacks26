@@ -106,12 +106,13 @@ export class AccountOnboardingStore {
     return this.accounts.find((row) => row.customerId.toLowerCase() === id);
   }
 
-  /** Public facts Gemini may use. Never includes a phone number. */
-  peopleDirectory(): Array<{ displayName: string; userId?: string; xrplAddress?: string }> {
+  /** Public facts Gemini may use: name, userId, wallet, and iMessage handle. */
+  peopleDirectory(): Array<{ displayName: string; userId?: string; xrplAddress?: string; imessage?: string }> {
     return this.accounts.map((row) => ({
       displayName: row.customerName,
       ...(row.userId && { userId: row.userId }),
       ...(row.xrplAddress && { xrplAddress: row.xrplAddress }),
+      ...(row.photonSenderId && { imessage: row.photonSenderId }),
     }));
   }
 

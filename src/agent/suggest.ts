@@ -43,6 +43,8 @@ export interface SuggestInput {
   userProfile?: { userId: string; displayName?: string; walletAddress: string; backboardLinked: boolean };
   /** Receives the Tiger report when the user asked about safety. */
   onSafetyReport?: (report: BlockSafetyReport) => void;
+  /** After Gemini composes a shared plan, Photon-text the named people. */
+  notifySharedPlan?: (invitees: string[], plan: string) => Promise<string | undefined>;
 }
 
 const clock = (d: Date) =>
@@ -113,9 +115,11 @@ export function buildContext(input: SuggestInput): string {
       for (const line of input.decisionLines) lines.push(`- ${line}`);
     }
     if (input.peopleDirectory?.length) {
-      lines.push("", "DEEPSPACE PEOPLE (userId and XRPL Testnet wallet; not phone numbers)");
-      lines.push("Tiger is authoritative for wallet lookup. Use these when talking about who can send or receive Testnet payments. Do not invent ids or addresses.");
+      lines.push("", "PEOPLE DIRECTORY (name, userId, XRPL Testnet wallet, iMessage when known)");
+      lines.push("Use these when they name a person for a plan, invite, or Testnet payment. Do not invent a userId, wallet, or iMessage handle.");
       lines.push("If they ask to pay someone with no Testnet wallet, say that person has no wallet address and that nothing was processed. Do not describe a send.");
+      lines.push("If they ask to invite someone with no iMessage handle, say that person has not texted this number yet.");
+      lines.push("When they want a plan with a named person, Photon texts that person after you write the plan. Do not claim you already sent it.");
       for (const line of formatPeopleDirectory(input.peopleDirectory)) lines.push(`- ${line}`);
     }
     const recentForThread = (input.groupLines ?? input.transcript).map((line) =>
@@ -126,6 +130,7 @@ export function buildContext(input: SuggestInput): string {
         "",
         "AVAILABLE PHOTON TOOLS / CAPABILITIES",
         "Transportation directions for walk, subway, bus, bike, and car via the transportation handler. Place suggestions grounded in Google Maps.",
+        "Do not claim you texted or invited someone. Photon texts named people after a shared plan is composed, or when the user asks to message them.",
       );
     }
   }
@@ -319,6 +324,10 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
       ),
     ],
     onSafetyReport: input.onSafetyReport,
+    knownPeople: (input.peopleDirectory ?? [])
+      .map((person) => person.displayName?.trim())
+      .filter((name): name is string => Boolean(name)),
+    onSharedPlan: input.notifySharedPlan,
   });
   return answer;
 }

@@ -16,6 +16,7 @@ import type { BlockSafetyReport } from "../safety.js";
 import { getSafety } from "../skills/safetySkill.js";
 import { renderResponse, rankRecommendationsSync } from "./compose.js";
 import { parseIntent, heuristicIntent, refineIntent } from "./intent.js";
+import { planLooksSendable } from "../meetup/plan-invite.js";
 
 export interface OrchestratorInput {
   question: string;
@@ -31,6 +32,10 @@ export interface OrchestratorInput {
   privateConstraintLines?: Array<{ who: string; text: string }>;
   /** Called with the Tiger report when the user asked about safety (e.g. to send the chart image). */
   onSafetyReport?: (report: BlockSafetyReport) => void;
+  /** Directory first names so Gemini can mark shared-plan invitees. */
+  knownPeople?: string[];
+  /** After a plan is composed, Photon-text named invitees. Return the host-facing reply. */
+  onSharedPlan?: (invitees: string[], plan: string) => Promise<string | undefined>;
 }
 
 function sharedLocation(input: OrchestratorInput): Location | undefined {
@@ -82,18 +87,26 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   }
   const recent = input.transcript.slice(-8).map(({ who, text }) => `${who}: ${text}`);
   const recentTexts = input.transcript.slice(-8).map(({ text }) => text);
-  const parsed = await parseIntent(input.question, sharedLocation(input), recent);
-  const heuristic = heuristicIntent(input.question, sharedLocation(input), recentTexts);
+  const knownPeople = input.knownPeople ?? [];
+  const parsed = await parseIntent(input.question, sharedLocation(input), recent, knownPeople);
+  const heuristic = heuristicIntent(input.question, sharedLocation(input), recentTexts, knownPeople);
   const intent = refineIntent(input.question, parsed, heuristic);
+  const finish = async (reply: string) => {
+    const invitees = intent.invitees ?? [];
+    if (!invitees.length || !input.onSharedPlan || !planLooksSendable(reply)) return reply;
+    return (await input.onSharedPlan(invitees, reply))?.trim() || reply;
+  };
   // Small talk, feelings, and follow-ups belong with the conversational model and chat memory.
   // Do not run empty food/event lookups just because a last-shared pin exists.
-  if ((intent.conversational || heuristic.conversational) && input.fallback) return input.fallback();
+  if ((intent.conversational || heuristic.conversational) && !intent.invitees?.length && input.fallback) {
+    return finish(await input.fallback());
+  }
   const origin = await resolveOrigin(intent, input);
   const homeTrip = asksDirectionsHome(input.question);
   const wantsSafety = wantsSafetySketch(input.question) || intent.needs.includes("safety") || homeTrip;
   if (!origin) {
     console.info(wantsSafety ? "tiger: skipped (no NYC origin)" : "tiger: skipped (not a safety prompt)");
-    return "Where in NYC are you? Share a location or name a neighborhood.";
+    return finish("Where in NYC are you? Share a location or name a neighborhood.");
   }
 
   const window = eventWindow(intent, now);
@@ -151,7 +164,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   }
   const destination = explicitDestination ?? picks[0]?.item.location;
   if (intent.needs.length === 1 && intent.needs[0] === "route" && !destination) {
-    return "Where are you trying to go?";
+    return finish("Where are you trying to go?");
   }
 
   const safetyTarget = destination && candidates.length ? destination : origin;
@@ -230,9 +243,11 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   }
   const official = renderResponse({ picks, safety, route, warnings: [], graph });
   input.onEvidence?.(graph);
-  return mergeOfficialAndGeminiReply(
-    official,
-    eventResult?.geminiReply,
-    picks.some((pick) => pick.item.kind === "event"),
+  return finish(
+    mergeOfficialAndGeminiReply(
+      official,
+      eventResult?.geminiReply,
+      picks.some((pick) => pick.item.kind === "event"),
+    ),
   );
 }

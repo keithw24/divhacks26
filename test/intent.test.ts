@@ -28,6 +28,11 @@ describe("intent routing", () => {
     expect(heuristicIntent("fun dinner nearby", origin).needs).toEqual(["food"]);
   });
 
+  it("marks a named person on a shared plan as an invitee", () => {
+    expect(heuristicIntent("plan a night with Rohan near Columbia", origin).invitees).toEqual(["Rohan"]);
+    expect(heuristicIntent("Plan a fun and safe night near Columbia", origin).invitees).toBeUndefined();
+  });
+
   it("keeps Gemini from sending a dinner ask to Tiger events", () => {
     const parsed = { ...heuristicIntent("Where should we get dinner?", origin), needs: ["events" as const] };
     const heuristic = heuristicIntent("Where should we get dinner?", origin);

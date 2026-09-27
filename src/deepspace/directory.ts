@@ -5,6 +5,8 @@ export interface PeopleDirectoryEntry {
   displayName?: string;
   userId?: string;
   xrplAddress?: string;
+  /** iMessage handle (phone or Apple ID). Gemini may use this; do not log it. */
+  imessage?: string;
 }
 
 export function mergePeopleDirectory(
@@ -27,12 +29,14 @@ export function mergePeopleDirectory(
       existing.userId = existing.userId || row.userId;
       existing.xrplAddress = existing.xrplAddress || row.xrplAddress;
       existing.displayName = existing.displayName || row.displayName;
+      existing.imessage = existing.imessage || row.photonIdentifier;
       continue;
     }
     byKey.set(row.userId.toLowerCase(), {
       userId: row.userId,
       ...(row.displayName ? { displayName: row.displayName } : {}),
       xrplAddress: row.xrplAddress,
+      ...(row.photonIdentifier ? { imessage: row.photonIdentifier } : {}),
     });
   }
   return [...byKey.values()];
@@ -44,6 +48,7 @@ export function formatPeopleDirectory(people: PeopleDirectoryEntry[]): string[] 
     if (person.userId) bits.push(`userId ${person.userId}`);
     if (person.xrplAddress && person.xrplAddress !== "0") bits.push(`wallet ${person.xrplAddress}`);
     else bits.push("no Testnet wallet");
+    if (person.imessage?.trim()) bits.push(`iMessage ${person.imessage.trim()}`);
     return bits.join(" — ");
   });
 }

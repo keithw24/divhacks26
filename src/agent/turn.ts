@@ -83,6 +83,13 @@ export interface TurnDeps {
     isGroup: boolean;
     messageId?: string;
   }): Promise<ReservationHandlerResult>;
+  /** "text Rohan that we're late" — Photon DM via space.create. */
+  handleRelay?(input: {
+    spaceId: string;
+    senderId?: string;
+    senderName?: string;
+    text: string;
+  }): Promise<ReservationHandlerResult>;
   handleMeetup?(input: {
     spaceId: string;
     senderId?: string;
@@ -129,6 +136,7 @@ export type TurnOutcome =
   | "reservation"
   | "ticketing"
   | "meetup"
+  | "relay"
   | "ledger"
   | "support"
   | "transport"
@@ -301,6 +309,23 @@ export async function runConversationTurn(
           await deliverOnce(deliveryActions, answer);
           delivered = true;
           if (invite.afterReply) await invite.afterReply();
+          return;
+        }
+      }
+      if (deps.handleRelay) {
+        const relay = await deps.handleRelay({
+          spaceId: input.spaceId,
+          senderId: input.senderId,
+          senderName: input.senderName,
+          text: question,
+        });
+        if (relay.handled && relay.reply) {
+          outcome = "relay";
+          answer = relay.reply;
+          await reactTo(actions, ackFor(input.social, relay.acknowledgement ?? "👍"));
+          await deliverOnce(deliveryActions, answer);
+          delivered = true;
+          if (relay.afterReply) await relay.afterReply();
           return;
         }
       }

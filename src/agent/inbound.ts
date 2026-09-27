@@ -17,7 +17,8 @@ import { createBackboardMemoryService, type MemoryService } from "../memory/back
 import type { Participant, StateStore } from "../store/state.js";
 import { ingestionKey } from "../store/state.js";
 import type { MeetupTurnInput, MeetupTurnResult, PersonLocation } from "../meetup/types.js";
-import { handlePlanInvite } from "../meetup/plan-invite.js";
+import { handleRelay } from "../chat/relay.js";
+import { handlePlanInvite, notifySharedPlan } from "../meetup/plan-invite.js";
 import type { OrchestratorTurnInput, OrchestratorTurnResult } from "../orchestration/orchestrator.js";
 import type { TransportationRequest, TransportationResult } from "../transport/service.js";
 
@@ -316,6 +317,22 @@ export async function handleInboundMessage(
           social,
           peopleDirectory,
           userProfile,
+          notifySharedPlan: deps.sendPlanInvite
+            ? async (invitees, plan) => {
+                const contacts = deps.inviteContacts ? await deps.inviteContacts().catch(() => []) : [];
+                const tigerPeople = deps.tigerPeople ? await deps.tigerPeople().catch(() => []) : [];
+                const notified = await notifySharedPlan({
+                  names: invitees,
+                  senderId,
+                  senderName: message.senderName,
+                  plan,
+                  contacts,
+                  tigerPeople,
+                  sendInvite: deps.sendPlanInvite!,
+                });
+                return withCheckIn(sanitizeGroupReply(notified.reply, attributed, recentText));
+              }
+            : undefined,
         });
         return withCheckIn(sanitizeGroupReply(answer, attributed, recentText));
       },
@@ -414,6 +431,20 @@ export async function handleInboundMessage(
             });
           }
         : undefined,
+      handleRelay: deps.sendPlanInvite
+        ? async (request) => {
+            const contacts = deps.inviteContacts ? await deps.inviteContacts().catch(() => []) : [];
+            const tigerPeople = deps.tigerPeople ? await deps.tigerPeople().catch(() => []) : [];
+            return handleRelay({
+              text: request.text,
+              senderId: request.senderId,
+              senderName: request.senderName,
+              contacts,
+              tigerPeople,
+              sendMessage: deps.sendPlanInvite!,
+            });
+          }
+        : undefined,
       handleMeetup: deps.meetup
         ? (request) =>
             deps.meetup!.handleTurn({
@@ -476,6 +507,7 @@ export async function handleInboundMessage(
     outcome === "reservation" ||
     outcome === "ticketing" ||
     outcome === "meetup" ||
+    outcome === "relay" ||
     outcome === "ledger" ||
     outcome === "support" ||
     outcome === "transport" ||

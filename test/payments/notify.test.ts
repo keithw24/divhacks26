@@ -104,16 +104,18 @@ describe("payment received notice", () => {
 });
 
 describe("Gemini people directory", () => {
-  it("merges DeepSpace userId and wallet without phones", () => {
+  it("merges DeepSpace userId, wallet, and iMessage handle", () => {
     const people = mergePeopleDirectory(
       [{ displayName: "Keith", xrplAddress: ADDRESS }],
-      [{ userId: "keith-user", xrplAddress: ADDRESS }],
+      [{ userId: "keith-user", xrplAddress: ADDRESS, photonIdentifier: "+19175551313" }],
     );
-    expect(people).toEqual([{ displayName: "Keith", userId: "keith-user", xrplAddress: ADDRESS }]);
+    expect(people).toEqual([
+      { displayName: "Keith", userId: "keith-user", xrplAddress: ADDRESS, imessage: "+19175551313" },
+    ]);
     const prompt = formatPeopleDirectory(people).join("\n");
     expect(prompt).toContain("keith-user");
     expect(prompt).toContain(ADDRESS);
-    expect(prompt).not.toMatch(/\+1/);
+    expect(prompt).toContain("+19175551313");
     expect(formatPeopleDirectory([{ displayName: "Jules", userId: "jules-user" }]).join("\n")).toContain(
       "no Testnet wallet",
     );
@@ -127,12 +129,14 @@ describe("Gemini people directory", () => {
       transcript: [],
       personalized: true,
       currentUser: { id: "alan-user", displayName: "Alan" },
-      peopleDirectory: [{ displayName: "Keith", userId: "keith-user", xrplAddress: ADDRESS }],
+      peopleDirectory: [
+        { displayName: "Keith", userId: "keith-user", xrplAddress: ADDRESS, imessage: "+19175551313" },
+      ],
     };
     const context = buildContext(input);
-    expect(context).toContain("DEEPSPACE PEOPLE");
+    expect(context).toContain("PEOPLE DIRECTORY");
     expect(context).toContain("keith-user");
     expect(context).toContain(ADDRESS);
-    expect(context).not.toMatch(/\+1917/);
+    expect(context).toContain("+19175551313");
   });
 });

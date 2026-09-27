@@ -23,6 +23,12 @@ describe("plan invite parsing", () => {
     expect(extractInviteeNames("what should we do tonight?")).toEqual([]);
   });
 
+  it("treats a named shared plan as an invite even without 'make a plan'", () => {
+    expect(isPlanInviteRequest("plan a night with Rohan near Columbia")).toBe(true);
+    expect(isPlanInviteRequest("dinner with Rohan tonight")).toBe(true);
+    expect(extractInviteeNames("Keith and I need a plan tonight", ["Keith"])).toEqual(["Keith"]);
+  });
+
   it("matches a first name against the invite directory", () => {
     const contacts = [
       { displayName: "Rohan Sharma", photonSenderId: "rohan-id" },

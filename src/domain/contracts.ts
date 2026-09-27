@@ -41,6 +41,11 @@ export interface UserIntent {
    */
   conversational?: boolean;
   clarificationQuestion?: string;
+  /**
+   * Other people the user wants on this plan. Gemini / heuristics fill this;
+   * Photon DMs them after a plan is composed.
+   */
+  invitees?: string[];
 }
 
 export interface Recommendation {

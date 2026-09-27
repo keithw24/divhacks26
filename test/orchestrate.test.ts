@@ -269,4 +269,19 @@ describe("skill dispatcher", () => {
 
     expect(getRoute).toHaveBeenCalledWith(expect.objectContaining({ travelMode: "TRANSIT", destination: home }));
   });
+
+  it("texts named invitees after Gemini composes a shared plan", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["food"], invitees: ["Rohan"] });
+    vi.mocked(renderResponse).mockReturnValue("Dinner at Jin Ramen at 8, about a 12 min walk.");
+    const onSharedPlan = vi.fn(async (_names: string[], plan: string) => `${plan}\n\nI texted Rohan an invite.`);
+    const reply = await orchestrate({
+      question: "plan something for Rohan and me tonight",
+      transcript: [],
+      location,
+      onSharedPlan,
+    });
+    expect(onSharedPlan).toHaveBeenCalledOnce();
+    expect(onSharedPlan.mock.calls[0]?.[0]).toEqual(["Rohan"]);
+    expect(reply).toMatch(/I texted Rohan an invite/i);
+  });
 });
