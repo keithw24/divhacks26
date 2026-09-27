@@ -42,7 +42,7 @@ import { createMailer } from "./web/email.js";
 import { readSocialContext } from "./agent/social.js";
 import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
 import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./deepspace/client.js";
-import { createDirectoryCache, mergePeopleDirectory } from "./deepspace/directory.js";
+import { createDirectoryCache, mergePeopleDirectory, type PeopleDirectoryEntry } from "./deepspace/directory.js";
 import { notifyPaymentReceived } from "./payments/notify.js";
 import { getPool } from "./safety.js";
 import { shouldSpeak } from "./voice/decide.js";
@@ -83,6 +83,7 @@ const paymentNotice: {
 } = {
   sendToExternalId: async () => undefined,
 };
+const peopleSnapshot: { current: PeopleDirectoryEntry[] } = { current: [] };
 const ledger = createLedgerService({
   query: config.databaseUrl
     ? (sql, params) => getPool(config.databaseUrl).query(sql, params)
@@ -95,7 +96,12 @@ const merchantPaymentMode =
 const payments = createPaymentRuntime({
   settlement:
     xrpl && usesCustomerWallets
-      ? new CustomerWalletSettlement(xrpl.guard.executor, liveSenders, () => onboardingStore.displayNames())
+      ? new CustomerWalletSettlement(
+          xrpl.guard.executor,
+          liveSenders,
+          () => onboardingStore.displayNames(),
+          (customerId) => xrpl.guard.registry.getAddress(customerId) ?? onboardingStore.findByCustomerId(customerId)?.xrplAddress,
+        )
       : undefined,
   mode: config.paymentsMode,
   maxUsd: config.paymentsMaxUsd,
@@ -122,6 +128,10 @@ const payments = createPaymentRuntime({
     });
   },
   audit: xrpl?.guard.audit,
+  peopleDirectory: () =>
+    peopleSnapshot.current.length
+      ? peopleSnapshot.current
+      : onboardingStore.peopleDirectory(),
 });
 const meetup = createMeetupRuntime({
   googleMapsApiKey: config.googleMapsApiKey,
@@ -593,8 +603,11 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       orchestration,
       liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
-      peopleDirectory: async () =>
-        mergePeopleDirectory(onboardingStore.peopleDirectory(), await loadDeepSpaceDirectory()),
+      peopleDirectory: async () => {
+        const merged = mergePeopleDirectory(onboardingStore.peopleDirectory(), await loadDeepSpaceDirectory());
+        peopleSnapshot.current = merged;
+        return merged;
+      },
       suggest: (input) =>
         suggestNext({
           ...input,

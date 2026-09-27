@@ -114,6 +114,9 @@ describe("Gemini people directory", () => {
     expect(prompt).toContain("keith-user");
     expect(prompt).toContain(ADDRESS);
     expect(prompt).not.toMatch(/\+1/);
+    expect(formatPeopleDirectory([{ displayName: "Jules", userId: "jules-user" }]).join("\n")).toContain(
+      "no Testnet wallet",
+    );
   });
 
   it("puts the directory in the Gemini user context", () => {

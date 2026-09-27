@@ -1,3 +1,4 @@
+import { isValidClassicAddress } from "xrpl";
 import { REGISTERED_CUSTOMERS, findRegisteredCustomer, type RegisteredCustomer } from "./customers.js";
 import type { XrplPaymentExecutor } from "./executor.js";
 import type { PaymentExecution } from "./types.js";
@@ -18,6 +19,8 @@ export interface SettlementRequest {
 export interface CustomerSettlementPort {
   resolveSender(input: { senderId?: string; senderName?: string }): RegisteredCustomer | undefined;
   resolveRecipient(name: string): RegisteredCustomer | undefined;
+  /** Existing Testnet address only. Missing means do not process the payment. */
+  lookupRecipientAddress?(customerId: string): string | undefined;
   knownNames(): string[];
   settle(input: SettlementRequest): Promise<PaymentExecution>;
 }
@@ -33,6 +36,7 @@ export class CustomerWalletSettlement implements CustomerSettlementPort {
     private readonly executor: XrplPaymentExecutor,
     senders: Record<string, string> | (() => Record<string, string>),
     private readonly extraNames?: () => string[],
+    private readonly lookupAddress?: (customerId: string) => string | undefined,
   ) {
     this.sendersFn = typeof senders === "function" ? senders : () => senders;
   }
@@ -49,6 +53,11 @@ export class CustomerWalletSettlement implements CustomerSettlementPort {
 
   resolveRecipient(name: string): RegisteredCustomer | undefined {
     return findRegisteredCustomer(name);
+  }
+
+  lookupRecipientAddress(customerId: string): string | undefined {
+    const address = this.lookupAddress?.(customerId)?.trim();
+    return address && isValidClassicAddress(address) ? address : undefined;
   }
 
   knownNames(): string[] {

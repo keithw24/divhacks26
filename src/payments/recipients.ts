@@ -86,6 +86,21 @@ export function isPronoun(name: string): boolean {
   return PRONOUNS.has(name.trim().toLowerCase());
 }
 
+export interface NamedWallet {
+  displayName?: string;
+  userId?: string;
+  xrplAddress?: string;
+}
+
+/** Match a payee by display name or DeepSpace userId. */
+export function matchNamedWallet(name: string, people: NamedWallet[]): NamedWallet | undefined {
+  const key = name.trim().toLowerCase();
+  if (!key) return undefined;
+  return people.find(
+    (person) => person.displayName?.trim().toLowerCase() === key || person.userId?.trim().toLowerCase() === key,
+  );
+}
+
 const NAME_STOP = new Set([
   "actually",
   "and",

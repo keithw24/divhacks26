@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Wallet } from "xrpl";
 import { afterEach, describe, expect, it } from "vitest";
-import { confirmationText } from "../../src/payments/format.js";
+import { confirmationText, missingRecipientWalletText } from "../../src/payments/format.js";
 import { MockPaymentProvider } from "../../src/payments/mock.js";
 import { loadRecipientDirectory } from "../../src/payments/recipients.js";
 import { PaymentService } from "../../src/payments/service.js";
@@ -530,11 +530,16 @@ describe("XRPL Testnet dashboard", () => {
 describe("Photon payment flow settles between customer wallets", () => {
   const ROHAN_PHONE = "+1 (555) 000-0001";
 
-  function chat(options: { interpreter?: PaymentInterpreter } = {}) {
+  function chat(options: { interpreter?: PaymentInterpreter; provision?: string[] } = {}) {
     const s = stack({ autonomousEnabled: false });
     s.ledger.evidenceSource = "XRPL_TESTNET";
     const provider = new MockPaymentProvider();
-    const settlement = new CustomerWalletSettlement(s.guard.executor, parseCustomerSenders(JSON.stringify({ "+15550000001": "rohan", "+15550000009": "nobody" })));
+    const settlement = new CustomerWalletSettlement(
+      s.guard.executor,
+      parseCustomerSenders(JSON.stringify({ "+15550000001": "rohan", "+15550000009": "nobody" })),
+      undefined,
+      (id) => s.guard.registry.getAddress(id),
+    );
     const service = new PaymentService({
       provider,
       directory: loadRecipientDirectory(),
@@ -542,13 +547,19 @@ describe("Photon payment flow settles between customer wallets", () => {
       interpreter: options.interpreter,
     });
     let n = 0;
-    const say = (text: string, senderId = ROHAN_PHONE) =>
-      service.handleTurn({ spaceId: "group", senderId, senderName: "Rohan", text, messageId: `m${(n += 1)}` });
+    const say = async (text: string, senderId = ROHAN_PHONE) => {
+      if (n === 0) {
+        for (const id of options.provision ?? []) {
+          await s.guard.registry.ensureCustomerTestnetWallet(id);
+        }
+      }
+      return service.handleTurn({ spaceId: "group", senderId, senderName: "Rohan", text, messageId: `m${(n += 1)}` });
+    };
     return { s, provider, service, say };
   }
 
   it("asks first, then pays Keith $5 from Rohan's own Testnet wallet after yes", async () => {
-    const { s, provider, service, say } = chat();
+    const { s, provider, service, say } = chat({ provision: ["rohan", "keith"] });
     const ask = await say("Pay Keith $5 for dinner");
     expect(ask.reply).toBe(confirmationText({ recipientName: "Keith", amountUsd: 5, memo: "dinner" }));
     expect(s.ledger.submits).toHaveLength(0);
@@ -595,6 +606,49 @@ describe("Photon payment flow settles between customer wallets", () => {
     expect(s.guard.registry.getWallet("RandomFakeCustomer")).toBeUndefined();
   });
 
+  it("refuses a registered recipient who has no Testnet wallet before confirmation", async () => {
+    const { s, service, say } = chat({ provision: ["rohan"] });
+    const reply = await say("Pay Keith $5");
+    expect(reply.reply).toBe(missingRecipientWalletText("Keith"));
+    expect(service.payments.active("group")).toBeUndefined();
+    expect(s.ledger.submits).toHaveLength(0);
+    expect(s.guard.registry.getWallet("keith")).toBeUndefined();
+  });
+
+  it("refuses a named person from DeepSpace with no wallet and does not ask Gemini to send", async () => {
+    const s = stack({ autonomousEnabled: false });
+    const settlement = new CustomerWalletSettlement(
+      s.guard.executor,
+      parseCustomerSenders(JSON.stringify({ "+15550000001": "rohan" })),
+      undefined,
+      (id) => s.guard.registry.getAddress(id),
+    );
+    await s.guard.registry.ensureCustomerTestnetWallet("rohan");
+    const interpreter: PaymentInterpreter = {
+      async extract(input) {
+        expect(input.people?.some((person) => person.displayName === "Jules" && !person.xrplAddress)).toBe(true);
+        return { intent: "SEND_PAYMENT", recipientName: "Jules", amountUsd: 5, memo: null };
+      },
+    };
+    const service = new PaymentService({
+      provider: new MockPaymentProvider(),
+      directory: loadRecipientDirectory(),
+      settlement,
+      interpreter,
+      peopleDirectory: () => [{ displayName: "Jules", userId: "jules-user" }],
+    });
+    const reply = await service.handleTurn({
+      spaceId: "group",
+      senderId: "+15550000001",
+      senderName: "Rohan",
+      text: "Could you transfer five bucks to Jules?",
+      messageId: "m-jules",
+    });
+    expect(reply.reply).toBe(missingRecipientWalletText("Jules"));
+    expect(service.payments.active("group")).toBeUndefined();
+    expect(s.ledger.submits).toHaveLength(0);
+  });
+
   it("ignores an XRPL address chosen by the model", async () => {
     const attacker = Wallet.generate().classicAddress;
     const interpreter: PaymentInterpreter = {
@@ -610,10 +664,9 @@ describe("Photon payment flow settles between customer wallets", () => {
   });
 
   it("reports a policy denial without claiming anything moved", async () => {
-    const { s, service, say } = chat();
-    await s.guard.registry.ensureCustomerTestnetWallet("rohan");
-    s.ledger.balances.set(s.guard.registry.getAddress("rohan") ?? "", "3000000");
+    const { s, service, say } = chat({ provision: ["rohan", "keith"] });
     await say("Pay Keith $5");
+    s.ledger.balances.set(s.guard.registry.getAddress("rohan") ?? "", "3000000");
     const reply = await say("yes");
     expect(reply.reply).toContain("INSUFFICIENT_BALANCE");
     expect(reply.reply).toContain("Nothing moved on XRPL Testnet");

@@ -67,6 +67,7 @@ async function main(): Promise<number> {
   try {
     const settlement = new CustomerWalletSettlement(xrpl.guard.executor, { ...senders, ...onboarding.senderMap() }, () =>
       onboarding.displayNames(),
+      (id) => xrpl.guard.registry.getAddress(id) ?? onboarding.findByCustomerId(id)?.xrplAddress,
     );
     const prod = createPaymentRuntime({
       settlement,
