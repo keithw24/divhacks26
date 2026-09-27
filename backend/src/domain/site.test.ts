@@ -78,6 +78,27 @@ describe('website sign-in on DeepSpace', () => {
     await expect(site.verifyPhone(challenge, '9175550120')).rejects.toMatchObject({ code: 'challenge_expired' })
   })
 
+  it("shows each person their own @agent number, and fails clearly without one", async () => {
+    const store = createFakeStore()
+    const emailed: Record<string, string> = {}
+    const numbers: Record<string, string> = { '+19175550130': '+14155550030', '+19175550131': '+14155550031' }
+    const make = (agentNumberFor?: (p: string) => Promise<string | null>) =>
+      createSite({ store, secret: 's', maxUsers: 100, agentNumberFor, sendEmailCode: async (e, c) => { emailed[e] = c } })
+    const site = make(async (phone) => numbers[phone] ?? null)
+    for (const [phone, agent] of Object.entries(numbers)) {
+      const email = `${phone.slice(-4)}@example.com`
+      await site.startEmail(email)
+      const { challenge } = await site.verifyEmail(email, emailed[email])
+      expect((await site.startPhone(challenge, phone)).agentNumber).toBe(agent)
+    }
+    const broken = make(async () => {
+      throw new Error('photon down')
+    })
+    await broken.startEmail('x@example.com')
+    const { challenge } = await broken.verifyEmail('x@example.com', emailed['x@example.com'])
+    await expect(broken.startPhone(challenge, '9175550132')).rejects.toMatchObject({ code: 'number_unavailable' })
+  })
+
   it('reads code texts loosely but not ordinary numbers', () => {
     expect(parsePhoneCodeText('CODE 482913')).toBe('482913')
     expect(parsePhoneCodeText(' code:482-913 ')).toBe('482913')

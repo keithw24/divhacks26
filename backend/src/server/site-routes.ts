@@ -19,6 +19,7 @@ import { createSite, type SiteUser, publicUser } from '../domain/site'
 import { ServiceError } from '../domain/store'
 import { enrollAgentWalletHttp } from '../domain/wallets'
 import { createActionTools } from './action-routes.js'
+import { assignedAgentNumber } from './photon-users.js'
 
 /** Identity the site's writes are attributed to in `createdBy`. */
 export const SITE_USER = 'system:website'
@@ -40,6 +41,7 @@ const STATUS: Record<string, number> = {
   wallet_unavailable: 503,
   memory_unavailable: 503,
   site_unconfigured: 503,
+  number_unavailable: 503,
 }
 
 type SiteContext = Context<AppContext>
@@ -99,6 +101,17 @@ export function siteFor(env: Env) {
       secret,
       maxUsers: Number(env.BETA_MAX_USERS ?? 100) || 100,
       agentNumber: env.AGENT_NUMBER,
+      agentNumberFor:
+        env.PHOTON_ID && env.PHOTON_SECRET
+          ? async (phone) => {
+              try {
+                return await assignedAgentNumber({ projectId: env.PHOTON_ID!, secret: env.PHOTON_SECRET! }, phone)
+              } catch (error) {
+                console.error(`[site] photon number lookup failed: ${error instanceof Error ? error.message.slice(0, 200) : 'Error'}`)
+                throw error
+              }
+            }
+          : undefined,
       sendEmailCode: (email, code) =>
         sendEmail(tools, env, {
           to: email,

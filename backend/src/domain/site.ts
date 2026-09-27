@@ -60,7 +60,12 @@ export interface SiteDeps {
   secret: string
   maxUsers: number
   sendEmailCode(email: string, code: string): Promise<void>
-  /** @agent's iMessage number, shown only after the email is verified. */
+  /**
+   * The @agent number this person should text. On Photon's shared pool each
+   * person gets their own (registering them with Photon if needed).
+   */
+  agentNumberFor?(phone: string): Promise<string | null>
+  /** Fallback single @agent number (AGENT_NUMBER) if Photon lookup isn't configured. */
   agentNumber?: string
   now?: () => number
 }
@@ -319,8 +324,18 @@ export function createSite(deps: SiteDeps) {
       const verified = await challengeEmail(challenge)
       if (!verified) throw new ServiceError('challenge_expired', 'Start again with your email.')
       await assertPairing(verified.email, phone)
+      // Their own @agent number first: without it they have nobody to text.
+      let agentNumber = deps.agentNumber || null
+      if (deps.agentNumberFor) {
+        try {
+          agentNumber = (await deps.agentNumberFor(phone)) ?? agentNumber
+        } catch {
+          if (!agentNumber) throw new ServiceError('number_unavailable', "Couldn't set up @agent for this number. Try again.")
+        }
+      }
+      if (!agentNumber) throw new ServiceError('number_unavailable', "Couldn't set up @agent for this number. Try again.")
       const code = await issueCode(`phone:${phone}`, async () => {})
-      return { ok: true, code, agentNumber: deps.agentNumber || null }
+      return { ok: true, code, agentNumber }
     },
 
     /**
