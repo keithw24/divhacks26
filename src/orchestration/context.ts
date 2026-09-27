@@ -75,12 +75,36 @@ export interface PendingChoice {
   expiresAt: number;
 }
 
+export type AssistantQuestionKind =
+  | "ticket_prices"
+  | "ticket_purchase"
+  | "ticket_quantity"
+  | "restaurant_booking"
+  | "restaurant_choice"
+  | "event_choice"
+  | "location"
+  | "confirmation";
+
+export type AssistantDomain = "ticketing" | "reservation" | "transport" | "safety" | "payment" | "planning" | "general";
+
+export interface CandidateOption {
+  id: string;
+  name: string;
+  kind: "event" | "restaurant" | "place";
+  details?: Record<string, unknown>;
+}
+
 export interface ConversationContext {
   spaceId: string;
   event?: EventFocus;
   dining?: DiningSearch;
   restaurant?: RestaurantFocus;
   pendingChoice?: PendingChoice;
+  lastAssistantQuestion?: string;
+  lastAssistantQuestionKind?: AssistantQuestionKind;
+  lastAssistantDomain?: AssistantDomain;
+  activeIntent?: string;
+  candidates?: CandidateOption[];
   updatedAt: number;
 }
 
@@ -136,6 +160,51 @@ export class ConversationContextStore {
         category: event.category,
         focusedAt: this.clock(),
       };
+      context.activeIntent = "events";
+    });
+  }
+
+  noteAssistantTurn(spaceId: string, replyText: string, domain?: string): void {
+    const text = replyText.trim();
+    let kind: AssistantQuestionKind | undefined;
+    let detectedDomain: AssistantDomain = (domain as AssistantDomain) || "general";
+
+    if (/want ticket prices\??$/i.test(text) || /want me to check (?:the )?options\??$/i.test(text)) {
+      kind = "ticket_prices";
+      detectedDomain = "ticketing";
+    } else if (/want me to (?:buy|purchase)(?: them| it)?\??(?:\s*\([^)]*\))?$/i.test(text) || /want me to grab two\??$/i.test(text)) {
+      kind = "ticket_purchase";
+      detectedDomain = "ticketing";
+    } else if (/how many tickets\b/i.test(text)) {
+      kind = "ticket_quantity";
+      detectedDomain = "ticketing";
+    } else if (/want me to book it\b/i.test(text) || /want me to make (?:a|the )?reservation\b/i.test(text)) {
+      kind = "restaurant_booking";
+      detectedDomain = "reservation";
+    } else if (/which one\b/i.test(text)) {
+      kind = "event_choice";
+    } else if (/where in nyc are you\b/i.test(text)) {
+      kind = "location";
+      detectedDomain = "planning";
+    }
+
+    this.update(spaceId, (context) => {
+      context.lastAssistantQuestion = kind ? text : undefined;
+      context.lastAssistantQuestionKind = kind;
+      context.lastAssistantDomain = detectedDomain;
+    });
+  }
+
+  clearAssistantQuestion(spaceId: string): void {
+    this.update(spaceId, (context) => {
+      context.lastAssistantQuestion = undefined;
+      context.lastAssistantQuestionKind = undefined;
+    });
+  }
+
+  noteCandidates(spaceId: string, candidates: CandidateOption[]): void {
+    this.update(spaceId, (context) => {
+      context.candidates = candidates;
     });
   }
 

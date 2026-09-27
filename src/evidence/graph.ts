@@ -155,7 +155,9 @@ export function renderEvidencePlan(plan: EvidencePlan, maxLength = 1900): string
   const lines: string[] = [];
   const rendered: string[] = [];
   const byId = new Map(plan.claims.map(c => [c.claimId, c]));
-  const notes = [...plan.unavailable, ...plan.limitations.filter(l => /Historical complaints|routes are beta|requested travel mode/.test(l))];
+  // Internal diagnostic objects must never be rendered into user-facing text (Requirement 2 & 7)
+  const notes = [...plan.unavailable, ...plan.limitations.filter(l => /routes are beta|requested travel mode/.test(l))]
+    .filter(n => !/source unavailable|no supported claims returned|partial results|supported claims|dataset freshness|Historical complaints/i.test(n));
   const noteText = notes.map(n => `Note: ${n}`).join("\n");
   const limit = Math.max(0, maxLength - noteText.length - 1);
   function append(line: string, ids: string[] = []) {

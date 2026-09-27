@@ -563,6 +563,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       suggest: (input) =>
         suggestNext({
           ...input,
+          ticketProvider: ticketing.provider,
           onEvidence: (plan) => saveEvidencePlan(agentState, who, plan),
           // The chart follows the text card; it is dropped if Gemini's restyle fails the read-back check.
           onSafetyReport: (report) => {
@@ -581,6 +582,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       recordChatMessage: recordMessage,
       recordAssistant: (replyText, meta) => {
         recordMessage(space.id, config.agentName, replyText);
+        conversationContext.noteAssistantTurn(space.id, replyText, meta?.outcome);
         // A signed-up user's own voice setting from the website wins over the global default.
         const speak = shouldSpeak({
           mode: web?.voicePreference(who) ?? config.voiceReplies,

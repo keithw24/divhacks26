@@ -1,19 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type { EvidenceCall, EvidencePlan } from "../domain/evidence.js";
-import type { SkillResult } from "../domain/contracts.js";
+import type { EventRecommendation, Location, Recommendation, SkillResult, UserIntent } from "../domain/contracts.js";
 import { buildEvidenceGraph } from "../evidence/graph.js";
 import { config } from "../config.js";
-import type { Location, Recommendation, UserIntent } from "../domain/contracts.js";
 import { prefersSaferSlowerRoute } from "../formatReport.js";
 import { geocodeNyc } from "../geocode.js";
 import { applyNavHazards } from "../navigation/guide.js";
 import { lookupNavHazards, nightHourEt, recentOpsNote } from "../navigation/hazards.js";
 import { asksDirectionsHome, wantsSafetySketch } from "../safetyIntent.js";
+import { distanceMeters } from "../skills/geo.js";
 import { findEvents } from "../skills/eventsSkill.js";
 import { findFood } from "../skills/foodSkill.js";
 import { getRoute } from "../skills/routeSkill.js";
 import type { BlockSafetyReport } from "../safety.js";
 import { getSafety } from "../skills/safetySkill.js";
+import type { TicketProvider } from "../ticketing/types.js";
 import { renderResponse, rankRecommendationsSync } from "./compose.js";
 import { parseIntent, heuristicIntent } from "./intent.js";
 
@@ -31,6 +32,7 @@ export interface OrchestratorInput {
   privateConstraintLines?: Array<{ who: string; text: string }>;
   /** Called with the Tiger report when the user asked about safety (e.g. to send the chart image). */
   onSafetyReport?: (report: BlockSafetyReport) => void;
+  ticketProvider?: TicketProvider;
 }
 
 function sharedLocation(input: OrchestratorInput): Location | undefined {
@@ -117,9 +119,130 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
         tavilyApiKey: config.tavilyApiKey,
       }), [])
     : Promise.resolve(null);
+  const ticketEventsPromise =
+    input.ticketProvider && intent.needs.includes("events")
+      ? observed("events", async () => {
+          try {
+            const raw = await input.ticketProvider!.searchEvents({
+              latitude: origin.latitude,
+              longitude: origin.longitude,
+              radiusMiles: Math.max(3, Math.round(((intent.maxTravelMinutes ?? 30) * 80) / 1609)),
+              startDateTime: window.from,
+              endDateTime: window.to,
+              size: 10,
+            });
+            const recs: EventRecommendation[] = raw.map((item) => ({
+              id: `ticket:${item.id}`,
+              kind: "event" as const,
+              name: item.name,
+              location: {
+                label: item.venue ? `${item.venue}${item.address ? `, ${item.address}` : ""}` : origin.label,
+                latitude: item.latitude ?? origin.latitude,
+                longitude: item.longitude ?? origin.longitude,
+              },
+              distanceMeters: Math.round(
+                distanceMeters(origin, {
+                  label: item.venue || item.name,
+                  latitude: item.latitude ?? origin.latitude,
+                  longitude: item.longitude ?? origin.longitude,
+                }),
+              ),
+              startsAt: item.localDate
+                ? (item.localTime ? `${item.localDate}T${item.localTime}:00` : `${item.localDate}T19:00:00`)
+                : undefined,
+              categories: item.category ? [item.category] : ["event"],
+              priceLevel: item.minPrice !== undefined ? `$${Math.round(item.minPrice)}` : undefined,
+              url: item.url,
+              source: {
+                name: input.ticketProvider!.name === "ticketmaster" ? "Ticketmaster" : "Tickets",
+                url: item.url,
+                updatedAt: new Date().toISOString(),
+                updatedAtKind: "provider" as const,
+              },
+            }));
+            return {
+              status: recs.length ? "ok" : "partial",
+              data: recs,
+              sources: [{ name: input.ticketProvider!.name === "ticketmaster" ? "Ticketmaster" : "Tickets" }],
+              warnings: recs.length ? [] : ["No ticketed events matched this location and time window."],
+            };
+          } catch {
+            return { status: "partial", data: [], sources: [], warnings: [] };
+          }
+        }, [])
+      : Promise.resolve(null);
 
-  const [food, events] = await Promise.all([foodPromise, eventsPromise]);
-  const candidates: Recommendation[] = [...(events?.data ?? []), ...(food?.data ?? [])];
+  const [food, events, ticketEvents] = await Promise.all([foodPromise, eventsPromise, ticketEventsPromise]);
+  let candidates: Recommendation[] = [...(events?.data ?? []), ...(ticketEvents?.data ?? []), ...(food?.data ?? [])];
+
+  // If no exact matches in immediate vicinity, search nearby area (up to ~3 miles) for useful alternatives
+  if (candidates.length === 0 && origin && (intent.needs.includes("events") || intent.needs.includes("food"))) {
+    const widerRadius = 5000;
+    const [widerEvents, widerTickets, widerFood] = await Promise.all([
+      intent.needs.includes("events")
+        ? observed("events", () => findEvents({
+            origin,
+            from: window.from,
+            to: window.to,
+            radiusMeters: widerRadius,
+            categories: intent.categories.map((c) => c.toLowerCase()),
+            budget: intent.budget,
+            databaseUrl: config.databaseUrl,
+            tavilyApiKey: config.tavilyApiKey,
+          }), [])
+        : Promise.resolve(null),
+      input.ticketProvider && intent.needs.includes("events")
+        ? input.ticketProvider.searchEvents({
+            latitude: origin.latitude,
+            longitude: origin.longitude,
+            radiusMiles: 4,
+            startDateTime: window.from,
+            endDateTime: window.to,
+            size: 5,
+          }).then((res) => res.map((item) => ({
+            id: `ticket:${item.id}`,
+            kind: "event" as const,
+            name: item.name,
+            location: {
+              label: item.venue ? `${item.venue}${item.address ? `, ${item.address}` : ""}` : origin.label,
+              latitude: item.latitude ?? origin.latitude,
+              longitude: item.longitude ?? origin.longitude,
+            },
+            distanceMeters: Math.round(
+              distanceMeters(origin, {
+                label: item.venue || item.name,
+                latitude: item.latitude ?? origin.latitude,
+                longitude: item.longitude ?? origin.longitude,
+              }),
+            ),
+            startsAt: item.localDate
+              ? (item.localTime ? `${item.localDate}T${item.localTime}:00` : `${item.localDate}T19:00:00`)
+              : undefined,
+            categories: item.category ? [item.category] : ["event"],
+            priceLevel: item.minPrice !== undefined ? `$${Math.round(item.minPrice)}` : undefined,
+            url: item.url,
+            source: {
+              name: input.ticketProvider!.name === "ticketmaster" ? "Ticketmaster" : "Tickets",
+              url: item.url,
+              updatedAt: new Date().toISOString(),
+              updatedAtKind: "provider" as const,
+            },
+          }))).catch(() => [])
+        : Promise.resolve([]),
+      intent.needs.includes("food")
+        ? observed("food", () => findFood({
+            origin,
+            cuisine: intent.cuisine,
+            budget: intent.budget,
+            openNow: !/tomorrow|later/i.test(intent.when),
+            apiKey: config.googleMapsApiKey,
+            strict: config.liveDemoMode,
+          }), [])
+        : Promise.resolve(null),
+    ]);
+    candidates = [...(widerEvents?.data ?? []), ...(widerTickets ?? []), ...(widerFood?.data ?? [])];
+  }
+
   const ranked = rankRecommendationsSync(
     input.question,
     candidates,
@@ -159,7 +282,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
         now,
       }), null)
     : undefined;
-  const askedSafety = wantsSafetySketch(input.question) || intent.needs.includes("safety");
+  const askedSafety = wantsSafetySketch(input.question) || (intent.needs.length === 1 && intent.needs[0] === "safety");
   if (askedSafety && safety?.data) input.onSafetyReport?.(safety.data);
   const tradeTimeForSafety =
     Boolean(intent.needs.includes("route") && destination) && prefersSaferSlowerRoute(safety?.data);
@@ -221,7 +344,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   if (opsNote) {
     graph.limitations.push(opsNote);
   }
-  const response = renderResponse({ picks, safety, route, warnings: [], graph });
+  const response = renderResponse({ picks, safety, route, warnings: [], graph, intent, question: input.question, origin });
   input.onEvidence?.(graph);
   return response;
 }

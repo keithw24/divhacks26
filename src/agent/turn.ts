@@ -241,6 +241,11 @@ export async function runConversationTurn(
           phase,
         });
         if (!result.handled || !result.reply) return false;
+        if (/didn't find any ticketed events|no ticketed events/i.test(result.reply)) {
+          // A zero-result response from one provider is not proof that nothing is happening.
+          // Fall through so other integrations (local events, Google Places, orchestrator) are checked.
+          return false;
+        }
         outcome = "ticketing";
         answer = result.reply;
         await reactTo(actions, ackFor(input.social, result.acknowledgement ?? "👍"));

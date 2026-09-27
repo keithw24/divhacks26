@@ -123,6 +123,7 @@ export class CrossDomainOrchestrator {
     try {
       return (
         (await this.confirmation(input)) ??
+        (await this.conversationalFollowUp(input)) ??
         this.paymentStatus(input) ??
         (await this.directions(input)) ??
         (await this.restaurantPick(input)) ??
@@ -209,6 +210,64 @@ export class CrossDomainOrchestrator {
     this.deps.context.update(spaceId, (draft) => {
       draft.pendingChoice = undefined;
     });
+  }
+
+  private async conversationalFollowUp(input: OrchestratorTurnInput): Promise<OrchestratorTurnResult | undefined> {
+    const text = input.text.trim().toLowerCase();
+    const isAffirmative = /^(?:yes|yep|yeah|yup|ya|sure|do it|go ahead|please|ok|okay|sounds good)(?: please)?$/i.test(text);
+    const context = this.deps.context.peek(input.spaceId);
+    if (!context) return undefined;
+
+    // Follow-up: Assistant asked "Want ticket prices?" and user said "Yes"
+    if (isAffirmative && context.lastAssistantQuestionKind === "ticket_prices") {
+      this.deps.context.clearAssistantQuestion(input.spaceId);
+      const ticketResult = await this.deps.ticketing?.handleTurn({
+        spaceId: input.spaceId,
+        senderId: input.senderId,
+        senderName: input.senderName,
+        text: "ticket prices",
+        phase: "priority",
+      });
+      if (ticketResult?.handled && ticketResult.reply) {
+        return {
+          handled: true,
+          outcome: "ticketing",
+          reply: ticketResult.reply,
+          acknowledgement: ticketResult.acknowledgement ?? "🎟️",
+          afterReply: ticketResult.afterReply,
+        };
+      }
+    }
+
+    // Follow-up: Assistant asked "Want me to book it?" and user said "Yes" / "book it"
+    if ((isAffirmative || BOOK_VERB.test(text)) && context.lastAssistantQuestionKind === "restaurant_booking" && context.restaurant) {
+      this.deps.context.clearAssistantQuestion(input.spaceId);
+      if (this.deps.reservations) {
+        const resResult = await this.deps.reservations.handleTurn({
+          spaceId: input.spaceId,
+          senderId: input.senderId,
+          senderName: input.senderName,
+          text: "book it",
+          selection: {
+            restaurant: { name: context.restaurant.name, address: context.restaurant.address, placeId: context.restaurant.placeId },
+            partySize: context.dining?.partySize,
+            requestedDate: context.dining?.date,
+            requestedTime: context.dining?.time,
+          },
+        });
+        if (resResult.handled && resResult.reply) {
+          return {
+            handled: true,
+            outcome: "reservation",
+            reply: resResult.reply,
+            acknowledgement: resResult.acknowledgement ?? "🍽️",
+            afterReply: resResult.afterReply,
+          };
+        }
+      }
+    }
+
+    return undefined;
   }
 
   /** Hand the answer to the one domain that owns the pending record. Its own checks (initiator, expiry, requote, guardrails) run as usual. */
