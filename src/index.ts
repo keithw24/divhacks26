@@ -13,6 +13,8 @@ import { setCalendarIcsBase } from "./calendar/links.js";
 import { config } from "./config.js";
 import { safetyChartImage } from "./safetyChart.js";
 import { createAlertService, startAreaAlertWatcher } from "./alerts/service.js";
+import { createLiveOutboundCaller } from "./elevenlabs/client.js";
+import { createFriendCallService, isFriendCallId, type FriendCallService } from "./phone/friend-call.js";
 import { liveDemoProblems } from "./integrations/live-demo.js";
 import { logIntegration } from "./integrations/log.js";
 import { createBackboardMemoryService } from "./memory/backboard.js";
@@ -130,7 +132,19 @@ const meetup = createMeetupRuntime({
   timeZone: config.timezone,
   stateStore: agentState,
 });
+// Set once the friend-call service exists (it needs spaceSenders); ElevenLabs results check it first.
+let friendCalls: FriendCallService | undefined;
 const reservations = createReservationRuntime({
+  otherCallCompletion: async (completion) =>
+    isFriendCallId(completion.reservationId) && friendCalls
+      ? friendCalls.handleCompletion({
+          conversationId: completion.conversationId,
+          callId: completion.reservationId,
+          failed: completion.type === "call_initiation_failure",
+          transcript: completion.transcript,
+          terminationReason: completion.terminationReason,
+        })
+      : false,
   callMode: reservationCallMode,
   providers: config.liveDemoMode ? [] : undefined,
   mockScenario: config.reservationMockScenario,
@@ -162,6 +176,38 @@ const reservations = createReservationRuntime({
       console.info(JSON.stringify({ event: "reservation_result_undelivered", spaceId }));
       return;
     }
+    await send(text);
+  },
+});
+// "@agent call Alex and ask…": live ElevenLabs calls only (the mock caller simulates restaurants).
+friendCalls = createFriendCallService({
+  store: agentState,
+  caller:
+    reservationCallMode === "live" && config.elevenLabsApiKey && config.elevenLabsAgentId && config.elevenLabsAgentPhoneNumberId
+      ? createLiveOutboundCaller({
+          apiKey: config.elevenLabsApiKey,
+          agentId: config.elevenLabsAgentId,
+          agentPhoneNumberId: config.elevenLabsAgentPhoneNumberId,
+        })
+      : undefined,
+  // Group members (their iMessage handles are numbers) and people who onboarded a wallet.
+  knownPeople: (spaceId) => {
+    const people: Array<{ name: string; phone: string }> = [];
+    for (const p of agentState.getState().spaces[spaceId]?.participants ?? []) {
+      if (p.displayName && /^\+\d{10,15}$/.test(p.id)) people.push({ name: p.displayName, phone: p.id });
+    }
+    for (const row of onboardingStore.list()) {
+      if (/^\+\d{10,15}$/.test(row.photonSenderId)) people.push({ name: row.customerName, phone: row.photonSenderId });
+    }
+    return people;
+  },
+  notify: async (spaceId, text) => {
+    const send = spaceSenders.get(spaceId);
+    if (!send) {
+      console.info(JSON.stringify({ event: "friend_call_result_undelivered", spaceId }));
+      return;
+    }
+    recordMessage(spaceId, config.agentName, text);
     await send(text);
   },
 });
@@ -618,6 +664,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       wallets: walletChat,
       ticketing: ticketing.service,
       meetup: meetup.service,
+      friendCalls,
       ledger,
       alerts,
       orchestration,

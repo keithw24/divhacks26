@@ -71,6 +71,8 @@ export interface TurnDeps {
     messageId?: string;
     phase: "priority" | "fallback";
   }): Promise<ReservationHandlerResult>;
+  /** "@agent call Alex and ask…": confirm, then an ElevenLabs call to the friend. */
+  handleFriendCall?(input: { spaceId: string; senderName?: string; text: string }): Promise<ReservationHandlerResult>;
   /** Area alerts: "watch my area", "anything going on near me?", "stop alerts". */
   handleAlerts?(input: { spaceId: string; text: string }): Promise<ReservationHandlerResult>;
   /** Friend-style reply for venting with nothing to look up. */
@@ -126,6 +128,7 @@ export type TurnOutcome =
   | "transport"
   | "orchestration"
   | "alerts"
+  | "friend_call"
   | "gemini"
   | "failed";
 
@@ -202,6 +205,18 @@ export async function runConversationTurn(
           outcome = "ledger";
           answer = ledger.reply;
           await reactTo(actions, ackFor(input.social, ledger.acknowledgement ?? "👍"));
+          await deliverOnce(deliveryActions, answer);
+          delivered = true;
+          return;
+        }
+      }
+      // Before orchestration: a pending call's "yes" must confirm the call.
+      if (deps.handleFriendCall) {
+        const friendCall = await deps.handleFriendCall({ spaceId: input.spaceId, senderName: input.senderName, text: question });
+        if (friendCall.handled && friendCall.reply) {
+          outcome = "friend_call";
+          answer = friendCall.reply;
+          await reactTo(actions, ackFor(input.social, friendCall.acknowledgement ?? "👍"));
           await deliverOnce(deliveryActions, answer);
           delivered = true;
           return;
