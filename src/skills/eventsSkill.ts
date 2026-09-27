@@ -6,6 +6,7 @@ import type {
   Source,
 } from "../domain/contracts.js";
 import { getPool } from "../safety.js";
+import { createGeminiMapsClient } from "../transport/gemini.js";
 
 export interface EventsInput {
   origin: Location;
@@ -16,8 +17,17 @@ export interface EventsInput {
   budget?: Budget;
   databaseUrl?: string;
   tavilyApiKey?: string;
+  geminiApiKey?: string;
+  geminiModel?: string;
   fetcher?: typeof fetch;
   query?: (sql: string, values: unknown[]) => Promise<{ rows: EventRow[] }>;
+  /** Injected Gemini nearby lookup so tests do not hit the network. */
+  geminiNearby?: (origin: Location, query: string) => Promise<{ text: string; sources?: Source[] }>;
+}
+
+export interface EventsResult extends SkillResult<EventRecommendation[]> {
+  /** Ungraphable Gemini / Maps nearby answer. Official Tiger rows stay in `data`. */
+  geminiReply?: string;
 }
 
 interface EventRow {
@@ -122,9 +132,19 @@ async function tavilySources(input: EventsInput, events: EventRecommendation[]):
   }
 }
 
-export async function findEvents(input: EventsInput): Promise<SkillResult<EventRecommendation[]>> {
-  if (!input.databaseUrl) {
-    return { status: "unavailable", data: [], sources: [], warnings: ["Tiger Data is not configured."] };
+async function loadOfficialEvents(input: EventsInput): Promise<{
+  events: EventRecommendation[];
+  sources: Source[];
+  warnings: string[];
+  status: SkillResult<EventRecommendation[]>["status"];
+}> {
+  if (!input.databaseUrl && !input.query) {
+    return {
+      events: [],
+      sources: [],
+      warnings: ["Tiger Data is not configured."],
+      status: "unavailable",
+    };
   }
   try {
     const values = [
@@ -137,7 +157,7 @@ export async function findEvents(input: EventsInput): Promise<SkillResult<EventR
     ];
     const result = input.query
       ? await input.query(EVENTS_SQL, values)
-      : await getPool(input.databaseUrl).query<EventRow>(EVENTS_SQL, values);
+      : await getPool(input.databaseUrl!).query<EventRow>(EVENTS_SQL, values);
     const seen = new Set<string>();
     const events = result.rows
       .map(normalizeEvent)
@@ -154,13 +174,90 @@ export async function findEvents(input: EventsInput): Promise<SkillResult<EventR
       { name: "NYC Permitted Event Information", url: "https://data.cityofnewyork.us/d/tvpp-9vvx" },
     ];
     return {
-      status: events.length ? "ok" : "partial",
-      data: events,
+      events,
       sources: [...officialSources, ...enrichment],
       warnings: events.length ? [] : ["No official NYC Parks or permitted events matched this time window."],
+      status: events.length ? "ok" : "partial",
     };
   } catch (error) {
     console.error("events skill failed:", error);
-    return { status: "unavailable", data: [], sources: [], warnings: ["Event search is temporarily unavailable."] };
+    return {
+      events: [],
+      sources: [],
+      warnings: ["Event search is temporarily unavailable."],
+      status: "unavailable",
+    };
   }
+}
+
+function eventsGeminiQuery(input: EventsInput): string {
+  const categories = input.categories.length ? input.categories.join(", ") : "any";
+  return [
+    "What public events and activities are happening near this NYC location in the requested window?",
+    `Window: ${input.from} to ${input.to}.`,
+    `Categories: ${categories}.`,
+    "Answer in a few short iMessage lines. Name venues and times only when Maps grounding supports them.",
+  ].join(" ");
+}
+
+async function loadGeminiEvents(input: EventsInput): Promise<{ text?: string; sources: Source[] }> {
+  try {
+    if (input.geminiNearby) {
+      const result = await input.geminiNearby(input.origin, eventsGeminiQuery(input));
+      const text = result.text.trim();
+      return { ...(text && { text }), sources: result.sources ?? [] };
+    }
+    const key = input.geminiApiKey?.trim();
+    if (!key) return { sources: [] };
+    const client = createGeminiMapsClient({ apiKey: key, model: input.geminiModel });
+    const grounded = await client.nearby(
+      {
+        name: input.origin.label,
+        latitude: input.origin.latitude,
+        longitude: input.origin.longitude,
+        source: "user",
+        confidence: 1,
+      },
+      eventsGeminiQuery(input),
+    );
+    const text = grounded.text.trim();
+    return {
+      ...(text && { text }),
+      sources: grounded.sources.flatMap((source) =>
+        source.uri || source.title ? [{ name: source.title || "Google Maps", url: source.uri }] : [],
+      ),
+    };
+  } catch (error) {
+    console.error("events Gemini nearby failed:", error);
+    return { sources: [] };
+  }
+}
+
+export function mergeOfficialAndGeminiReply(
+  official: string,
+  geminiReply?: string,
+  hasOfficialEvent = false,
+): string {
+  const extra = geminiReply?.trim();
+  if (!extra) return official;
+  if (!hasOfficialEvent && /couldn't find a verified match/i.test(official)) return extra;
+  return `${official}\n\n${extra}`;
+}
+
+export async function findEvents(input: EventsInput): Promise<EventsResult> {
+  const [official, gemini] = await Promise.all([loadOfficialEvents(input), loadGeminiEvents(input)]);
+  const status = official.events.length
+    ? "ok"
+    : gemini.text
+      ? official.status === "unavailable"
+        ? "partial"
+        : official.status
+      : official.status;
+  return {
+    status,
+    data: official.events,
+    sources: [...official.sources, ...gemini.sources],
+    warnings: official.warnings,
+    ...(gemini.text && { geminiReply: gemini.text }),
+  };
 }

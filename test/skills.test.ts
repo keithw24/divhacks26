@@ -37,6 +37,54 @@ describe("events skill", () => {
     expect(result.data[0]?.name).toBe("Outdoor Movie");
   });
 
+  it("returns Tiger rows and a Gemini nearby reply together", async () => {
+    const row = {
+      source: "NYC Parks",
+      source_id: "42",
+      title: "Outdoor Movie",
+      description: "A free movie",
+      category: "Movies",
+      starts_at: "2026-09-26T23:00:00Z",
+      ends_at: "2026-09-27T01:00:00Z",
+      venue: "Riverside Park",
+      latitude: 40.805,
+      longitude: -73.97,
+      source_url: "https://example.test/event",
+      updated_at: "2026-09-26T12:00:00Z",
+      distance_meters: 700,
+    };
+    const geminiNearby = vi.fn(async () => ({ text: "Jazz at Lincoln Center at 8pm." }));
+    const result = await findEvents({
+      origin,
+      from: "2026-09-26T12:00:00Z",
+      to: "2026-09-27T12:00:00Z",
+      radiusMeters: 3000,
+      categories: [],
+      databaseUrl: "postgres://test",
+      query: async () => ({ rows: [row] }),
+      geminiNearby,
+    });
+    expect(result.data).toHaveLength(1);
+    expect(result.geminiReply).toBe("Jazz at Lincoln Center at 8pm.");
+    expect(geminiNearby).toHaveBeenCalledOnce();
+  });
+
+  it("still returns Gemini when Tiger has no matching events", async () => {
+    const result = await findEvents({
+      origin,
+      from: "2026-09-26T12:00:00Z",
+      to: "2026-09-27T12:00:00Z",
+      radiusMeters: 3000,
+      categories: [],
+      databaseUrl: "postgres://test",
+      query: async () => ({ rows: [] }),
+      geminiNearby: async () => ({ text: "A comedy show in the Village tonight." }),
+    });
+    expect(result.data).toEqual([]);
+    expect(result.status).toBe("partial");
+    expect(result.geminiReply).toBe("A comedy show in the Village tonight.");
+  });
+
   it("authenticates Tavily enrichment with a bearer token", async () => {
     const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer tvly-test");
@@ -93,6 +141,21 @@ describe("food skill", () => {
     expect(result.data[0]?.location.latitude).toBe(40.81);
     expect(result.data[0]?.url).toBe("https://jinramen.example");
     expect(result.data[0]?.openNow).toBe(true);
+  });
+
+  it("uses Maps grounding when Places is not configured", async () => {
+    const mapsSearch = vi.fn(async () => [{
+      name: "Jin Ramen",
+      placeId: "place-maps",
+      latitude: 40.81,
+      longitude: -73.96,
+      address: "Broadway, New York",
+    }]);
+    const result = await findFood({ origin, mapsSearch });
+    expect(result.status).toBe("ok");
+    expect(result.data[0]?.placeId).toBe("place-maps");
+    expect(result.data[0]?.source.name).toBe("Google Maps");
+    expect(mapsSearch).toHaveBeenCalledOnce();
   });
 });
 

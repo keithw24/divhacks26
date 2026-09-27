@@ -31,7 +31,7 @@ import { geocodeNyc } from "./geocode.js";
 import { createMerchantDirectory } from "./payments/merchants.js";
 import { createTicketingRuntime } from "./ticketing/runtime.js";
 import { publicTicketPurchase } from "./ticketing/service.js";
-import { createMeetupRuntime } from "./meetup/runtime.js";
+import { collectInviteContacts } from "./meetup/invite.js";
 import { ConversationContextStore } from "./orchestration/context.js";
 import { createPlacesRestaurantSearch } from "./orchestration/dining.js";
 import { CrossDomainOrchestrator } from "./orchestration/orchestrator.js";
@@ -346,6 +346,9 @@ if (!config.backboardApiKey) {
 }
 if (!config.geminiApiKey) {
   console.info("GEMINI_API_KEY is not set; transportation and Maps-grounded suggestions will fall back.");
+} else {
+  const source = process.env.GEMINI_API_KEY?.trim() ? "GEMINI_API_KEY" : "GOOGLE_API_KEY";
+  console.info(`Gemini: ${config.geminiModel} via ${source} (…${config.geminiApiKey.slice(-4)})`);
 }
 console.info(
   voiceEnabled()
@@ -560,11 +563,11 @@ async function processMessages(items: { space: Space; message: Message }[]) {
   const text = texts.join("\n");
 
   const backend = await checkInWithBackend(space, message, who, text);
-  if (backend?.userId && who !== "someone") {
+  if (who !== "someone") {
     await onboarding.enroll({
       photonSenderId: who,
       displayName: senderDisplayName(message.sender),
-      userId: backend.userId,
+      userId: backend?.userId,
       provisionWallet: false,
     }).catch((error) => {
       console.error(`Tiger profile sync failed: ${error instanceof Error ? error.message.slice(0, 120) : "Error"}`);
@@ -641,6 +644,27 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       wallets: walletChat,
       ticketing: ticketing.service,
       meetup: meetup.service,
+      sendPlanInvite: (externalId, body) => paymentNotice.sendToExternalId(externalId, body),
+      inviteContacts: async () => {
+        const remote = await loadDeepSpaceDirectory();
+        const tiger = tigerDirectory ? await tigerDirectory.refresh() : [];
+        return collectInviteContacts({
+          onboarded: onboardingStore.list().map((row) => ({
+            displayName: row.customerName,
+            photonSenderId: row.photonSenderId,
+            userId: row.userId,
+          })),
+          directory: remote,
+          tiger: tiger.map((row) => ({ displayName: row.displayName, userId: row.userId })),
+        });
+      },
+      tigerPeople: async () => {
+        if (!tigerDirectory) return [];
+        return (await tigerDirectory.refresh()).map((row) => ({
+          displayName: row.displayName,
+          userId: row.userId,
+        }));
+      },
       ledger,
       alerts,
       orchestration,
