@@ -92,14 +92,66 @@ export interface NamedWallet {
   xrplAddress?: string;
 }
 
+function usableClassicAddress(value: string | undefined): string | undefined {
+  const address = value?.trim();
+  if (!address || address === "0") return undefined;
+  return isValidClassicAddress(address) ? address : undefined;
+}
+
+function personKey(person: NamedWallet): string {
+  return (person.displayName?.trim() || person.userId?.trim() || "").toLowerCase();
+}
+
+function namesMatch(person: NamedWallet, key: string): boolean {
+  const display = person.displayName?.trim().toLowerCase() ?? "";
+  const first = display.split(/\s+/)[0] ?? "";
+  const userId = person.userId?.trim().toLowerCase() ?? "";
+  return display === key || first === key || userId === key;
+}
+
+function samePerson(left: NamedWallet, right: NamedWallet): boolean {
+  const leftName = personKey(left);
+  const rightName = personKey(right);
+  if (leftName && rightName && leftName === rightName) return true;
+  const leftUser = left.userId?.trim().toLowerCase();
+  const rightUser = right.userId?.trim().toLowerCase();
+  if (leftUser && rightUser && leftUser === rightUser) return true;
+  const leftWallet = usableClassicAddress(left.xrplAddress);
+  const rightWallet = usableClassicAddress(right.xrplAddress);
+  return Boolean(leftWallet && rightWallet && leftWallet === rightWallet);
+}
+
+/** Keep one row per name/userId/wallet, preferring a real Testnet address over "no wallet". */
+export function preferNamedWallets(...groups: NamedWallet[][]): NamedWallet[] {
+  const rows: NamedWallet[] = [];
+  for (const group of groups) {
+    for (const person of group) {
+      if (!personKey(person) && !usableClassicAddress(person.xrplAddress)) continue;
+      const index = rows.findIndex((row) => samePerson(row, person));
+      if (index === -1) {
+        rows.push({ ...person });
+        continue;
+      }
+      const existing = rows[index]!;
+      const nextAddress = usableClassicAddress(person.xrplAddress) ?? usableClassicAddress(existing.xrplAddress);
+      rows[index] = {
+        ...existing,
+        ...person,
+        displayName: existing.displayName || person.displayName,
+        userId: existing.userId || person.userId,
+        xrplAddress: nextAddress ?? existing.xrplAddress ?? person.xrplAddress,
+      };
+    }
+  }
+  return rows;
+}
+
 /** Match a payee by display name or DeepSpace userId. Prefer a row that already has a Testnet address. */
 export function matchNamedWallet(name: string, people: NamedWallet[]): NamedWallet | undefined {
   const key = name.trim().toLowerCase();
   if (!key) return undefined;
-  const matches = people.filter(
-    (person) => person.displayName?.trim().toLowerCase() === key || person.userId?.trim().toLowerCase() === key,
-  );
-  return matches.find((person) => Boolean(person.xrplAddress?.trim() && isValidClassicAddress(person.xrplAddress))) ?? matches[0];
+  const matches = people.filter((person) => namesMatch(person, key));
+  return matches.find((person) => Boolean(usableClassicAddress(person.xrplAddress))) ?? matches[0];
 }
 
 const NAME_STOP = new Set([

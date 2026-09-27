@@ -1,5 +1,6 @@
 import type { DirectoryPerson } from "./client.js";
 import type { AccountOnboardingStore } from "../payments/xrpl/onboarding.js";
+import { preferNamedWallets } from "../payments/recipients.js";
 
 export interface PeopleDirectoryEntry {
   displayName?: string;
@@ -13,33 +14,23 @@ export function mergePeopleDirectory(
   local: PeopleDirectoryEntry[],
   remote: DirectoryPerson[],
 ): PeopleDirectoryEntry[] {
-  const byKey = new Map<string, PeopleDirectoryEntry>();
-  const keyOf = (row: PeopleDirectoryEntry) =>
-    (row.userId?.trim() || row.xrplAddress?.trim() || row.displayName?.trim() || "").toLowerCase();
-  for (const row of local) {
-    const key = keyOf(row);
-    if (!key) continue;
-    byKey.set(key, { ...row });
-  }
+  const remoteRows: PeopleDirectoryEntry[] = remote.map((row) => ({
+    userId: row.userId,
+    ...(row.displayName ? { displayName: row.displayName } : {}),
+    xrplAddress: row.xrplAddress,
+    ...(row.photonIdentifier ? { imessage: row.photonIdentifier } : {}),
+  }));
+  const merged = preferNamedWallets(local, remoteRows) as PeopleDirectoryEntry[];
   for (const row of remote) {
-    const existing =
-      [...byKey.values()].find((person) => person.userId === row.userId || person.xrplAddress === row.xrplAddress) ??
-      undefined;
-    if (existing) {
-      existing.userId = existing.userId || row.userId;
-      existing.xrplAddress = existing.xrplAddress || row.xrplAddress;
-      existing.displayName = existing.displayName || row.displayName;
-      existing.imessage = existing.imessage || row.photonIdentifier;
-      continue;
-    }
-    byKey.set(row.userId.toLowerCase(), {
-      userId: row.userId,
-      ...(row.displayName ? { displayName: row.displayName } : {}),
-      xrplAddress: row.xrplAddress,
-      ...(row.photonIdentifier ? { imessage: row.photonIdentifier } : {}),
-    });
+    const match = merged.find(
+      (person) =>
+        person.userId === row.userId ||
+        (row.xrplAddress && person.xrplAddress === row.xrplAddress) ||
+        (row.displayName && person.displayName?.trim().toLowerCase() === row.displayName.trim().toLowerCase()),
+    );
+    if (match) match.imessage = match.imessage || row.photonIdentifier;
   }
-  return [...byKey.values()];
+  return merged;
 }
 
 export function formatPeopleDirectory(people: PeopleDirectoryEntry[]): string[] {

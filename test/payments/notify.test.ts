@@ -7,6 +7,7 @@ import { notifyPaymentReceived } from "../../src/payments/notify.js";
 import { AccountOnboardingStore } from "../../src/payments/xrpl/onboarding.js";
 import { resetOnboardedCustomers } from "../../src/payments/xrpl/customers.js";
 import { mergePeopleDirectory, formatPeopleDirectory } from "../../src/deepspace/directory.js";
+import { matchNamedWallet } from "../../src/payments/recipients.js";
 import { buildContext, type SuggestInput } from "../../src/agent/suggest.js";
 
 const ADDRESS = Wallet.generate().classicAddress;
@@ -119,6 +120,25 @@ describe("Gemini people directory", () => {
     expect(formatPeopleDirectory([{ displayName: "Jules", userId: "jules-user" }]).join("\n")).toContain(
       "no Testnet wallet",
     );
+  });
+
+  it("keeps a Testnet address when DeepSpace lists the same name without a wallet", () => {
+    const people = mergePeopleDirectory(
+      [{ displayName: "Mike", userId: "photon:+15555550123", xrplAddress: ADDRESS }],
+      [{ userId: "site:mike", displayName: "Mike", xrplAddress: "0" }],
+    );
+    expect(people).toHaveLength(1);
+    expect(people[0]?.xrplAddress).toBe(ADDRESS);
+    expect(formatPeopleDirectory(people).join("\n")).toContain(ADDRESS);
+    expect(formatPeopleDirectory(people).join("\n")).not.toContain("no Testnet wallet");
+  });
+
+  it("pays Mike even when another directory row uses the same name without a wallet", () => {
+    const hit = matchNamedWallet("Mike", [
+      { displayName: "Mike", userId: "site:mike", xrplAddress: "0" },
+      { displayName: "Mike", userId: "photon:+15555550123", xrplAddress: ADDRESS },
+    ]);
+    expect(hit?.xrplAddress).toBe(ADDRESS);
   });
 
   it("puts the directory in the Gemini user context", () => {

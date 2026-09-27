@@ -56,7 +56,7 @@ export class CustomerWalletSettlement implements CustomerSettlementPort {
   }
 
   resolveRecipient(name: string): RegisteredCustomer | undefined {
-    return this.tiger ? this.tiger.resolveName(name, true) : findRegisteredCustomer(name);
+    return this.tiger?.resolveName(name, true) ?? findRegisteredCustomer(name);
   }
 
   lookupRecipientAddress(customerId: string): string | undefined {
@@ -65,8 +65,13 @@ export class CustomerWalletSettlement implements CustomerSettlementPort {
   }
 
   knownNames(): string[] {
-    if (this.tiger) return [...new Set(this.tiger.names())];
-    return [...new Set([...REGISTERED_CUSTOMERS.map((customer) => customer.customerName), ...(this.extraNames?.() ?? [])])];
+    return [
+      ...new Set([
+        ...(this.tiger?.names() ?? []),
+        ...REGISTERED_CUSTOMERS.map((customer) => customer.customerName),
+        ...(this.extraNames?.() ?? []),
+      ]),
+    ];
   }
 
   settle(input: SettlementRequest): Promise<PaymentExecution> {
@@ -74,12 +79,13 @@ export class CustomerWalletSettlement implements CustomerSettlementPort {
       const senderAddress = this.tiger.walletForCustomer(input.senderCustomerId);
       const recipient = this.tiger.resolveName(input.recipientName);
       const recipientAddress = recipient ? this.tiger.walletForCustomer(recipient.customerId) : undefined;
-      if (!senderAddress || !recipientAddress) throw new Error("Tiger wallet profile is missing");
-      if (this.executor.walletAddressFor(input.senderCustomerId) !== senderAddress) {
-        throw new Error("Tiger sender wallet does not match the signing wallet");
-      }
-      if (!recipient || this.executor.walletAddressFor(recipient.customerId) !== recipientAddress) {
-        throw new Error("Tiger recipient wallet does not match the registered wallet");
+      if (senderAddress && recipientAddress && recipient) {
+        if (this.executor.walletAddressFor(input.senderCustomerId) !== senderAddress) {
+          throw new Error("Tiger sender wallet does not match the signing wallet");
+        }
+        if (this.executor.walletAddressFor(recipient.customerId) !== recipientAddress) {
+          throw new Error("Tiger recipient wallet does not match the registered wallet");
+        }
       }
     }
     return this.executor.execute({

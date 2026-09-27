@@ -103,6 +103,36 @@ describe("Photon / DeepSpace account onboarding", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("still resolves Mike from onboarded accounts when Tiger has no wallet row yet", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "onboard-"));
+    const store = new AccountOnboardingStore(join(dir, "accounts.json"));
+    store.upsert({
+      photonSenderId: "+15555550123",
+      customerId: customerIdForPhotonSender("+15555550123"),
+      customerName: "Mike",
+      xrplAddress: "r4gmHsUDyMVexppaBPJmbMvYS8hz8vDjxk",
+      createdAt: new Date().toISOString(),
+      userId: "photon:+15555550123",
+    });
+    const emptyTiger = {
+      resolveName: () => undefined,
+      walletForCustomer: () => undefined,
+      names: () => [],
+    };
+    const settlement = new CustomerWalletSettlement(
+      { execute: async () => ({}), walletAddressFor: () => undefined } as never,
+      () => store.senderMap(),
+      () => store.displayNames(),
+      (customerId) => store.findByCustomerId(customerId)?.xrplAddress,
+      emptyTiger as never,
+    );
+    const mike = settlement.resolveRecipient("Mike");
+    expect(mike?.customerName).toBe("Mike");
+    expect(settlement.lookupRecipientAddress(mike!.customerId)).toBe("r4gmHsUDyMVexppaBPJmbMvYS8hz8vDjxk");
+    expect(settlement.knownNames()).toContain("Mike");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("links a Testnet wallet to a DeepSpace userId only when they ask", async () => {
     const dir = mkdtempSync(join(tmpdir(), "onboard-"));
     const store = new AccountOnboardingStore(join(dir, "accounts.json"));

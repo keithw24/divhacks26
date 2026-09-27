@@ -51,6 +51,7 @@ import { readPublicIntegrations } from "./integrations/report.js";
 import { photonSenderFromUserId } from "./identity/users.js";
 import { startDeepSpaceProfileSync } from "./deepspace/profile-sync.js";
 import { createDirectoryCache, mergePeopleDirectory, type PeopleDirectoryEntry } from "./deepspace/directory.js";
+import { preferNamedWallets } from "./payments/recipients.js";
 import { notifyPaymentReceived } from "./payments/notify.js";
 import { getPool } from "./safety.js";
 import { TigerProfileDirectory, TigerUserProfileStore } from "./profiles/tiger.js";
@@ -143,10 +144,7 @@ const payments = createPaymentRuntime({
     });
   },
   audit: xrpl?.guard.audit,
-  peopleDirectory: () =>
-    peopleSnapshot.current.length
-      ? peopleSnapshot.current
-      : onboardingStore.peopleDirectory(),
+  peopleDirectory: () => preferNamedWallets(onboardingStore.peopleDirectory(), peopleSnapshot.current),
 });
 const meetup = createMeetupRuntime({
   googleMapsApiKey: config.googleMapsApiKey,
