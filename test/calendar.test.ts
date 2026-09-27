@@ -72,6 +72,9 @@ describe("calendar links", () => {
       requestedTime: "19:45",
       flexibilityKnown: false,
       confirmGeneration: 0,
+      confirming: false,
+      callPlaced: false,
+      resultDelivered: false,
       status: "BOOKED",
     });
     expect(reservation?.title).toBe("L'Artusi");
