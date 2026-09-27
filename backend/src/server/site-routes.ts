@@ -177,7 +177,17 @@ export function registerSiteRoutes(app: Hono<AppContext>): void {
   // Bearer tokens, no cookies, so any origin may call these.
   app.use(`${BASE}/*`, cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type'], maxAge: 600 }))
 
-  app.get(`${BASE}/healthz`, (c) => c.json({ status: 'ok', configured: Boolean(c.env.SITE_AUTH_SECRET || c.env.CHANNEL_ADAPTER_SECRET) }))
+  // Setup at a glance (booleans only, never values), so a deploy can be checked from outside.
+  app.get(`${BASE}/healthz`, (c) =>
+    c.json({
+      status: 'ok',
+      configured: Boolean(c.env.SITE_AUTH_SECRET || c.env.CHANNEL_ADAPTER_SECRET),
+      photon: Boolean(c.env.PHOTON_ID && c.env.PHOTON_SECRET),
+      email: c.env.RESEND_API_KEY ? 'resend' : 'deepspace',
+      agentNumberFallback: Boolean(c.env.AGENT_NUMBER),
+      version: 'site-api-2026-09-27',
+    }),
+  )
   app.get(`${PREFIX}/stats`, handle((c) => siteFor(c.env).site.stats()))
   // Live checks run in the agent; the site shows this as "not checked yet".
   app.get(`${PREFIX}/integrations`, (c) => c.json({ checkedAt: null, integrations: [] }))
