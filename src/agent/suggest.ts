@@ -37,7 +37,7 @@ export interface SuggestInput {
   groupLines?: { senderId: string; senderName?: string; text: string }[];
   /** How the sender and group are feeling and texting right now. */
   social?: SocialRead;
-  /** DeepSpace / onboarded people: userId and Testnet wallet only. */
+  /** Tiger-backed people directory: names, stable user ids, and public Testnet wallets only. */
   peopleDirectory?: Array<{ displayName?: string; userId?: string; xrplAddress?: string }>;
   /** Authenticated identity and public wallet metadata from Tiger. */
   userProfile?: { userId: string; displayName?: string; walletAddress: string; backboardLinked: boolean };

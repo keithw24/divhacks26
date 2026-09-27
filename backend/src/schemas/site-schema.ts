@@ -39,6 +39,8 @@ const SERVER_ONLY: Record<string, RolePermissions> = {
 export const siteUsersSchema: CollectionSchema = {
   name: 'site_users',
   columns: [
+    /** Stable opaque id synchronized to Tiger; unlike phone it is safe to expose to the model. */
+    text('userId'),
     text('phone', { required: true }),
     text('email', { required: true }),
     text('createdAt', { required: true }),

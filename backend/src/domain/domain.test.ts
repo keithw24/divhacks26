@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { betaCap, createBetaInvite, isBetaMember, redeemBetaInvite } from './beta'
-import { ackOutbox, claimOutbox, handleInbound, listWalletDirectory, notifyPaymentReceived } from './channels'
+import { ackOutbox, claimOutbox, handleInbound, listProfileDirectory, notifyPaymentReceived } from './channels'
 import { normalizeCode, parseLinkCommand } from './codes'
 import { normalizeExternalId, resolveChannelUser, startChannelLink } from './identity'
 import { createPlan, createPlanInvite, getPlan, joinPlan, leavePlan, listMyPlans, setPreferences } from './plans'
@@ -252,8 +252,14 @@ describe('payment notices', () => {
         photonSenderId: '+19175551313',
       }),
     })
-    const directory = await listWalletDirectory(store)
-    expect(directory).toEqual([{ userId: 'keith', xrplAddress: 'rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH' }])
+    const directory = await listProfileDirectory(store)
+    expect(directory).toEqual([
+      {
+        userId: 'keith',
+        xrplAddress: 'rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH',
+        photonIdentifier: '+19175551313',
+      },
+    ])
     const result = await notifyPaymentReceived(store, {
       xrplAddress: 'rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH',
       body: 'Alan sent you $1 in test XRP.',

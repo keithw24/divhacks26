@@ -26,9 +26,14 @@ export function mergePeopleDirectory(
     if (existing) {
       existing.userId = existing.userId || row.userId;
       existing.xrplAddress = existing.xrplAddress || row.xrplAddress;
+      existing.displayName = existing.displayName || row.displayName;
       continue;
     }
-    byKey.set(row.userId.toLowerCase(), { userId: row.userId, xrplAddress: row.xrplAddress });
+    byKey.set(row.userId.toLowerCase(), {
+      userId: row.userId,
+      ...(row.displayName ? { displayName: row.displayName } : {}),
+      xrplAddress: row.xrplAddress,
+    });
   }
   return [...byKey.values()];
 }

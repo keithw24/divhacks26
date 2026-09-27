@@ -256,16 +256,16 @@ export function registerSiteRoutes(app: Hono<AppContext>): void {
     signedIn(async (c, user, _token, { site }) => {
       const body = await readJson(c)
       if (body.wantWallet !== true) throw new ServiceError('want_wallet_required', 'Say you want a wallet first.')
-      if (user.xrplAddress) return { ok: true, xrplAddress: user.xrplAddress, userId: `site:${user.phone}` }
+      if (user.xrplAddress) return { ok: true, xrplAddress: user.xrplAddress, userId: user.userId }
       const enrolled = await enrollAgentWalletHttp(c.env, {
-        userId: `site:${user.phone}`,
+        userId: user.userId,
         photonSenderId: user.phone,
         displayName: user.preferences?.name,
         wantWallet: true,
       })
       if (!enrolled.xrplAddress) throw new ServiceError('wallet_unavailable', 'The agent could not create a Testnet wallet.')
       await site.recordWallet(user.phone, enrolled.xrplAddress)
-      return { ok: true, xrplAddress: enrolled.xrplAddress, userId: enrolled.userId ?? `site:${user.phone}` }
+      return { ok: true, xrplAddress: enrolled.xrplAddress, userId: enrolled.userId ?? user.userId }
     }),
   )
   app.delete(

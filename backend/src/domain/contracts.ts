@@ -78,10 +78,16 @@ export interface OutboxAck {
   error?: string
 }
 
-/** Public XRPL Testnet wallet linked to a DeepSpace user. No channel addresses. */
+/**
+ * Server-to-server profile used to synchronize the Tiger directory.
+ * `photonIdentifier` is consumed only by the adapter and hashed before Tiger
+ * stores it; it must never be included in Gemini context or logs.
+ */
 export interface DirectoryPerson {
   userId: string
+  displayName?: string
   xrplAddress: string
+  photonIdentifier?: string
 }
 
 export interface PaymentNotifyRequest {
