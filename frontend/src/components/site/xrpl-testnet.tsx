@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { API_URL } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+// The agent publishes this snapshot to the DeepSpace site API every few seconds.
 const DASHBOARD_URL =
   (import.meta.env["VITE_XRPL_DASHBOARD_URL"] as string | undefined) ??
-  "http://127.0.0.1:8790/api/xrpl/dashboard";
+  `${API_URL}/api/xrpl/dashboard`;
 const POLL_MS = 10_000;
 
 interface Wallet {
@@ -836,12 +838,10 @@ export function XrplTestnetSection() {
 
       {state.status === "offline" ? (
         <div className="bg-card outline-card rounded-2xl p-5 text-sm">
-          <div className="font-bold">Live feed not connected</div>
+          <div className="font-bold">Live feed is paused</div>
           <div className="text-muted-foreground mt-1 text-pretty">
-            This panel reads the agent's local XRPL Testnet feed and shows nothing it can't load
-            from there. Run the agent in <span className="font-mono">ripple_test</span> payments
-            mode (or <span className="font-mono">npm run xrpl:dashboard</span>) on this machine to
-            see wallets, validated payments, restaurant deposits, and blocked attempts.
+            Wallets, validated payments, and refused attempts show here while @agent is running.
+            Check back in a moment.
           </div>
         </div>
       ) : null}

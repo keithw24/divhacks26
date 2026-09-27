@@ -17,6 +17,7 @@ import { computeHmacHex, timingSafeEqualHex } from 'deepspace/worker'
 import type { AppContext, Env } from '../../worker.js'
 import { isAdapterChannel, type OutboxAck } from '../domain/contracts'
 import { ackOutbox, claimOutbox, handleInbound, listProfileDirectory, notifyPaymentReceived, parseInbound } from '../domain/channels'
+import { isSnapshotKey, saveSnapshot } from '../domain/snapshots'
 import { ServiceError } from '../domain/store'
 import { createActionTools } from './action-routes.js'
 import { siteFor } from './site-routes.js'
@@ -25,6 +26,8 @@ import { siteFor } from './site-routes.js'
 export const CHANNEL_ADAPTER_USER = 'system:channel-adapter'
 const MAX_SKEW_SECONDS = 300
 const MAX_BODY_BYTES = 64_000
+/** The XRPL dashboard lists wallets, payments and guardrail decisions, so it runs larger. */
+const MAX_SNAPSHOT_BYTES = 512_000
 
 export function signaturePayload(timestamp: string, method: string, pathWithQuery: string, body: string): string {
   return `${timestamp}.${method.toUpperCase()}.${pathWithQuery}.${body}`
@@ -45,10 +48,13 @@ export async function verifyAdapterSignature(
   return timingSafeEqualHex(expected, headers.signature.toLowerCase())
 }
 
-async function authorize(c: { req: { raw: Request; header(name: string): string | undefined }; env: Env }) {
+async function authorize(
+  c: { req: { raw: Request; header(name: string): string | undefined }; env: Env },
+  maxBytes = MAX_BODY_BYTES,
+) {
   const url = new URL(c.req.raw.url)
   const body = c.req.raw.method === 'GET' ? '' : await c.req.raw.text()
-  if (body.length > MAX_BODY_BYTES) return { ok: false as const, body }
+  if (body.length > maxBytes) return { ok: false as const, body }
   const ok = await verifyAdapterSignature(
     c.env.CHANNEL_ADAPTER_SECRET,
     { timestamp: c.req.header('X-Plans-Timestamp'), signature: c.req.header('X-Plans-Signature') },
@@ -153,6 +159,22 @@ export function registerChannelRoutes(app: Hono<AppContext>): void {
         userId,
       })
       return c.json(result)
+    } catch (error) {
+      const bad = badRequest(error)
+      if (bad) return c.json(bad.body, bad.status)
+      throw error
+    }
+  })
+
+  // Public read-only snapshots for the website (XRPL dashboard, integration check).
+  app.post('/api/channels/snapshots/:key', async (c) => {
+    const auth = await authorize(c, MAX_SNAPSHOT_BYTES)
+    if (!auth.ok) return c.json({ error: 'Unauthorized' }, 401)
+    const key = c.req.param('key')
+    if (!isSnapshotKey(key)) return c.json({ error: 'unknown snapshot' }, 404)
+    try {
+      await saveSnapshot(createActionTools(c.env, CHANNEL_ADAPTER_USER, ''), key, JSON.parse(auth.body))
+      return c.json({ ok: true })
     } catch (error) {
       const bad = badRequest(error)
       if (bad) return c.json(bad.body, bad.status)

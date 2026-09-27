@@ -45,6 +45,8 @@ import { createMailer } from "./web/email.js";
 import { readSocialContext } from "./agent/social.js";
 import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
 import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./deepspace/client.js";
+import { startSnapshotPush } from "./deepspace/snapshots.js";
+import { readPublicIntegrations } from "./integrations/report.js";
 import { startDeepSpaceProfileSync } from "./deepspace/profile-sync.js";
 import { createDirectoryCache, mergePeopleDirectory, type PeopleDirectoryEntry } from "./deepspace/directory.js";
 import { notifyPaymentReceived } from "./payments/notify.js";
@@ -414,6 +416,8 @@ console.info(
   `Ticketing: ${ticketing.provider.name} provider, ${ticketing.service.effectiveMode} checkout` +
     (ticketing.service.effectiveMode === "link" ? " (official purchase links only; nothing is bought)." : "."),
 );
+// Set when XRPL Testnet payments are on; also published to the website through DeepSpace.
+let xrplDashboard: XrplDashboardBuilder | undefined;
 if (xrpl) {
   console.info("Payments: XRPL Testnet. Person payments are signed by each customer's own Testnet wallet. No real money moves.");
   console.info(
@@ -434,14 +438,14 @@ if (xrpl) {
   } else {
     console.warn("No XRPL test wallet is configured for the payment service. Reservation deposits will be refused (run npm run xrpl:status).");
   }
-  const dashboard = new XrplDashboardBuilder({
+  const dashboard = (xrplDashboard = new XrplDashboardBuilder({
     registry: xrpl.guard.registry,
     audit: xrpl.guard.audit,
     ledger: xrpl.ledger,
     secrets: () => xrpl.secrets.knownSecrets(),
     operatorPayments: () => xrplPayments.listPublicTransactions({ limit: 20 }),
     ticketPurchases: () => ticketing.service.store.listPurchases(20).map(publicTicketPurchase),
-  });
+  }));
   void startXrplDashboardServer(config.xrplDashboardPort, () => dashboard.build())
     .then((server) => console.info(`XRPL Testnet dashboard: http://127.0.0.1:${server.port}${DASHBOARD_PATH}`))
     .catch((error) => console.warn(`XRPL dashboard did not start: ${errorCategory(error)}`));
@@ -551,6 +555,12 @@ if (deepspace) {
       intervalMs: config.deepspaceOutboxPollMs,
     });
   }
+  // The website's XRPL and "Built with" panels read these; it can't reach this machine directly.
+  if (xrplDashboard) {
+    const builder = xrplDashboard;
+    startSnapshotPush({ client: deepspace, key: "xrpl", build: () => builder.build(), intervalMs: 15_000 });
+  }
+  startSnapshotPush({ client: deepspace, key: "integrations", build: readPublicIntegrations, intervalMs: 60_000 });
   startOutboxPoller({
     client: deepspace,
     channel: "imessage",

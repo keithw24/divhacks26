@@ -24,21 +24,10 @@ export function IntegrationStatus() {
     staleTime: 60_000,
   });
 
-  if (query.isPending) {
-    return <p className="mt-4 text-sm text-muted-foreground">Checking integration status…</p>;
-  }
-  if (query.isError || !query.data) {
-    return (
-      <p className="mt-4 text-sm text-muted-foreground">
-        Live status is unavailable until the agent API is running. Nothing here is marked connected
-        by default.
-      </p>
-    );
-  }
+  // Only show statuses from a real live check; the sponsor cards below cover the rest.
+  if (!query.data?.checkedAt || query.data.integrations.length === 0) return null;
 
-  const checked = query.data.checkedAt
-    ? `Last live check ${new Date(query.data.checkedAt).toLocaleString()}`
-    : "No live check has been recorded yet. Credentials alone are not shown as live.";
+  const checked = `Last live check ${new Date(query.data.checkedAt).toLocaleString()}`;
 
   return (
     <div className="mt-6">
