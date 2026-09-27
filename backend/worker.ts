@@ -154,7 +154,7 @@ registerRealtimeRoutes(app)
 registerActionRoutes(app, resolveAuth)
 // Signed server-to-server routes for the Photon / SMS / voice adapters.
 registerChannelRoutes(app)
-// The public website's API (plansaroundus.tech), under /site/api/*.
+// The public website's API (plansaroundus.tech), under /api/site/*.
 registerSiteRoutes(app)
 // The in-app assistant stores chat history in `ai-chats` / `ai-messages`,
 // which only the copilot overlay declares. When present, registerAgent enables
