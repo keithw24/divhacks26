@@ -57,4 +57,4 @@ Without `RESEND_API_KEY` the email code prints in the agent's terminal. Type `CO
 
 ## Deploy (DigitalOcean droplet)
 
-Step by step: [`docs/digitalocean-setup.md`](../docs/digitalocean-setup.md). Only one agent may run per Photon project.
+Step by step: [`docs/digitalocean-setup.md`](../docs/digitalocean-setup.md). After setup, every green push to `main` deploys itself (`.github/workflows/deploy-droplet.yml` → `mvp/deploy/deploy.sh`, with rollback). Only one agent may run per Photon project.

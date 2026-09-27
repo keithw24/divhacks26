@@ -58,7 +58,7 @@ docker compose -f mvp/compose.yaml --profile tools run --rm migrate   # safe to 
 **Stop the agent on the friend's computer before the next step.** Only one listener per Photon project, or people get two replies.
 
 ```bash
-GIT_SHA=$(git rev-parse --short HEAD) docker compose -f mvp/compose.yaml up -d --build
+bash mvp/deploy/deploy.sh "$(git rev-parse HEAD)"   # migrate, build, start, wait for /healthz
 docker compose -f mvp/compose.yaml logs -f agent      # "agent started"
 curl -s https://api.plansaroundus.tech/healthz
 ```
@@ -82,15 +82,56 @@ The path moves from DeepSpace's `https://plans-around-us.app.space/api/site` to 
 
 The 4 people who signed up on DeepSpace sign up again (decided 2026-09-27). Nothing is migrated.
 
-## Deploying updates
+## Automatic deploys (GitHub Actions)
+
+`.github/workflows/deploy-droplet.yml` deploys every push to `main` once "Deployment CI" passes on it. It can also be run by hand: Actions → Deploy to droplet → Run workflow, with an optional commit. It SSHes in and runs `mvp/deploy/deploy.sh` from the commit being deployed. The script:
+1. checks out the commit and applies migrations;
+2. rebuilds the containers;
+3. waits until `/healthz` reports that exact commit;
+4. otherwise, **rolls back to the previous commit** and fails the run.
+
+It stays off until you turn it on:
+
+1. **Deploy key**, made on your laptop, not on the droplet:
+   ```bash
+   ssh-keygen -t ed25519 -N "" -C "github-deploy" -f droplet_deploy
+   ssh-copy-id -i droplet_deploy.pub <user>@<droplet-ip>
+   ```
+2. **Pinned host key**, so CI never trusts an impostor. Compare the fingerprint with the DigitalOcean console before saving it:
+   ```bash
+   ssh-keyscan -t ed25519 <droplet-ip> > droplet_known_hosts
+   ssh-keygen -lf droplet_known_hosts
+   ```
+3. **GitHub → Settings → Environments → New environment `production`.** Add these secrets:
+
+   | Secret | Value |
+   |---|---|
+   | `DROPLET_HOST` | droplet IP or hostname |
+   | `DROPLET_USER` | the SSH user that owns `~/divhacks26` and can run `docker` |
+   | `DROPLET_SSH_KEY` | contents of `droplet_deploy` (the private key) |
+   | `DROPLET_KNOWN_HOSTS` | contents of `droplet_known_hosts` |
+
+   Optional: add yourself under **Required reviewers** so each deploy waits for a click.
+4. **GitHub → Settings → Variables → Actions → Repository variables:**
+   - `DROPLET_DEPLOY_ENABLED` = `true`: the on/off switch.
+   - `DROPLET_DOMAIN` = `api.plansaroundus.tech` (optional). The run then also checks `https://<domain>/healthz` from outside.
+5. Delete `droplet_deploy` from your laptop, or keep it in a password manager.
+
+To pause deploys, set `DROPLET_DEPLOY_ENABLED` to anything else. The repo is public, so the droplet fetches over HTTPS without a key of its own. The code lives in `~/divhacks26` unless `REPO_DIR` is set for that user.
+
+## Deploying by hand
 
 ```bash
-cd divhacks26 && git pull
-docker compose -f mvp/compose.yaml --profile tools run --rm migrate
-GIT_SHA=$(git rev-parse --short HEAD) docker compose -f mvp/compose.yaml up -d --build
+cd ~/divhacks26 && git fetch -q origin
+bash mvp/deploy/deploy.sh "$(git rev-parse origin/main)"
 ```
 
+Same steps as CI, including the rollback. The checkout is left on a detached commit, so use the script rather than `git pull`.
+
 ## Rollback
+
+- **Bad release:** `deploy.sh` already rolls back on a failed health check. To go back further, run `bash mvp/deploy/deploy.sh <older-sha>`.
+- **Back to DeepSpace:**
 
 1. Set `VITE_AGENT_API_URL` back to `https://plans-around-us.app.space/api/site` in Vercel and redeploy.
 2. `docker compose -f mvp/compose.yaml down` on the droplet, then restart the friend's agent.

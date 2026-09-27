@@ -1,6 +1,5 @@
 # Around Me MVP on the DigitalOcean droplet. See docs/digitalocean-setup.md.
-#   docker compose -f mvp/compose.yaml --profile tools run --rm migrate   # once, and after new sql/ files
-#   GIT_SHA=$(git rev-parse --short HEAD) docker compose -f mvp/compose.yaml up -d --build
+# Deploys go through mvp/deploy/deploy.sh (CI or by hand): migrate, build, health check, rollback.
 # Exactly one agent may run per Photon project: Photon delivers each message to every listener.
 name: around-me-mvp
 

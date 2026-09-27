@@ -1,0 +1,87 @@
+name: Deploy to droplet
+
+# Deploys the MVP agent + website API to the DigitalOcean droplet after "Deployment CI" passes on a
+# push to main, or by hand from the Actions tab. Off until the repository variable
+# DROPLET_DEPLOY_ENABLED is "true". Setup: docs/digitalocean-setup.md → "Automatic deploys".
+on:
+  workflow_run:
+    workflows: ["Deployment CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to deploy (empty = the commit this run is on)
+        required: false
+        default: ""
+
+# One deploy at a time; a newer one waits instead of cancelling a deploy halfway.
+concurrency:
+  group: droplet-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >-
+      vars.DROPLET_DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    # Holds the secrets; add required reviewers here if deploys should wait for approval.
+    environment: production
+    timeout-minutes: 25
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || inputs.sha || github.sha }}
+    steps:
+      - name: Check the commit
+        run: |
+          if [[ ! "$SHA" =~ ^[0-9a-f]{7,40}$ ]]; then
+            echo "::error::'$SHA' is not a commit sha"
+            exit 1
+          fi
+          echo "Deploying $SHA"
+
+      - name: Load the deploy key and the droplet's pinned host key
+        env:
+          SSH_KEY: ${{ secrets.DROPLET_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DROPLET_KNOWN_HOSTS }}
+        run: |
+          if [[ -z "$SSH_KEY" || -z "$KNOWN_HOSTS" ]]; then
+            echo "::error::Set DROPLET_SSH_KEY and DROPLET_KNOWN_HOSTS in the production environment"
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy (rolls back on failure)
+        env:
+          DEPLOY_HOST: ${{ secrets.DROPLET_HOST }}
+          DEPLOY_USER: ${{ secrets.DROPLET_USER }}
+        run: |
+          # Runs the deploy script from the commit being deployed, not the droplet's current checkout.
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd \"\${REPO_DIR:-\$HOME/divhacks26}\" && git fetch -q origin && git show $SHA:mvp/deploy/deploy.sh | bash -s -- $SHA"
+
+      - name: Check it from outside
+        if: vars.DROPLET_DOMAIN != ''
+        env:
+          DOMAIN: ${{ vars.DROPLET_DOMAIN }}
+        run: |
+          body="$(curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "https://$DOMAIN/healthz")"
+          echo "$body"
+          version="$(jq -r '.version // empty' <<<"$body")"
+          # The agent reports a 12-character short sha; SHA may be full or short.
+          if [[ -n "$version" && ( "$SHA" == "$version"* || "$version" == "$SHA"* ) ]]; then
+            echo "https://$DOMAIN is serving $version"
+          else
+            echo "::error::https://$DOMAIN/healthz reports '$version', expected $SHA"
+            exit 1
+          fi
