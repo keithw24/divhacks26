@@ -4,6 +4,7 @@ import { ingestMemory, retrieveMemories } from "../backboard/memory.js";
 import { classifyMemory, isDurableMemory } from "../agent/classify.js";
 import { ensureSpaceThread, resolveUser, userIdFor } from "../identity/users.js";
 import type { StateStore } from "../store/state.js";
+import type { UserProfile } from "../store/state.js";
 import { isDuplicateMemory, selectRelevant } from "./relevance.js";
 import type { MemoryContext, MemoryQuery, MemoryService, MemoryWrite, MemoryWriteResult } from "./service.js";
 
@@ -20,6 +21,8 @@ export interface BackboardMemoryServiceOptions {
   memoryPro: boolean;
   writeMode: "Auto" | "Readonly" | "off";
   timeoutMs?: number;
+  /** Mirrors the stable Backboard link into the operational profile directory. */
+  onProfileResolved?: (profile: UserProfile) => Promise<void> | void;
 }
 
 /**
@@ -45,6 +48,7 @@ export function createBackboardMemoryService(options: BackboardMemoryServiceOpti
       displayName: input.displayName,
       client,
     });
+    await options.onProfileResolved?.(profile);
     if (!profile.backboardAssistantId) return null;
     return { userId: profile.userId, assistantId: profile.backboardAssistantId };
   }

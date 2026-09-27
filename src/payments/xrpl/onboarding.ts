@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { isValidClassicAddress } from "xrpl";
 import { registerOnboardedCustomer, type RegisteredCustomer } from "./customers.js";
 import type { WalletRegistry } from "./wallets.js";
+import type { UserProfileWriter } from "../../profiles/tiger.js";
 
 export interface OnboardedAccount {
   photonSenderId: string;
@@ -173,6 +174,7 @@ export class AccountOnboardingService {
   constructor(
     private readonly store: AccountOnboardingStore,
     private readonly registry?: WalletRegistry,
+    private readonly profiles?: UserProfileWriter,
   ) {
     this.store.registerAll();
   }
@@ -204,6 +206,14 @@ export class AccountOnboardingService {
       const wallet = await this.registry.ensureCustomerTestnetWallet(customerId);
       xrplAddress = wallet.xrplAddress;
       this.store.setAddress(customerId, wallet.xrplAddress);
+    }
+    if (this.profiles) {
+      await this.profiles.upsert({
+        userId: userId ?? existing?.userId ?? `photon:${photonSenderId}`,
+        displayName: customerName,
+        photonIdentifier: photonSenderId,
+        walletAddress: xrplAddress ?? "0",
+      });
     }
     return { photonSenderId, customerId, customerName, xrplAddress, created, userId: userId ?? existing?.userId };
   }

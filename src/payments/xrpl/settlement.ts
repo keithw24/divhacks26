@@ -1,6 +1,7 @@
 import { REGISTERED_CUSTOMERS, findRegisteredCustomer, type RegisteredCustomer } from "./customers.js";
 import type { XrplPaymentExecutor } from "./executor.js";
 import type { PaymentExecution } from "./types.js";
+import type { TigerProfileDirectory } from "../../profiles/tiger.js";
 
 export interface SettlementRequest {
   paymentId: string;
@@ -33,6 +34,7 @@ export class CustomerWalletSettlement implements CustomerSettlementPort {
     private readonly executor: XrplPaymentExecutor,
     senders: Record<string, string> | (() => Record<string, string>),
     private readonly extraNames?: () => string[],
+    private readonly tiger?: TigerProfileDirectory,
   ) {
     this.sendersFn = typeof senders === "function" ? senders : () => senders;
   }
@@ -44,18 +46,33 @@ export class CustomerWalletSettlement implements CustomerSettlementPort {
   resolveSender(input: { senderId?: string }): RegisteredCustomer | undefined {
     if (!input.senderId) return undefined;
     const customerId = this.senderMap().get(normalizeSenderId(input.senderId));
-    return customerId ? findRegisteredCustomer(customerId) : undefined;
+    const customer = customerId ? findRegisteredCustomer(customerId) : undefined;
+    if (customer && this.tiger && !this.tiger.walletForCustomer(customer.customerId)) return undefined;
+    return customer;
   }
 
   resolveRecipient(name: string): RegisteredCustomer | undefined {
-    return findRegisteredCustomer(name);
+    return this.tiger ? this.tiger.resolveName(name, true) : findRegisteredCustomer(name);
   }
 
   knownNames(): string[] {
+    if (this.tiger) return [...new Set(this.tiger.names())];
     return [...new Set([...REGISTERED_CUSTOMERS.map((customer) => customer.customerName), ...(this.extraNames?.() ?? [])])];
   }
 
   settle(input: SettlementRequest): Promise<PaymentExecution> {
+    if (this.tiger) {
+      const senderAddress = this.tiger.walletForCustomer(input.senderCustomerId);
+      const recipient = this.tiger.resolveName(input.recipientName);
+      const recipientAddress = recipient ? this.tiger.walletForCustomer(recipient.customerId) : undefined;
+      if (!senderAddress || !recipientAddress) throw new Error("Tiger wallet profile is missing");
+      if (this.executor.walletAddressFor(input.senderCustomerId) !== senderAddress) {
+        throw new Error("Tiger sender wallet does not match the signing wallet");
+      }
+      if (!recipient || this.executor.walletAddressFor(recipient.customerId) !== recipientAddress) {
+        throw new Error("Tiger recipient wallet does not match the registered wallet");
+      }
+    }
     return this.executor.execute({
       paymentId: input.paymentId,
       senderCustomerId: input.senderCustomerId,
