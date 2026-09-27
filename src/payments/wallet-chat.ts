@@ -27,7 +27,6 @@ function classify(text: string, recent: readonly string[]): "create" | "howto" |
   const payment = classifyPaymentMessage(text).kind;
   if (payment !== "none") return "none";
   if (askedForTestWallet(text)) return "create";
-  if (continuesCapabilityThread(text, recent) && recent.slice(-6).some(askedForTestWallet)) return "create";
   if (isAgentCapabilityTopic(text) || continuesCapabilityThread(text, recent)) return "howto";
   return "none";
 }

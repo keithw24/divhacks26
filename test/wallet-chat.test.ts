@@ -41,6 +41,29 @@ describe("wallet chat thread", () => {
     expect(second.handled).toBe(true);
     expect(second.reply).not.toMatch(/near me|walk|dinner|route/i);
     expect(second.reply).toMatch(/Send Keith \$1/);
+    expect(enroll).toHaveBeenCalledOnce();
+  });
+
+  it("does not recap the Testnet wallet on a later unrelated message", async () => {
+    const enroll = vi.fn(async () => ({
+      photonSenderId: "+19175550199",
+      customerId: "onboard_test",
+      customerName: "Alan",
+      xrplAddress: ADDRESS,
+      created: false,
+    }));
+    const chat = new WalletChatService({
+      onboarding: { enroll, publicView: vi.fn(() => ({ xrplAddress: ADDRESS })) } as unknown as AccountOnboardingService,
+    });
+    const recap = `You already have an XRPL Testnet wallet. Your XRPL Testnet wallet is ${ADDRESS}. To pay someone, text Send Keith $1.`;
+    const result = await chat.handleTurn({
+      spaceId: "s",
+      senderId: "+19175550199",
+      text: "hey what can you do",
+      recentTexts: ["can you make me an xrp test wallet", recap, "Gemini is unavailable right now"],
+    });
+    expect(result.handled).toBe(false);
+    expect(enroll).not.toHaveBeenCalled();
   });
 
   it("does not treat a payment yes as another wallet create", async () => {
