@@ -52,6 +52,12 @@ describe("Tiger user profiles", () => {
     expect(directory.names()).toEqual(["Keith", "Alan"]);
   });
 
+  it("maps a photon: Tiger user id to the onboard customer wallet id", async () => {
+    const { customerIdForPhotonSender } = await import("../src/payments/xrpl/onboarding.js");
+    const { customerIdForTigerUser } = await import("../src/profiles/tiger.js");
+    expect(customerIdForTigerUser("photon:+15555550101")).toBe(customerIdForPhotonSender("+15555550101"));
+  });
+
   it("keeps chat working when user_profiles is missing", async () => {
     const store = { list: vi.fn().mockRejectedValue(new Error('relation "user_profiles" does not exist')) };
     const directory = new TigerProfileDirectory(store as never, 60_000);

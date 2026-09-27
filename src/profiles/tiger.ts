@@ -1,10 +1,17 @@
 import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import { isValidClassicAddress } from "xrpl";
-import { customerIdForUser } from "../payments/xrpl/onboarding.js";
-import { registerOnboardedCustomer, type RegisteredCustomer } from "../payments/xrpl/customers.js";
+import { customerIdForPhotonSender, customerIdForUser } from "../payments/xrpl/onboarding.js";
+import { photonSenderFromUserId } from "../identity/users.js";
+import { findRegisteredCustomer, registerOnboardedCustomer, type RegisteredCustomer } from "../payments/xrpl/customers.js";
 
 export const NO_WALLET = "0";
+
+/** Align Tiger user ids with the local wallet registry (onboard_* for photon: rows). */
+export function customerIdForTigerUser(userId: string): string {
+  const handle = photonSenderFromUserId(userId);
+  return handle ? customerIdForPhotonSender(handle) : customerIdForUser(userId);
+}
 
 export interface TigerUserProfile {
   userId: string;
@@ -90,7 +97,14 @@ export class TigerUserProfileStore implements UserProfileWriter {
          (user_id, display_name, photon_identifier_hash, wallet_address, backboard_assistant_id)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (user_id) DO UPDATE SET
-         display_name = COALESCE(EXCLUDED.display_name, user_profiles.display_name),
+         display_name = CASE
+           WHEN EXCLUDED.display_name IS NULL THEN user_profiles.display_name
+           WHEN EXCLUDED.display_name ~ '^User [0-9a-f]{4,}$'
+            AND user_profiles.display_name IS NOT NULL
+            AND user_profiles.display_name !~ '^User [0-9a-f]{4,}$'
+           THEN user_profiles.display_name
+           ELSE EXCLUDED.display_name
+         END,
          photon_identifier_hash = CASE
            WHEN EXCLUDED.photon_identifier_hash IS NULL THEN user_profiles.photon_identifier_hash
            WHEN EXISTS (
@@ -155,7 +169,7 @@ export class TigerProfileDirectory {
       this.profiles = rows;
       this.loadedAt = Date.now();
       for (const row of rows) {
-        registerOnboardedCustomer({ customerId: customerIdForUser(row.userId), customerName: row.displayName || row.userId });
+        registerOnboardedCustomer({ customerId: customerIdForTigerUser(row.userId), customerName: row.displayName || row.userId });
       }
       return this.profiles;
     } catch (error) {
@@ -172,20 +186,26 @@ export class TigerProfileDirectory {
 
   resolveUser(userId: string): RegisteredCustomer | undefined {
     const row = this.profiles.find((item) => item.userId === userId);
-    return row ? { customerId: customerIdForUser(row.userId), customerName: row.displayName || row.userId } : undefined;
+    return row ? { customerId: customerIdForTigerUser(row.userId), customerName: row.displayName || row.userId } : undefined;
   }
 
   resolveName(name: string, requireWallet = false): RegisteredCustomer | undefined {
     const key = name.trim().toLowerCase();
-    const row = this.profiles.find((item) =>
-      (item.displayName?.toLowerCase() === key || item.userId.toLowerCase() === key)
-      && (!requireWallet || item.walletAddress !== NO_WALLET),
-    );
-    return row ? { customerId: customerIdForUser(row.userId), customerName: row.displayName || row.userId } : undefined;
+    const row = this.profiles.find((item) => {
+      const display = item.displayName?.trim().toLowerCase() ?? "";
+      const first = display.split(/\s+/)[0] ?? "";
+      const match = display === key || item.userId.toLowerCase() === key || first === key;
+      return match && (!requireWallet || item.walletAddress !== NO_WALLET);
+    });
+    return row ? { customerId: customerIdForTigerUser(row.userId), customerName: row.displayName || row.userId } : undefined;
   }
 
   walletForCustomer(customerId: string): string | undefined {
-    const row = this.profiles.find((item) => customerIdForUser(item.userId) === customerId);
+    const row = this.profiles.find((item) => {
+      if (customerIdForTigerUser(item.userId) === customerId) return true;
+      const named = item.displayName ? findRegisteredCustomer(item.displayName) : undefined;
+      return named?.customerId === customerId;
+    });
     return row?.walletAddress && row.walletAddress !== NO_WALLET ? row.walletAddress : undefined;
   }
 

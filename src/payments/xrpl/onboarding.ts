@@ -48,6 +48,22 @@ export function customerIdForPhotonSender(photonSenderId: string): string {
   return `onboard_${digest}`;
 }
 
+export function isPlaceholderDisplayName(name: string | undefined): boolean {
+  return /^User [0-9a-f]{4,}$/i.test(name?.trim() ?? "");
+}
+
+function preferredDisplayName(incoming: string | undefined, existing: string | undefined, customerId: string): string {
+  const next = incoming?.trim();
+  const prior = existing?.trim();
+  const picked =
+    (next && !isPlaceholderDisplayName(next) ? next : undefined) ||
+    (prior && !isPlaceholderDisplayName(prior) ? prior : undefined) ||
+    next ||
+    prior ||
+    `User ${customerId.slice(-6)}`;
+  return picked.slice(0, 40);
+}
+
 export function customerIdForUser(userId: string): string {
   const digest = createHash("sha256").update(`user:${userId.trim()}`).digest("hex").slice(0, 16);
   return `user_${digest}`;
@@ -151,6 +167,10 @@ export class AccountOnboardingStore {
     this.save();
   }
 
+  private accountKey(row: Partial<OnboardedAccount>): string {
+    return (row.userId?.trim() || row.photonSenderId?.trim() || row.customerId?.trim() || "").toLowerCase();
+  }
+
   private load(): void {
     try {
       const parsed = JSON.parse(readFileSync(this.path, "utf8")) as AccountsFile;
@@ -163,6 +183,33 @@ export class AccountOnboardingStore {
 
   private save(): void {
     mkdirSync(dirname(this.path), { recursive: true });
+    let disk: OnboardedAccount[] = [];
+    try {
+      const parsed = JSON.parse(readFileSync(this.path, "utf8")) as AccountsFile;
+      if (Array.isArray(parsed.accounts)) disk = parsed.accounts;
+    } catch {
+      disk = [];
+    }
+    const byKey = new Map<string, OnboardedAccount>();
+    for (const row of disk) {
+      const key = this.accountKey(row);
+      if (key) byKey.set(key, row);
+    }
+    for (const row of this.accounts) {
+      const key = this.accountKey(row);
+      if (!key) continue;
+      const prev = byKey.get(key);
+      byKey.set(key, {
+        ...prev,
+        ...row,
+        userId: row.userId || prev?.userId,
+        photonSenderId: row.photonSenderId || prev?.photonSenderId,
+        customerName: preferredDisplayName(row.customerName, prev?.customerName, row.customerId),
+        xrplAddress: row.xrplAddress || prev?.xrplAddress,
+        createdAt: prev?.createdAt ?? row.createdAt,
+      });
+    }
+    this.accounts = [...byKey.values()];
     const tmp = `${this.path}.tmp`;
     writeFileSync(tmp, JSON.stringify({ accounts: this.accounts }, null, 2), { mode: 0o600 });
     renameSync(tmp, this.path);
@@ -191,7 +238,7 @@ export class AccountOnboardingService {
     const customerId =
       existing?.customerId ?? (userId ? customerIdForUser(userId) : customerIdForPhotonSender(photonSenderId));
     const created = !existing;
-    const customerName = (input.displayName?.trim() || existing?.customerName || `User ${customerId.slice(-6)}`).slice(0, 40);
+    const customerName = preferredDisplayName(input.displayName, existing?.customerName, customerId);
     this.store.upsert({
       photonSenderId,
       customerId,

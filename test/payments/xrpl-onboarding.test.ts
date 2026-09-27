@@ -38,8 +38,50 @@ describe("Photon / DeepSpace account onboarding", () => {
     expect(again.customerName).toBe("Maya");
     expect(findRegisteredCustomer("Maya")?.customerId).toBe(first.customerId);
 
+    const nameless = await service.enroll({ photonSenderId: "+19175551212", provisionWallet: false });
+    expect(nameless.customerName).toBe("Maya");
+
     const reloaded = new AccountOnboardingStore(join(dir, "accounts.json"));
     expect(reloaded.senderMap()["+19175551212"]).toBe(first.customerId);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("keeps a real directory name when a later enroll has no display name", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "onboard-"));
+    const store = new AccountOnboardingStore(join(dir, "accounts.json"));
+    const service = new AccountOnboardingService(store);
+    await service.enroll({ photonSenderId: "+15555550101", displayName: "Mike", provisionWallet: false });
+    const again = await service.enroll({ photonSenderId: "+15555550101", provisionWallet: false });
+    expect(again.customerName).toBe("Mike");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("does not drop other accounts.json rows when one sender enrolls", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "onboard-"));
+    const path = join(dir, "accounts.json");
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        accounts: [
+          {
+            photonSenderId: "+15555550101",
+            customerId: "onboard_mike",
+            customerName: "Mike",
+            xrplAddress: "r4gmHsUDyMVexppaBPJmbMvYS8hz8vDjxk",
+            createdAt: "2026-09-27T00:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    const store = new AccountOnboardingStore(path);
+    await new AccountOnboardingService(store).enroll({
+      photonSenderId: "+15555550202",
+      displayName: "Alan",
+      provisionWallet: false,
+    });
+    expect(store.list().map((row) => row.customerName).sort()).toEqual(["Alan", "Mike"]);
+    expect(store.list().find((row) => row.customerName === "Mike")?.xrplAddress).toBe("r4gmHsUDyMVexppaBPJmbMvYS8hz8vDjxk");
     rmSync(dir, { recursive: true, force: true });
   });
 

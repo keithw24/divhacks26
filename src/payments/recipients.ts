@@ -92,13 +92,14 @@ export interface NamedWallet {
   xrplAddress?: string;
 }
 
-/** Match a payee by display name or DeepSpace userId. */
+/** Match a payee by display name or DeepSpace userId. Prefer a row that already has a Testnet address. */
 export function matchNamedWallet(name: string, people: NamedWallet[]): NamedWallet | undefined {
   const key = name.trim().toLowerCase();
   if (!key) return undefined;
-  return people.find(
+  const matches = people.filter(
     (person) => person.displayName?.trim().toLowerCase() === key || person.userId?.trim().toLowerCase() === key,
   );
+  return matches.find((person) => Boolean(person.xrplAddress?.trim() && isValidClassicAddress(person.xrplAddress))) ?? matches[0];
 }
 
 const NAME_STOP = new Set([
