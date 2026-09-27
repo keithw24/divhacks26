@@ -51,4 +51,11 @@ describe("Tiger user profiles", () => {
     expect(directory.resolveName("Alan", true)).toBeUndefined();
     expect(directory.names()).toEqual(["Keith", "Alan"]);
   });
+
+  it("keeps chat working when user_profiles is missing", async () => {
+    const store = { list: vi.fn().mockRejectedValue(new Error('relation "user_profiles" does not exist')) };
+    const directory = new TigerProfileDirectory(store as never, 60_000);
+    await expect(directory.refresh(true)).resolves.toEqual([]);
+    expect(directory.names()).toEqual([]);
+  });
 });

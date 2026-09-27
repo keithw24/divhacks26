@@ -206,12 +206,18 @@ export class AccountOnboardingService {
       this.store.setAddress(customerId, wallet.xrplAddress);
     }
     if (this.profiles) {
-      await this.profiles.upsert({
-        userId: userId ?? existing?.userId ?? `photon:${photonSenderId}`,
-        displayName: customerName,
-        photonIdentifier: photonSenderId,
-        walletAddress: xrplAddress ?? "0",
-      });
+      try {
+        await this.profiles.upsert({
+          userId: userId ?? existing?.userId ?? `photon:${photonSenderId}`,
+          displayName: customerName,
+          photonIdentifier: photonSenderId,
+          walletAddress: xrplAddress ?? "0",
+        });
+      } catch (error) {
+        console.error(
+          `Tiger profile upsert skipped: ${error instanceof Error ? error.message.slice(0, 160) : "Error"}`,
+        );
+      }
     }
     return { photonSenderId, customerId, customerName, xrplAddress, created, userId: userId ?? existing?.userId };
   }
