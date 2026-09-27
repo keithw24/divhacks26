@@ -144,9 +144,12 @@ export function startOutboxPoller(options: {
           await options.send(item);
           sent.push(item.id);
         } catch (error) {
-          await options.client
-            .ack(options.channel, [item.id], "failed", error instanceof Error ? error.name : "Error")
-            .catch(() => undefined);
+          // Say why the provider refused (e.g. Photon won't start a new chat), with phone digits masked.
+          const reason = (error instanceof Error ? `${error.name}: ${error.message}` : String(error))
+            .replace(/\+?\d[\d\s-]{6,}\d/g, (m) => `•••${m.replace(/\D/g, "").slice(-4)}`)
+            .slice(0, 300);
+          console.error(`deepspace.outbox send failed: ${reason}`);
+          await options.client.ack(options.channel, [item.id], "failed", reason.slice(0, 180)).catch(() => undefined);
         }
       }
       if (sent.length) await options.client.ack(options.channel, sent, "sent");

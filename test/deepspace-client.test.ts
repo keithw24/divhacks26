@@ -53,7 +53,7 @@ describe("DeepSpace channel client", () => {
   });
 
   it("loads the wallet directory for Gemini without phone numbers", async () => {
-    const fetcher = vi.fn(async () =>
+    const fetcher = vi.fn(async (..._args: Parameters<typeof fetch>) =>
       new Response(JSON.stringify({ people: [{ userId: "keith", xrplAddress: "rBQUYX8GqNYUdRJeSkuessmd6x4eiUW2JD" }] })),
     );
     const client = createDeepSpaceClient({ baseUrl: "https://plans.example", secret: "s", fetcher: fetcher as typeof fetch, now: () => 0 });
@@ -68,7 +68,7 @@ describe("DeepSpace channel client", () => {
   });
 
   it("surfaces backend errors with the status", async () => {
-    const fetcher = vi.fn(async () => new Response("nope", { status: 401 }));
+    const fetcher = vi.fn(async (..._args: Parameters<typeof fetch>) => new Response("nope", { status: 401 }));
     const client = createDeepSpaceClient({ baseUrl: "https://x.example", secret: "s", fetcher: fetcher as typeof fetch });
     await expect(client.claimOutbox("imessage")).rejects.toMatchObject({ status: 401 });
   });
@@ -96,7 +96,7 @@ describe("outbox poller", () => {
     });
     expect(await poller.pollOnce()).toBe(1);
     poller.stop();
-    expect(ack).toHaveBeenCalledWith("imessage", ["b"], "failed", "Error");
+    expect(ack).toHaveBeenCalledWith("imessage", ["b"], "failed", "Error: photon down");
     expect(ack).toHaveBeenCalledWith("imessage", ["a"], "sent");
   });
 
