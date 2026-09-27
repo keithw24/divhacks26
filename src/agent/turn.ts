@@ -207,23 +207,6 @@ export async function runConversationTurn(
           return;
         }
       }
-      if (deps.handleWallet) {
-        const wallet = await deps.handleWallet({
-          spaceId: input.spaceId,
-          senderId: input.senderId,
-          senderName: input.senderName,
-          text: question,
-          recentTexts: deps.transcript().map((line) => line.text),
-        });
-        if (wallet.handled && wallet.reply) {
-          outcome = "wallet";
-          answer = wallet.reply;
-          await reactTo(actions, ackFor(input.social, wallet.acknowledgement ?? "👍"));
-          await deliverOnce(deliveryActions, answer);
-          delivered = true;
-          return;
-        }
-      }
       if (deps.handleOrchestration) {
         const orchestrated = await deps.handleOrchestration({
           spaceId: input.spaceId,
@@ -327,6 +310,23 @@ export async function runConversationTurn(
           await deliverOnce(deliveryActions, answer);
           delivered = true;
           if (payment.afterReply) await payment.afterReply();
+          return;
+        }
+      }
+      if (deps.handleWallet) {
+        const wallet = await deps.handleWallet({
+          spaceId: input.spaceId,
+          senderId: input.senderId,
+          senderName: input.senderName,
+          text: question,
+          recentTexts: deps.transcript().map((line) => line.text),
+        });
+        if (wallet.handled && wallet.reply) {
+          outcome = "wallet";
+          answer = wallet.reply;
+          await reactTo(actions, ackFor(input.social, wallet.acknowledgement ?? "👍"));
+          await deliverOnce(deliveryActions, answer);
+          delivered = true;
           return;
         }
       }

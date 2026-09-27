@@ -32,6 +32,7 @@ import { PaymentStore } from "./state.js";
 import { testnetExplorerLink } from "./xrpl/explorer.js";
 import type { CustomerSettlementPort } from "./xrpl/settlement.js";
 import type { PaymentAuditLog } from "./xrpl/audit.js";
+import type { LatestTestnetTxLookup } from "./xrpl/latest-tx.js";
 import type { DepositExecuteInput, DepositExecuteResult, DepositPaymentPort, DepositSyncInput } from "./deposit-port.js";
 import type {
   PaymentInterpreter,
@@ -66,6 +67,8 @@ export interface PaymentServiceOptions {
   }) => Promise<void> | void;
   audit?: PaymentAuditLog;
   intentTtlMs?: number;
+  /** After a confirmed Testnet send, resolve the newest tx on the destination account page. */
+  latestTestnetTx?: LatestTestnetTxLookup;
 }
 
 export class PaymentService implements DepositPaymentPort {
@@ -79,6 +82,7 @@ export class PaymentService implements DepositPaymentPort {
   private readonly onPersonSettled?: PaymentServiceOptions["onPersonSettled"];
   private readonly audit?: PaymentAuditLog;
   private readonly intentTtlMs: number;
+  private readonly latestTestnetTx?: LatestTestnetTxLookup;
 
   constructor(options: PaymentServiceOptions) {
     this.maxUsd = options.maxUsd ?? 500;
@@ -91,6 +95,7 @@ export class PaymentService implements DepositPaymentPort {
     this.onPersonSettled = options.onPersonSettled;
     this.audit = options.audit;
     this.intentTtlMs = options.intentTtlMs ?? 10 * 60 * 1000;
+    this.latestTestnetTx = options.latestTestnetTx;
   }
 
   get payments(): PaymentStore {
@@ -417,13 +422,14 @@ export class PaymentService implements DepositPaymentPort {
     }
 
     if (isConfirmed(result)) {
+      const explorer = await this.resolveExplorer(stillThere.recipient.rippleDestination, result.transactionId);
       const saved = this.store.markResult(claimed.id, "SUCCEEDED", {
         transactionId: result.transactionId,
         providerStatus: result.status,
         submittedAsset: result.submittedAsset,
         submittedAmount: result.submittedAmount,
         submittedDrops: result.submittedDrops,
-        explorerUrl: testnetExplorerLink(result.transactionId) ?? undefined,
+        explorerUrl: explorer.url,
       });
       this.rememberPersonPayout(saved ?? claimed);
       logPayment("payment_succeeded", { paymentId: claimed.id, spaceId: claimed.photonSpaceId, status: result.status });
@@ -436,7 +442,8 @@ export class PaymentService implements DepositPaymentPort {
           transactionId: result.transactionId,
           submittedAsset: result.submittedAsset,
           nessiePurchaseId: result.nessiePurchaseId,
-          explorerUrl: testnetExplorerLink(result.transactionId),
+          explorerUrl: explorer.url,
+          explorerLookupFailed: explorer.lookupFailed,
         }),
       );
     }
@@ -481,13 +488,14 @@ export class PaymentService implements DepositPaymentPort {
 
     const evidence = execution.evidence;
     if (evidence) {
+      const explorer = await this.resolveExplorer(evidence.recipientAddress, evidence.transactionHash);
       const saved = this.store.markResult(claimed.id, "SUCCEEDED", {
         transactionId: evidence.transactionHash,
         providerStatus: evidence.engineResult,
         submittedAsset: "XRP",
         submittedAmount: evidence.amount.xrp,
         submittedDrops: evidence.amount.drops,
-        explorerUrl: evidence.explorerUrl ?? undefined,
+        explorerUrl: explorer.lookupFailed ? undefined : (explorer.url ?? evidence.explorerUrl ?? undefined),
       });
       this.rememberPersonPayout(saved ?? claimed);
       logPayment("payment_succeeded", { paymentId: claimed.id, spaceId: claimed.photonSpaceId, status: evidence.engineResult });
@@ -498,7 +506,8 @@ export class PaymentService implements DepositPaymentPort {
           amountUsd: claimed.amountUsd,
           memo: claimed.memo,
           xrp: evidence.amount.xrp,
-          explorerUrl: evidence.explorerUrl,
+          explorerUrl: explorer.lookupFailed ? null : (explorer.url ?? evidence.explorerUrl),
+          explorerLookupFailed: explorer.lookupFailed,
           transactionHash: evidence.transactionHash,
         }),
       );
@@ -608,13 +617,14 @@ export class PaymentService implements DepositPaymentPort {
     }
 
     if (isConfirmed(result)) {
+      const explorer = await this.resolveExplorer(claimed.destination, result.transactionId);
       const saved = this.store.markResult(claimed.id, "SUCCEEDED", {
         transactionId: result.transactionId,
         providerStatus: result.status,
         submittedAsset: result.submittedAsset,
         submittedAmount: result.submittedAmount,
         submittedDrops: result.submittedDrops,
-        explorerUrl: testnetExplorerLink(result.transactionId) ?? undefined,
+        explorerUrl: explorer.url ?? testnetExplorerLink(result.transactionId) ?? undefined,
       });
       logPayment("payment_succeeded", { paymentId: claimed.id, spaceId: claimed.photonSpaceId, status: result.status });
       return { outcome: "succeeded", payment: saved };
@@ -990,6 +1000,22 @@ export class PaymentService implements DepositPaymentPort {
         explorerUrl: record.explorerUrl,
       }),
     ).catch(() => undefined);
+  }
+
+  private async resolveExplorer(
+    destination: string,
+    fallbackHash?: string,
+  ): Promise<{ url?: string; lookupFailed?: boolean }> {
+    if (!this.latestTestnetTx) {
+      return { url: testnetExplorerLink(fallbackHash) ?? undefined };
+    }
+    try {
+      const found = await this.latestTestnetTx({ account: destination });
+      if ("url" in found) return { url: found.url };
+    } catch {
+      return { lookupFailed: true };
+    }
+    return { lookupFailed: true };
   }
 }
 

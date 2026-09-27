@@ -12,6 +12,7 @@ import type { PaymentProvider } from "./types.js";
 import type { CustomerSettlementPort } from "./xrpl/settlement.js";
 import type { PaymentServiceOptions } from "./service.js";
 import type { PaymentAuditLog } from "./xrpl/audit.js";
+import { createLatestTestnetTxLookup } from "./xrpl/latest-tx.js";
 
 export interface PaymentRuntimeEnv {
   mode: PaymentsMode;
@@ -52,6 +53,10 @@ export function createPaymentRuntime(env: PaymentRuntimeEnv) {
     onPersonSettled: env.onPersonSettled,
     audit: env.audit,
     intentTtlMs: env.intentTtlMs,
+    latestTestnetTx:
+      env.mode === "ripple_test" || env.mode === "nessie_ripple"
+        ? createLatestTestnetTxLookup(env.serverUrl)
+        : undefined,
   });
   return { service, provider };
 }

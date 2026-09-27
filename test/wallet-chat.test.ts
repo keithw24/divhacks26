@@ -43,6 +43,27 @@ describe("wallet chat thread", () => {
     expect(second.reply).toMatch(/Send Keith \$1/);
   });
 
+  it("does not treat a payment yes as another wallet create", async () => {
+    const enroll = vi.fn(async () => ({
+      photonSenderId: "+19175550199",
+      customerId: "onboard_test",
+      customerName: "Alan",
+      xrplAddress: ADDRESS,
+      created: false,
+    }));
+    const chat = new WalletChatService({
+      onboarding: { enroll, publicView: vi.fn() } as unknown as AccountOnboardingService,
+    });
+    const result = await chat.handleTurn({
+      spaceId: "s",
+      senderId: "+19175550199",
+      text: "yes",
+      recentTexts: ["can you make me an xrp test wallet", "Send Keith $1"],
+    });
+    expect(result.handled).toBe(false);
+    expect(enroll).not.toHaveBeenCalled();
+  });
+
   it("does not steal a dinner request", async () => {
     const chat = new WalletChatService();
     const result = await chat.handleTurn({

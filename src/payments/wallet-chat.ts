@@ -1,5 +1,6 @@
 import type { ReservationHandlerResult } from "../agent/turn.js";
 import { askedForTestWallet, continuesCapabilityThread, isAgentCapabilityTopic } from "../agent/thread.js";
+import { classifyPaymentMessage } from "./intent.js";
 import { testnetAccountUrl } from "./xrpl/explorer.js";
 import type { AccountOnboardingService } from "./xrpl/onboarding.js";
 
@@ -23,6 +24,8 @@ function howToPay(address?: string): string {
 }
 
 function classify(text: string, recent: readonly string[]): "create" | "howto" | "none" {
+  const payment = classifyPaymentMessage(text).kind;
+  if (payment !== "none") return "none";
   if (askedForTestWallet(text)) return "create";
   if (continuesCapabilityThread(text, recent) && recent.slice(-6).some(askedForTestWallet)) return "create";
   if (isAgentCapabilityTopic(text) || continuesCapabilityThread(text, recent)) return "howto";

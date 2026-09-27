@@ -47,6 +47,7 @@ export function successText(input: {
   submittedAsset?: string;
   nessiePurchaseId?: string;
   explorerUrl?: string | null;
+  explorerLookupFailed?: boolean;
 }): string {
   const base = `Sent ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)}.`;
   const bits: string[] = [base];
@@ -56,6 +57,10 @@ export function successText(input: {
   } else if (input.submittedAsset === "USD" && input.transactionId && !testnetExplorerLink(input.transactionId)) {
     const shown = input.transactionId.length > 12 ? input.transactionId.slice(0, 8) : input.transactionId;
     bits.push(`Nessie sim: ${shown}.`);
+  }
+  if (input.explorerLookupFailed) {
+    bits.push("The payment went through, but I couldn't load the Testnet transaction link.");
+    return bits.join(" ");
   }
   const url = transactionUrl(input.explorerUrl, input.transactionId, input.submittedAsset);
   if (url) bits.push(`XRPL Testnet: ${url}`);
@@ -124,9 +129,13 @@ export function xrplSuccessText(input: {
   memo: string | null;
   xrp: string;
   explorerUrl: string | null;
+  explorerLookupFailed?: boolean;
   transactionHash: string;
 }): string {
   const base = `Sent ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)} as ${input.xrp} test XRP on XRPL Testnet (no real money).`;
+  if (input.explorerLookupFailed) {
+    return `${base} The payment went through, but I couldn't load the Testnet transaction link.`;
+  }
   const url =
     (input.explorerUrl?.includes("testnet.xrpl.org/transactions/") ? input.explorerUrl : null) ??
     testnetExplorerLink(input.transactionHash) ??

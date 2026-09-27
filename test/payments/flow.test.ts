@@ -154,6 +154,48 @@ describe("confirmation flow", () => {
     expect(service.payments.active("space")?.status).toBe("SUCCEEDED");
   });
 
+  it("uses the newest Testnet explorer link after a successful send", async () => {
+    const hash = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+    const { say } = setup();
+    const service = new PaymentService({
+      provider: new MockPaymentProvider(),
+      directory: loadRecipientDirectory(),
+      latestTestnetTx: async () => ({ url: `https://testnet.xrpl.org/transactions/${hash}`, hash }),
+    });
+    await service.handleTurn({ spaceId: "space", senderId: "rohan-id", senderName: "Rohan", text: "Send Keith $1" });
+    const sent = await service.handleTurn({ spaceId: "space", senderId: "rohan-id", senderName: "Rohan", text: "yes" });
+    expect(sent.reply).toBe(`Sent $1 to Keith. XRPL Testnet: https://testnet.xrpl.org/transactions/${hash}`);
+  });
+
+  it("says so when the Testnet transaction link cannot be loaded after a successful send", async () => {
+    const { provider } = setup();
+    const service = new PaymentService({
+      provider,
+      directory: loadRecipientDirectory(),
+      latestTestnetTx: async () => ({ failed: true }),
+    });
+    await service.handleTurn({ spaceId: "space", senderId: "rohan-id", senderName: "Rohan", text: "Send Keith $1" });
+    const sent = await service.handleTurn({ spaceId: "space", senderId: "rohan-id", senderName: "Rohan", text: "yes" });
+    expect(sent.reply).toBe("Sent $1 to Keith. The payment went through, but I couldn't load the Testnet transaction link.");
+  });
+
+  it("notes a failed send instead of an explorer link", async () => {
+    const provider = new MockPaymentProvider();
+    provider.result = "reject";
+    const service = new PaymentService({
+      provider,
+      directory: loadRecipientDirectory(),
+      latestTestnetTx: async () => ({
+        url: "https://testnet.xrpl.org/transactions/DEAD",
+        hash: "DEAD",
+      }),
+    });
+    await service.handleTurn({ spaceId: "space", senderId: "rohan-id", senderName: "Rohan", text: "Send Keith $1" });
+    const sent = await service.handleTurn({ spaceId: "space", senderId: "rohan-id", senderName: "Rohan", text: "yes" });
+    expect(sent.reply).toMatch(/couldn't send|rejected/i);
+    expect(sent.reply).not.toMatch(/testnet\.xrpl\.org/);
+  });
+
   it("cancels on no without sending", async () => {
     const { say, provider, service } = setup();
     await say("space", "Send Keith $20");
@@ -544,6 +586,55 @@ describe("dispatcher precedence", () => {
     expect(result.outcome).toBe("payment");
     expect(result.reply).toBe(ask("Keith", 20, "Uber"));
     expect(provider.calls).toHaveLength(0);
+  });
+
+  it("confirms yes as a payment, not a wallet recap", async () => {
+    const provider = new MockPaymentProvider();
+    const payments = new PaymentService({ provider, directory: loadRecipientDirectory() });
+    const sink: string[] = [];
+    await payments.handleTurn({
+      spaceId: "route",
+      senderId: "rohan-id",
+      senderName: "Rohan",
+      text: "Send Keith $1",
+    });
+    const outcome = await runConversationTurn(
+      {
+        spaceId: "route",
+        senderId: "rohan-id",
+        senderName: "Rohan",
+        direction: "inbound",
+        isGroup: false,
+        question: "yes",
+        messageId: "yes-1",
+      },
+      {
+        reply: async (reply) => {
+          sink.push(reply);
+          return { id: "r" };
+        },
+        responding: async (fn) => fn(),
+      },
+      {
+        autoReply: true,
+        handleTransport: async () => ({ handled: false, acknowledgement: "👍" }),
+        suggest: async () => "gemini",
+        transcript: () => [
+          { at: new Date(), who: "Rohan", text: "can you make me an xrp test wallet" },
+          { at: new Date(), who: "Rohan", text: "Send Keith $1" },
+        ],
+        recordAssistant: () => undefined,
+        handleWallet: async () => ({
+          handled: true,
+          reply: "You already have an XRPL Testnet wallet.",
+        }),
+        handlePayment: (request) => payments.handleTurn(request),
+      },
+    );
+    expect(outcome).toBe("payment");
+    expect(sink.at(-1)).toMatch(/^Sent \$1 to Keith/);
+    expect(sink.at(-1)).not.toMatch(/already have an XRPL/i);
+    expect(provider.calls).toHaveLength(1);
   });
 
   it("sets a personal payment max without Gemini", async () => {

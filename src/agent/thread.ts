@@ -10,7 +10,9 @@ const CHAIN = /\b(?:xrp|xrpl|ripple|testnet)\b/i;
 const PAYMENT_CAPABILITY =
   /(?:(?:to|so (?:i|we) can|for)\s+)?(?:make\s+)?payments?\b|how (?:do i|to) (?:make\s+)?(?:a\s+)?payments?\b|so i can pay|send (?:xrp|test\s*xrp|testnet)|(?:my|a) (?:xrp|xrpl|testnet) wallet/i;
 
-const FOLLOW_UP_OPENER = /^(?:to|so(?: that)?|for|and|also|just|because|yeah|yes|please)\b/i;
+const FOLLOW_UP_OPENER = /^(?:to|so(?: that)?|for|and|also|just|because|please)\b/i;
+const CONFIRM_OR_CANCEL =
+  /^(?:yes|yep|yeah|yup|y|confirm|send it|do it|pay it|go ahead|no|nope|nah|cancel|stop|don't|dont)\b/i;
 
 export function isPlacePlanningAsk(text: string): boolean {
   return PLACE_PLAN.test(text.trim());
@@ -28,7 +30,7 @@ export function isAgentCapabilityTopic(text: string): boolean {
 
 export function continuesCapabilityThread(question: string, recent: readonly string[] = []): boolean {
   const trimmed = question.trim();
-  if (!trimmed || isPlacePlanningAsk(trimmed)) return false;
+  if (!trimmed || isPlacePlanningAsk(trimmed) || CONFIRM_OR_CANCEL.test(trimmed)) return false;
   if (isAgentCapabilityTopic(trimmed)) return true;
   const prior = recent.slice(-6).some((line) => isAgentCapabilityTopic(line));
   if (!prior) return false;
