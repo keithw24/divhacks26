@@ -169,11 +169,7 @@ function Index() {
 
       {/* HERO */}
       <section className="relative overflow-hidden px-5 pt-16 pb-12">
-        <div className="absolute inset-0 grid place-items-center select-none pointer-events-none">
-          <span className="font-display text-[22vw] leading-none text-lime/20 tracking-tighter whitespace-nowrap">
-            1:1 AGENT
-          </span>
-        </div>
+
         <div className="relative max-w-5xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 bg-blue text-blue-foreground text-xs font-bold uppercase tracking-[0.15em] px-3.5 py-1.5 rounded-full outline-card mb-5 animate-rise shadow-sm">
             <Lock className="size-3.5" />
