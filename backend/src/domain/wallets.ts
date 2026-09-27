@@ -69,10 +69,11 @@ export async function requestWallet(
     linkedAt: (input.now ?? new Date()).toISOString(),
   }
   const already = await findOne<WalletRecord>(store, 'wallets', { userId })
+  // Copies: the store takes plain key/value objects, which an interface isn't to TypeScript.
   if (already) {
-    await patch(store, 'wallets', already.recordId, record)
+    await patch(store, 'wallets', already.recordId, { ...record })
   } else {
-    await insert(store, 'wallets', record)
+    await insert(store, 'wallets', { ...record })
   }
   return record
 }
