@@ -36,6 +36,9 @@ export function assertConfirmedTransfer(input: {
     if (!input.recipient?.customerId || input.recipient.customerId !== input.record.recipientCustomerId) {
       mismatches.push("recipientWallet");
     }
+    if (!input.record.destination || input.recipient?.rippleDestination !== input.record.destination) {
+      mismatches.push("destination");
+    }
     if (
       input.recipient &&
       input.recipient.displayName.trim().toLowerCase() !== input.record.recipientName.trim().toLowerCase()

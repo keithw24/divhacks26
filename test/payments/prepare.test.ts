@@ -48,9 +48,9 @@ describe("assertConfirmedTransfer", () => {
           destination: "",
         }),
         amountUsd: 20,
-        sender: { customerId: "keith" },
+        sender: { customerId: "rohan" },
         recipient: { displayName: "Keith", rippleDestination: "", customerId: "keith" },
       }),
-    ).toMatchObject({ ok: false });
+    ).toMatchObject({ ok: false, mismatches: expect.arrayContaining(["destination"]) });
   });
 });

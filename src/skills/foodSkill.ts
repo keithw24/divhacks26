@@ -5,7 +5,17 @@ import type {
   SkillResult,
 } from "../domain/contracts.js";
 import { logIntegration } from "../integrations/log.js";
+import { createGeminiMapsClient } from "../transport/gemini.js";
 import { distanceMeters } from "./geo.js";
+
+export interface MapsFoodHit {
+  name: string;
+  placeId: string;
+  latitude: number;
+  longitude: number;
+  address?: string;
+  url?: string;
+}
 
 export interface FoodInput {
   origin: Location;
@@ -13,7 +23,11 @@ export interface FoodInput {
   budget?: Budget;
   openNow?: boolean;
   apiKey?: string;
+  geminiApiKey?: string;
+  geminiModel?: string;
   fetcher?: typeof fetch;
+  /** Injected Maps grounding search; used when Places is missing or empty. */
+  mapsSearch?: (query: string, origin: Location) => Promise<MapsFoodHit[]>;
   /** When set, the provider error is returned instead of a generic unavailable line. */
   strict?: boolean;
 }
@@ -40,8 +54,96 @@ const priceLevels: Partial<Record<Budget, string[]>> = {
   high: ["PRICE_LEVEL_EXPENSIVE", "PRICE_LEVEL_VERY_EXPENSIVE"],
 };
 
+function foodQuery(input: FoodInput): string {
+  const cuisine = input.cuisine?.length ? `${input.cuisine.join(" or ")} ` : "";
+  return `${cuisine}restaurants near ${input.origin.label}, New York City`;
+}
+
+function hitsToRecommendations(input: FoodInput, hits: MapsFoodHit[]): FoodRecommendation[] {
+  return hits.flatMap((hit): FoodRecommendation[] => {
+    if (!hit.name || !Number.isFinite(hit.latitude) || !Number.isFinite(hit.longitude)) return [];
+    const location: Location = {
+      label: hit.address ?? hit.name,
+      latitude: hit.latitude,
+      longitude: hit.longitude,
+    };
+    const mapsUrl =
+      hit.url ||
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(hit.name)}&query_place_id=${encodeURIComponent(hit.placeId)}`;
+    return [{
+      id: `food:${hit.placeId}`,
+      kind: "food",
+      placeId: hit.placeId,
+      name: hit.name,
+      location,
+      distanceMeters: Math.round(distanceMeters(input.origin, location)),
+      categories: ["restaurant"],
+      url: mapsUrl,
+      source: { name: "Google Maps", url: mapsUrl },
+    }];
+  }).slice(0, 5);
+}
+
+async function defaultMapsSearch(input: FoodInput, query: string): Promise<MapsFoodHit[]> {
+  const key = input.geminiApiKey?.trim();
+  if (!key) return [];
+  const client = createGeminiMapsClient({ apiKey: key, model: input.geminiModel });
+  const resolved = await client.resolvePlaces(query, {
+    latitude: input.origin.latitude,
+    longitude: input.origin.longitude,
+  });
+  const byName = new Map((resolved.sources ?? []).map((source) => [source.title.toLowerCase(), source]));
+  return resolved.places.flatMap((place) => {
+    if (place.latitude == null || place.longitude == null) return [];
+    const source = byName.get(place.name.toLowerCase());
+    const placeId = source?.placeId || `maps:${place.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    return [{
+      name: place.name,
+      placeId,
+      latitude: place.latitude,
+      longitude: place.longitude,
+      address: place.address,
+      url: source?.uri,
+    }];
+  });
+}
+
+async function findFoodFromMaps(input: FoodInput): Promise<SkillResult<FoodRecommendation[]>> {
+  const query = foodQuery(input);
+  try {
+    const hits = input.mapsSearch
+      ? await input.mapsSearch(query, input.origin)
+      : await defaultMapsSearch(input, query);
+    const data = hitsToRecommendations(input, hits);
+    if (!data.length) {
+      return {
+        status: "unavailable",
+        data: [],
+        sources: [],
+        warnings: input.apiKey ? ["No matching restaurants were returned."] : ["Google Places is not configured."],
+      };
+    }
+    logIntegration("GEMINI", "LIVE", `${data.length} restaurants from Maps grounding`);
+    return {
+      status: "ok",
+      data,
+      sources: [{ name: "Google Maps" }],
+      warnings: [],
+    };
+  } catch (error) {
+    console.error("food skill maps fallback failed:", error);
+    return {
+      status: "unavailable",
+      data: [],
+      sources: [],
+      warnings: [input.apiKey ? "Restaurant search is temporarily unavailable." : "Google Places is not configured."],
+    };
+  }
+}
+
 export async function findFood(input: FoodInput): Promise<SkillResult<FoodRecommendation[]>> {
   if (!input.apiKey) {
+    if (input.mapsSearch || input.geminiApiKey) return findFoodFromMaps(input);
     return { status: "unavailable", data: [], sources: [], warnings: ["Google Places is not configured."] };
   }
   const fetcher = input.fetcher ?? fetch;
@@ -112,14 +214,19 @@ export async function findFood(input: FoodInput): Promise<SkillResult<FoodRecomm
     });
     data.sort((a, b) => (Number(b.openNow) - Number(a.openNow)) || ((b.rating ?? 0) - (a.rating ?? 0)) || (a.distanceMeters - b.distanceMeters));
     logIntegration("GOOGLE", "LIVE", `${data.length} restaurants returned in ${Date.now() - started}ms`);
-    return {
-      status: data.length ? "ok" : "partial",
-      data: data.slice(0, 5),
-      sources: [{ name: "Google Places" }],
-      warnings: data.length ? [] : ["No matching restaurants were returned."],
-    };
+    if (data.length) {
+      return {
+        status: "ok",
+        data: data.slice(0, 5),
+        sources: [{ name: "Google Places" }],
+        warnings: [],
+      };
+    }
+    return findFoodFromMaps(input);
   } catch (error) {
     console.error("food skill failed:", error);
+    const mapped = await findFoodFromMaps(input);
+    if (mapped.data.length) return mapped;
     const warning = input.strict && error instanceof Error ? error.message : "Restaurant search is temporarily unavailable.";
     return { status: "unavailable", data: [], sources: [], warnings: [warning] };
   }

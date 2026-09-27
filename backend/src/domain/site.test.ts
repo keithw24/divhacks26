@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { handleInbound } from './channels'
+import { handleInbound, listProfileDirectory } from './channels'
 import { createSite, MAX_ATTEMPTS, maskEmail, maskPhone, normalizeEmail, normalizeUsPhone, parsePhoneCodeText, RESEND_COOLDOWN_MS } from './site'
 import { createFakeStore } from './testing/fake-store'
 
@@ -209,6 +209,23 @@ describe('website sign-in on DeepSpace', () => {
     await site.deleteUser(user.phone)
     expect(await site.session(second.token)).toBeNull()
     expect(await site.stats()).toEqual({ spotsTaken: 0, spotsTotal: 100 })
+  })
+
+  it('exposes registered names and wallet-or-zero through the signed profile feed', async () => {
+    const { store, site, signUp } = setup()
+    const { token } = await signUp('profile@example.com', '9175550140')
+    const user = (await site.session(token))!
+    await site.savePreferences(user.phone, { name: 'Maya', dietary: [] })
+
+    const people = await listProfileDirectory(store)
+    expect(people).toHaveLength(1)
+    expect(people[0]).toMatchObject({
+      displayName: 'Maya',
+      xrplAddress: '0',
+      photonIdentifier: '+19175550140',
+    })
+    expect(people[0]?.userId).toMatch(/^site:[0-9a-f]{32}$/)
+    expect(people[0]?.userId).not.toContain('19175550140')
   })
 
   it('queues a hello iMessage and adds people to the waitlist', async () => {

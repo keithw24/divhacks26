@@ -33,7 +33,7 @@ import { geocodeNyc } from "./geocode.js";
 import { createMerchantDirectory } from "./payments/merchants.js";
 import { createTicketingRuntime } from "./ticketing/runtime.js";
 import { publicTicketPurchase } from "./ticketing/service.js";
-import { createMeetupRuntime } from "./meetup/runtime.js";
+import { collectInviteContacts } from "./meetup/invite.js";
 import { ConversationContextStore } from "./orchestration/context.js";
 import { createPlacesRestaurantSearch } from "./orchestration/dining.js";
 import { CrossDomainOrchestrator } from "./orchestration/orchestrator.js";
@@ -44,6 +44,8 @@ import { createMailer } from "./web/email.js";
 import { readSocialContext } from "./agent/social.js";
 import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
 import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./deepspace/client.js";
+import { startDeepSpaceProfileSync } from "./deepspace/profile-sync.js";
+import { createDirectoryCache, mergePeopleDirectory, type PeopleDirectoryEntry } from "./deepspace/directory.js";
 import { notifyPaymentReceived } from "./payments/notify.js";
 import { getPool } from "./safety.js";
 import { TigerProfileDirectory, TigerUserProfileStore } from "./profiles/tiger.js";
@@ -87,6 +89,7 @@ const paymentNotice: {
 } = {
   sendToExternalId: async () => undefined,
 };
+const peopleSnapshot: { current: PeopleDirectoryEntry[] } = { current: [] };
 const ledger = createLedgerService({
   query: config.databaseUrl
     ? (sql, params) => getPool(config.databaseUrl).query(sql, params)
@@ -99,7 +102,16 @@ const merchantPaymentMode =
 const payments = createPaymentRuntime({
   settlement:
     xrpl && usesCustomerWallets
-      ? new CustomerWalletSettlement(xrpl.guard.executor, liveSenders, () => onboardingStore.displayNames(), tigerDirectory)
+      ? new CustomerWalletSettlement(
+          xrpl.guard.executor,
+          liveSenders,
+          () => onboardingStore.displayNames(),
+          (customerId) =>
+            tigerDirectory?.walletForCustomer(customerId) ??
+            xrpl.guard.registry.getAddress(customerId) ??
+            onboardingStore.findByCustomerId(customerId)?.xrplAddress,
+          tigerDirectory,
+        )
       : undefined,
   mode: config.paymentsMode,
   maxUsd: config.paymentsMaxUsd,
@@ -126,6 +138,10 @@ const payments = createPaymentRuntime({
     });
   },
   audit: xrpl?.guard.audit,
+  peopleDirectory: () =>
+    peopleSnapshot.current.length
+      ? peopleSnapshot.current
+      : onboardingStore.peopleDirectory(),
 });
 const meetup = createMeetupRuntime({
   googleMapsApiKey: config.googleMapsApiKey,
@@ -376,6 +392,9 @@ if (!config.backboardApiKey) {
 }
 if (!config.geminiApiKey) {
   console.info("GEMINI_API_KEY is not set; transportation and Maps-grounded suggestions will fall back.");
+} else {
+  const source = process.env.GEMINI_API_KEY?.trim() ? "GEMINI_API_KEY" : "GOOGLE_API_KEY";
+  console.info(`Gemini: ${config.geminiModel} via ${source} (…${config.geminiApiKey.slice(-4)})`);
 }
 console.info(
   voiceEnabled()
@@ -524,6 +543,13 @@ const deepspace =
 console.info(deepspace ? `DeepSpace backend: ${config.deepspaceApiUrl}` : "DeepSpace backend: off (set DEEPSPACE_API_URL and DEEPSPACE_CHANNEL_SECRET).");
 if (deepspace) {
   paymentNotice.notifyDeepSpace = (input) => deepspace.notifyPayment(input);
+  if (tigerProfiles) {
+    startDeepSpaceProfileSync({
+      client: deepspace,
+      profiles: tigerProfiles,
+      intervalMs: config.deepspaceOutboxPollMs,
+    });
+  }
   startOutboxPoller({
     client: deepspace,
     channel: "imessage",
@@ -535,6 +561,7 @@ if (deepspace) {
     },
   });
 }
+const loadDeepSpaceDirectory = createDirectoryCache(async () => (deepspace ? deepspace.directory() : []));
 paymentNotice.sendToExternalId = async (externalId, body) => {
   if (config.chatProvider !== "imessage") return;
   const chat = await imessage(app as never).space.create(externalId);
@@ -582,11 +609,11 @@ async function processMessages(items: { space: Space; message: Message }[]) {
   const text = texts.join("\n");
 
   const backend = await checkInWithBackend(space, message, who, text);
-  if (backend?.userId && who !== "someone") {
+  if (who !== "someone") {
     await onboarding.enroll({
       photonSenderId: who,
       displayName: senderDisplayName(message.sender),
-      userId: backend.userId,
+      userId: backend?.userId,
       provisionWallet: false,
     }).catch((error) => {
       console.error(`Tiger profile sync failed: ${error instanceof Error ? error.message.slice(0, 120) : "Error"}`);
@@ -655,8 +682,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       payments: {
         observe: (spaceId, observed) => payments.service.observe(spaceId, observed),
         handleTurn: async (request) => {
-          // The payment resolver is synchronous by design; refresh its Tiger-backed
-          // snapshot immediately before Gemini extraction and recipient resolution.
+          // Snapshot Tiger wallets before recipient resolution. Missing table or a down DB must not fail the chat.
           if (tigerDirectory) await tigerDirectory.refresh(true);
           return payments.service.handleTurn(request);
         },
@@ -665,18 +691,46 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       ticketing: ticketing.service,
       meetup: meetup.service,
       friendCalls,
+      sendPlanInvite: (externalId, body) => paymentNotice.sendToExternalId(externalId, body),
+      inviteContacts: async () => {
+        const remote = await loadDeepSpaceDirectory();
+        const tiger = tigerDirectory ? await tigerDirectory.refresh() : [];
+        return collectInviteContacts({
+          onboarded: onboardingStore.list().map((row) => ({
+            displayName: row.customerName,
+            photonSenderId: row.photonSenderId,
+            userId: row.userId,
+          })),
+          directory: remote,
+          tiger: tiger.map((row) => ({ displayName: row.displayName, userId: row.userId })),
+        });
+      },
+      tigerPeople: async () => {
+        if (!tigerDirectory) return [];
+        return (await tigerDirectory.refresh()).map((row) => ({
+          displayName: row.displayName,
+          userId: row.userId,
+        }));
+      },
       ledger,
       alerts,
       orchestration,
       liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
       peopleDirectory: async () => {
-        if (!tigerDirectory) return [];
-        return (await tigerDirectory.refresh()).map((person) => ({
-          displayName: person.displayName,
-          userId: person.userId,
-          ...(person.walletAddress !== "0" ? { xrplAddress: person.walletAddress } : {}),
-        }));
+        const tigerPeople = tigerDirectory
+          ? (await tigerDirectory.refresh()).map((person) => ({
+              displayName: person.displayName,
+              userId: person.userId,
+              ...(person.walletAddress && person.walletAddress !== "0" ? { xrplAddress: person.walletAddress } : {}),
+            }))
+          : [];
+        const merged = mergePeopleDirectory(
+          [...tigerPeople, ...onboardingStore.peopleDirectory()],
+          await loadDeepSpaceDirectory(),
+        );
+        peopleSnapshot.current = merged;
+        return merged;
       },
       userProfile: async (senderId) => {
         const person = await tigerProfiles?.findByPhotonIdentifier(senderId);

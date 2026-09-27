@@ -38,12 +38,14 @@ const ROHAN_PHONE = "+15550000001";
 const SARAH_WALLET_ADDR = "rLkAvxEN7WtDYGNUdMMawSyaAGTWpVYnY4";
 const ROHAN_WALLET_ADDR = "rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe";
 
-function setupHarness(options: { intentTtlMs?: number } = {}) {
+async function setupHarness(options: { intentTtlMs?: number } = {}) {
   const s = stack({ autonomousEnabled: false });
   s.ledger.evidenceSource = "XRPL_TESTNET";
 
   const senders = parseCustomerSenders(JSON.stringify({ [ROHAN_PHONE]: "rohan" }));
-  const settlement = new CustomerWalletSettlement(s.guard.executor, senders);
+  const settlement = new CustomerWalletSettlement(s.guard.executor, senders, undefined, (id) =>
+    s.guard.registry.getAddress(id),
+  );
   const directory = new MapRecipientDirectory(TEST_RECIPIENTS);
   const provider = new MockPaymentProvider();
   const store = new PaymentStore();
@@ -72,6 +74,11 @@ function setupHarness(options: { intentTtlMs?: number } = {}) {
     });
   }
 
+  await s.guard.registry.ensureCustomerTestnetWallet("rohan");
+  await s.guard.registry.ensureCustomerTestnetWallet("sarah");
+  await s.guard.registry.ensureCustomerTestnetWallet("keith");
+  await s.guard.registry.ensureCustomerTestnetWallet("ben");
+
   return {
     ledger: s.ledger,
     audit: s.guard.audit,
@@ -89,7 +96,7 @@ function setupHarness(options: { intentTtlMs?: number } = {}) {
 
 describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () => {
   it("A. 'Send Sarah $25' does NOT immediately transfer", async () => {
-    const { say, ledger, store } = setupHarness();
+    const { say, ledger, store } = await setupHarness();
     const result = await say("Send Sarah $25");
 
     // Must prompt for confirmation without transferring funds
@@ -106,7 +113,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("B. User confirms $25 → exactly one $25 transaction", async () => {
-    const { say, ledger, store, registry } = setupHarness();
+    const { say, ledger, store, registry } = await setupHarness();
     await say("Send Sarah $25");
     expect(ledger.submits).toHaveLength(0);
 
@@ -129,7 +136,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("C. User cancels on 'no' → zero transactions", async () => {
-    const { say, ledger, store } = setupHarness();
+    const { say, ledger, store } = await setupHarness();
     await say("Send Sarah $25");
     const cancelled = await say("no");
 
@@ -139,7 +146,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("D. User disputes amount ('that's wrong') → asks for correction", async () => {
-    const { say, ledger, store } = setupHarness();
+    const { say, ledger, store } = await setupHarness();
     await say("Send Sarah $25");
     const disputed = await say("that's wrong");
 
@@ -153,7 +160,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("E. User cancels during correction → zero transactions", async () => {
-    const { say, ledger, store } = setupHarness();
+    const { say, ledger, store } = await setupHarness();
     await say("Send Sarah $25");
     await say("that's wrong");
     const cancelled = await say("cancel");
@@ -164,7 +171,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("F. User provides corrected amount '$15' → asks for confirmation again; does NOT immediately transfer", async () => {
-    const { say, ledger, store } = setupHarness();
+    const { say, ledger, store } = await setupHarness();
     await say("Send Sarah $25");
     await say("that's wrong");
     const revised = await say("$15");
@@ -181,7 +188,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("G. User confirms revised $15 → exactly one $15 transaction", async () => {
-    const { say, ledger, store } = setupHarness();
+    const { say, ledger, store } = await setupHarness();
     await say("Send Sarah $25");
     await say("that's wrong");
     await say("$15");
@@ -198,7 +205,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("H. User changes recipient → requires fresh confirmation", async () => {
-    const { say, ledger, store, registry } = setupHarness();
+    const { say, ledger, store, registry } = await setupHarness();
     await say("Send Sarah $25");
     const changed = await say("Actually send it to Keith");
 
@@ -218,7 +225,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("I. User changes amount after confirming but before execution → block and reconfirm", async () => {
-    const { say, ledger, store } = setupHarness();
+    const { say, ledger, store } = await setupHarness();
     await say("Send Sarah $25");
 
     // Simulate intent state transitioned to CONFIRMED
@@ -244,7 +251,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("J. Confirmation from another space/user → rejected", async () => {
-    const { say, ledger } = setupHarness();
+    const { say, ledger } = await setupHarness();
     await say("Send Sarah $25", { spaceId: "space-1", senderId: ROHAN_PHONE, senderName: "Rohan" });
 
     // Different user attempts to confirm
@@ -259,7 +266,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("K. Expired confirmation → rejected", async () => {
-    const { say, ledger, store } = setupHarness({ intentTtlMs: -1000 }); // expired TTL
+    const { say, ledger, store } = await setupHarness({ intentTtlMs: -1000 }); // expired TTL
     await say("Send Sarah $25");
 
     const active = store.active("space-1");
@@ -271,7 +278,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("L. Duplicate 'yes' → at most one transaction", async () => {
-    const { say, ledger } = setupHarness();
+    const { say, ledger } = await setupHarness();
     await say("Send Sarah $25");
 
     const first = await say("yes");
@@ -284,14 +291,14 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("M. Missing pending payment + 'yes' → no transaction", async () => {
-    const { say, ledger } = setupHarness();
+    const { say, ledger } = await setupHarness();
     const reply = await say("yes");
     expect(reply.handled).toBe(false);
     expect(ledger.submits).toHaveLength(0);
   });
 
   it("N. Ambiguous response → no transaction", async () => {
-    const { say, ledger, store } = setupHarness();
+    const { say, ledger, store } = await setupHarness();
     await say("Send Sarah $25");
 
     const ambiguous = await say("maybe later");
@@ -303,7 +310,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("O. Negative amount → no transaction", async () => {
-    const { say, ledger, store } = setupHarness();
+    const { say, ledger, store } = await setupHarness();
     const reply = await say("Send Sarah -$25");
     expect(reply.reply).toBe("I can only send a positive amount.");
     expect(ledger.submits).toHaveLength(0);
@@ -311,7 +318,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("P. Direct/internal call to the Ripple payment executor without valid confirmation → rejected", async () => {
-    const { executor, ledger } = setupHarness();
+    const { executor, ledger } = await setupHarness();
 
     // 1. Direct call with humanConfirmed: false in confirmed mode
     const rejected1 = await executor.execute({
@@ -338,7 +345,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("Q. Existing restaurant deposit flow still works, but requires its own explicit confirmation", async () => {
-    const { service, store } = setupHarness();
+    const { service, store } = await setupHarness();
 
     // Synchronize deposit requirement
     const deposit = service.syncDeposit({
@@ -376,7 +383,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
 
   it("R. Existing ticket purchase/payment flow still works, but requires its own explicit confirmation", async () => {
     // Ticket payment port requires valid amount, purpose, currency, and explicit quote
-    const { provider } = setupHarness();
+    const { provider } = await setupHarness();
     const guardrail = validateConfirmationGuardrail(
       { amountUsd: 50, recipientName: "Box Office", destination: TEST_RECIPIENTS.Keith.rippleDestination, currency: "USD", senderId: ROHAN_PHONE, spaceId: "tickets" },
       {
@@ -409,7 +416,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("S. Existing person-to-person payment flow uses this same guardrail", async () => {
-    const { say, ledger, store } = setupHarness();
+    const { say, ledger, store } = await setupHarness();
 
     // Standard P2P flow
     await say("Send Sarah $25");
@@ -423,7 +430,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
   });
 
   it("Audit trail reflects full conversation lifecycle: PROPOSED → REVISED → CONFIRMED → VALIDATED", async () => {
-    const { say, audit, registry, ledger } = setupHarness();
+    const { say, audit, registry, ledger } = await setupHarness();
 
     await say("Send Sarah $25");
     await say("that's wrong");

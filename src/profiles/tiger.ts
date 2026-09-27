@@ -145,17 +145,27 @@ export class TigerUserProfileStore implements UserProfileWriter {
 export class TigerProfileDirectory {
   private profiles: TigerUserProfile[] = [];
   private loadedAt = 0;
+  private warned = false;
   constructor(private readonly store: TigerUserProfileStore, private readonly ttlMs = 15_000) {}
 
   async refresh(force = false): Promise<TigerUserProfile[]> {
     if (!force && Date.now() - this.loadedAt < this.ttlMs) return this.profiles;
-    const rows = await this.store.list();
-    this.profiles = rows;
-    this.loadedAt = Date.now();
-    for (const row of rows) {
-      registerOnboardedCustomer({ customerId: customerIdForUser(row.userId), customerName: row.displayName || row.userId });
+    try {
+      const rows = await this.store.list();
+      this.profiles = rows;
+      this.loadedAt = Date.now();
+      for (const row of rows) {
+        registerOnboardedCustomer({ customerId: customerIdForUser(row.userId), customerName: row.displayName || row.userId });
+      }
+      return this.profiles;
+    } catch (error) {
+      if (!this.warned) {
+        this.warned = true;
+        const detail = error instanceof Error ? error.message.slice(0, 160) : "Error";
+        console.error(`Tiger user_profiles unavailable (${detail}). Payments still run from local wallets. Run npm run db:migrate:user-profiles.`);
+      }
+      return this.profiles;
     }
-    return this.profiles;
   }
 
   list(): TigerUserProfile[] { return this.profiles.map((row) => ({ ...row })); }

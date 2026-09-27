@@ -22,6 +22,8 @@ interface PhotonUser {
 export interface PhotonCredentials {
   projectId: string
   secret: string
+  /** Line type for new users; Photon rejects creates without it (422). Default "shared". */
+  lineType?: 'shared' | 'dedicated'
 }
 
 function listFrom(body: unknown): PhotonUser[] {
@@ -66,7 +68,11 @@ export async function assignedAgentNumber(
     const res = await fetchImpl(base, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ phoneNumber: phone, firstName: options.firstName || 'plansaroundus', sendInvite: false }),
+      body: JSON.stringify({
+        type: creds.lineType ?? 'shared',
+        phoneNumber: phone,
+        firstName: options.firstName || 'plansaroundus',
+      }),
     })
     if (!res.ok) {
       const detail = (await res.text().catch(() => '')).slice(0, 200)

@@ -9,13 +9,13 @@ import { geocodeNyc } from "../geocode.js";
 import { applyNavHazards } from "../navigation/guide.js";
 import { lookupNavHazards, nightHourEt, recentOpsNote } from "../navigation/hazards.js";
 import { asksDirectionsHome, wantsSafetySketch } from "../safetyIntent.js";
-import { findEvents } from "../skills/eventsSkill.js";
+import { findEvents, mergeOfficialAndGeminiReply, type EventsResult } from "../skills/eventsSkill.js";
 import { findFood } from "../skills/foodSkill.js";
 import { getRoute } from "../skills/routeSkill.js";
 import type { BlockSafetyReport } from "../safety.js";
 import { getSafety } from "../skills/safetySkill.js";
 import { renderResponse, rankRecommendationsSync } from "./compose.js";
-import { parseIntent, heuristicIntent } from "./intent.js";
+import { parseIntent, heuristicIntent, refineIntent } from "./intent.js";
 
 export interface OrchestratorInput {
   question: string;
@@ -82,8 +82,9 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   }
   const recent = input.transcript.slice(-8).map(({ who, text }) => `${who}: ${text}`);
   const recentTexts = input.transcript.slice(-8).map(({ text }) => text);
-  const intent = await parseIntent(input.question, sharedLocation(input), recent);
+  const parsed = await parseIntent(input.question, sharedLocation(input), recent);
   const heuristic = heuristicIntent(input.question, sharedLocation(input), recentTexts);
+  const intent = refineIntent(input.question, parsed, heuristic);
   // Small talk, feelings, and follow-ups belong with the conversational model and chat memory.
   // Do not run empty food/event lookups just because a last-shared pin exists.
   if ((intent.conversational || heuristic.conversational) && input.fallback) return input.fallback();
@@ -103,6 +104,8 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
         budget: intent.budget,
         openNow: !/tomorrow|later/i.test(intent.when),
         apiKey: config.googleMapsApiKey,
+        geminiApiKey: config.geminiApiKey,
+        geminiModel: config.geminiModel,
         strict: config.liveDemoMode,
       }), [])
     : Promise.resolve(null);
@@ -116,10 +119,13 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
         budget: intent.budget,
         databaseUrl: config.databaseUrl,
         tavilyApiKey: config.tavilyApiKey,
+        geminiApiKey: config.geminiApiKey,
+        geminiModel: config.geminiModel,
       }), [])
     : Promise.resolve(null);
 
   const [food, events] = await Promise.all([foodPromise, eventsPromise]);
+  const eventResult = events as EventsResult | null;
   const candidates: Recommendation[] = [...(events?.data ?? []), ...(food?.data ?? [])];
   const ranked = rankRecommendationsSync(
     input.question,
@@ -222,7 +228,11 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   if (opsNote) {
     graph.limitations.push(opsNote);
   }
-  const response = renderResponse({ picks, safety, route, warnings: [], graph });
+  const official = renderResponse({ picks, safety, route, warnings: [], graph });
   input.onEvidence?.(graph);
-  return response;
+  return mergeOfficialAndGeminiReply(
+    official,
+    eventResult?.geminiReply,
+    picks.some((pick) => pick.item.kind === "event"),
+  );
 }

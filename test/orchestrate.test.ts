@@ -9,7 +9,10 @@ vi.mock("../src/agent/compose.js", () => ({
   rankRecommendationsSync: vi.fn(() => ({ picks: [], offerMore: false })),
   renderResponse: vi.fn(() => "rendered response"),
 }));
-vi.mock("../src/skills/eventsSkill.js", () => ({ findEvents: vi.fn() }));
+vi.mock("../src/skills/eventsSkill.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/skills/eventsSkill.js")>();
+  return { ...actual, findEvents: vi.fn() };
+});
 vi.mock("../src/skills/foodSkill.js", () => ({ findFood: vi.fn() }));
 vi.mock("../src/skills/routeSkill.js", () => ({ getRoute: vi.fn() }));
 vi.mock("../src/skills/safetySkill.js", () => ({ getSafety: vi.fn() }));
@@ -63,6 +66,14 @@ describe("skill dispatcher", () => {
     expect(findFood).not.toHaveBeenCalled();
     expect(findEvents).not.toHaveBeenCalled();
     expect(getRoute).not.toHaveBeenCalled();
+  });
+
+  it("does not query Tiger events for a dinner request even if Gemini asked for events", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["events"] });
+    await orchestrate({ question: "Where should we get dinner?", transcript: [], location });
+    expect(findFood).toHaveBeenCalledOnce();
+    expect(findEvents).not.toHaveBeenCalled();
+    expect(getSafety).not.toHaveBeenCalled();
   });
 
   it("hands the Tiger report to onSafetyReport only when safety was asked for", async () => {
@@ -193,6 +204,34 @@ describe("skill dispatcher", () => {
     );
     expect(fallback).not.toHaveBeenCalled();
     expect(renderResponse).toHaveBeenCalled();
+  });
+
+  it("appends the Gemini events reply after official Tiger listings", async () => {
+    const event = {
+      id: "event:parks:1",
+      kind: "event" as const,
+      name: "Outdoor Movie",
+      location: { label: "Riverside Park", latitude: 40.805, longitude: -73.97 },
+      distanceMeters: 700,
+      categories: ["movie"],
+      source: { name: "NYC Parks" },
+    };
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["events"] });
+    vi.mocked(findEvents).mockResolvedValue({
+      status: "ok",
+      data: [event],
+      sources: [],
+      warnings: [],
+      geminiReply: "Jazz at Lincoln Center at 8pm.",
+    });
+    vi.mocked(rankRecommendationsSync).mockReturnValue({
+      picks: [{ item: event, reason: "nearby" }],
+      offerMore: false,
+    });
+    vi.mocked(renderResponse).mockReturnValue("1. Outdoor Movie");
+    await expect(orchestrate({ question: "what's happening tonight?", transcript: [], location })).resolves.toBe(
+      "1. Outdoor Movie\n\nJazz at Lincoln Center at 8pm.",
+    );
   });
 
   it("uses the fallback when food/events were asked for but nothing was picked, even with safety data", async () => {

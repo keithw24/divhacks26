@@ -77,6 +77,14 @@ export interface TurnDeps {
   handleAlerts?(input: { spaceId: string; text: string }): Promise<ReservationHandlerResult>;
   /** Friend-style reply for venting with nothing to look up. */
   support?(): Promise<string>;
+  handlePlanInvite?(input: {
+    spaceId: string;
+    senderId?: string;
+    senderName?: string;
+    text: string;
+    isGroup: boolean;
+    messageId?: string;
+  }): Promise<ReservationHandlerResult>;
   handleMeetup?(input: {
     spaceId: string;
     senderId?: string;
@@ -292,6 +300,25 @@ export async function runConversationTurn(
           return;
         }
       }
+      if (deps.handlePlanInvite) {
+        const invite = await deps.handlePlanInvite({
+          spaceId: input.spaceId,
+          senderId: input.senderId,
+          senderName: input.senderName,
+          text: question,
+          isGroup: input.isGroup,
+          messageId: input.messageId,
+        });
+        if (invite.handled && invite.reply) {
+          outcome = "meetup";
+          answer = invite.reply;
+          await reactTo(actions, ackFor(input.social, invite.acknowledgement ?? "👍"));
+          await deliverOnce(deliveryActions, answer);
+          delivered = true;
+          if (invite.afterReply) await invite.afterReply();
+          return;
+        }
+      }
       if (deps.handleMeetup) {
         const meetup = await deps.handleMeetup({
           spaceId: input.spaceId,
@@ -385,7 +412,8 @@ export async function runConversationTurn(
     if (delivered) deps.recordAssistant(answer, outcome);
     return outcome;
   } catch (error) {
-    console.error(`reply failed: ${errorCategory(error)}`);
+    const detail = error instanceof Error ? `${error.name}: ${error.message.slice(0, 200)}` : "Error";
+    console.error(`reply failed: ${detail}`);
     if (!deliveryAttempted) {
       const notify = actions.send ?? actions.reply;
       await notify(FRIENDLY_FAILURE).catch(() => undefined);

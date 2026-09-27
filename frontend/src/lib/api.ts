@@ -163,6 +163,9 @@ const MESSAGES: Record<string, string> = {
     "Couldn't create a Testnet wallet right now. Chat still works; try again from the dashboard.",
   memory_unavailable: "Memory is unavailable right now. Try again shortly.",
   unauthorized: "Your session ended. Sign in again.",
+  number_unavailable:
+    "Couldn't set up @agent for this number right now. Check the number and try again in a moment.",
+  site_unconfigured: "Sign-in isn't set up on the server yet. Try again later.",
 };
 
 export function errorMessage(err: unknown): string {

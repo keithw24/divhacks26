@@ -9,6 +9,7 @@ import {
   failureText,
   formatUsd,
   missingDestinationText,
+  missingRecipientWalletText,
   overMaxText,
   rejectedText,
   successText,
@@ -27,7 +28,8 @@ import {
 } from "./guardrails.js";
 import { classifyPaymentMessage, shouldAskModel, type PaymentMessage } from "./intent.js";
 import { assertConfirmedTransfer } from "./prepare.js";
-import { extractPersonMentions, isPronoun, type RecipientDirectory } from "./recipients.js";
+import { isValidClassicAddress } from "xrpl";
+import { extractPersonMentions, isPronoun, matchNamedWallet, type RecipientDirectory } from "./recipients.js";
 import { PaymentStore } from "./state.js";
 import { testnetExplorerLink } from "./xrpl/explorer.js";
 import type { CustomerSettlementPort } from "./xrpl/settlement.js";
@@ -72,6 +74,8 @@ export interface PaymentServiceOptions {
   intentTtlMs?: number;
   /** After a confirmed Testnet send, resolve the newest tx on the destination account page. */
   latestTestnetTx?: LatestTestnetTxLookup;
+  /** DeepSpace / onboarded people. Used to find a payee wallet before any send is proposed. */
+  peopleDirectory?: () => Array<{ displayName?: string; userId?: string; xrplAddress?: string }>;
 }
 
 export class PaymentService implements DepositPaymentPort {
@@ -86,6 +90,7 @@ export class PaymentService implements DepositPaymentPort {
   private readonly audit?: PaymentAuditLog;
   private readonly intentTtlMs: number;
   private readonly latestTestnetTx?: LatestTestnetTxLookup;
+  private readonly peopleDirectory?: PaymentServiceOptions["peopleDirectory"];
 
   constructor(options: PaymentServiceOptions) {
     this.maxUsd = options.maxUsd ?? 500;
@@ -99,6 +104,7 @@ export class PaymentService implements DepositPaymentPort {
     this.audit = options.audit;
     this.intentTtlMs = options.intentTtlMs ?? 10 * 60 * 1000;
     this.latestTestnetTx = options.latestTestnetTx;
+    this.peopleDirectory = options.peopleDirectory;
   }
 
   get payments(): PaymentStore {
@@ -106,7 +112,15 @@ export class PaymentService implements DepositPaymentPort {
   }
 
   private knownNames(): string[] {
-    return this.settlement ? this.settlement.knownNames() : this.directory.knownNames();
+    const base = this.settlement ? this.settlement.knownNames() : this.directory.knownNames();
+    const extra = (this.peopleDirectory?.() ?? [])
+      .map((person) => person.displayName?.trim())
+      .filter((name): name is string => Boolean(name));
+    return [...new Set([...base, ...extra])];
+  }
+
+  private peopleSnapshot(): Array<{ displayName?: string; userId?: string; xrplAddress?: string }> {
+    return this.peopleDirectory?.() ?? [];
   }
 
   observe(spaceId: string, text: string): void {
@@ -194,7 +208,11 @@ export class PaymentService implements DepositPaymentPort {
   private async startFromModel(input: PaymentTurnInput): Promise<PaymentTurnResult> {
     let extracted;
     try {
-      extracted = await this.interpreter!.extract({ text: input.text, recentTexts: input.recentTexts ?? [] });
+      extracted = await this.interpreter!.extract({
+        text: input.text,
+        recentTexts: input.recentTexts ?? [],
+        people: this.peopleSnapshot(),
+      });
     } catch (error) {
       logPayment("payment_extract_failed", { spaceId: input.spaceId, reason: error instanceof Error ? error.name : "Error" });
       return { handled: false };
@@ -222,19 +240,24 @@ export class PaymentService implements DepositPaymentPort {
     const quoted = assertAmountMatchesUtterance(input.text, fields.amount.value);
     if (!quoted.ok) return this.finish(input, quoted.reply);
 
-    const resolved = this.resolveRecipient(input.spaceId, fields.recipientName, input.recentTexts);
-    if (!resolved.ok) return this.finish(input, resolved.reply);
-
     let customerFields: Pick<PaymentRecord, "settlement" | "senderCustomerId" | "recipientCustomerId"> = {};
     if (this.settlement) {
       const sender = this.settlement.resolveSender({ senderId: input.senderId, senderName: input.senderName });
       if (!sender) return this.finish(input, unlinkedSenderText());
-      if (sender.customerId === resolved.recipient.customerId) return this.finish(input, "You can't send a payment to yourself.");
       customerFields = {
         settlement: "XRPL_TESTNET_CUSTOMER_WALLET",
         senderCustomerId: sender.customerId,
-        recipientCustomerId: resolved.recipient.customerId,
       };
+    }
+
+    const resolved = this.resolveRecipient(input.spaceId, fields.recipientName, input.recentTexts);
+    if (!resolved.ok) return this.finish(input, resolved.reply);
+
+    if (this.settlement) {
+      if (customerFields.senderCustomerId === resolved.recipient.customerId) {
+        return this.finish(input, "You can't send a payment to yourself.");
+      }
+      customerFields = { ...customerFields, recipientCustomerId: resolved.recipient.customerId };
     }
 
     const existing = this.store.active(input.spaceId);
@@ -329,9 +352,16 @@ export class PaymentService implements DepositPaymentPort {
       return this.finish(input, rejectedText(sendable.reply));
     }
     const stillThere = this.resolveRecipient(input.spaceId, active.recipientName, input.recentTexts);
-    if (!stillThere.ok || stillThere.recipient.rippleDestination !== active.destination) {
+    if (!stillThere.ok) {
       this.store.markResult(active.id, "FAILED", { providerStatus: "guardrail" });
-      return this.finish(input, rejectedText("I couldn't verify the destination. Nothing was charged"));
+      return this.finish(input, stillThere.reply);
+    }
+    if (
+      !classicAddress(stillThere.recipient.rippleDestination) ||
+      stillThere.recipient.rippleDestination !== active.destination
+    ) {
+      this.store.markResult(active.id, "FAILED", { providerStatus: "guardrail" });
+      return this.finish(input, missingRecipientWalletText(active.recipientName));
     }
     const sender = this.settlement
       ? this.settlement.resolveSender({ senderId: input.senderId, senderName: input.senderName })
@@ -957,13 +987,24 @@ export class PaymentService implements DepositPaymentPort {
     const picked = isPronoun(name) ? this.pronoun(spaceId, recentTexts) : { status: "one" as const, name };
     if (picked.status !== "one") return { ok: false, reply: "I'm not sure who you mean." };
     if (this.settlement) {
-      // The registered customer list is the only source of recipients. The wallet address is looked up at signing time.
       const customer = this.settlement.resolveRecipient(picked.name);
-      if (!customer) return { ok: false, reply: unknownCustomerText(picked.name) };
-      return { ok: true, recipient: { displayName: customer.customerName, rippleDestination: "", customerId: customer.customerId } };
+      const person = matchNamedWallet(picked.name, this.peopleSnapshot());
+      const fromRegistry = customer ? this.settlement.lookupRecipientAddress?.(customer.customerId) : undefined;
+      const address = classicAddress(fromRegistry) ?? classicAddress(person?.xrplAddress);
+      const displayName = customer?.customerName ?? person?.displayName?.trim() ?? picked.name;
+      if (!customer && !person) return { ok: false, reply: unknownCustomerText(picked.name) };
+      if (!address) return { ok: false, reply: missingRecipientWalletText(displayName) };
+      return {
+        ok: true,
+        recipient: { displayName, rippleDestination: address, customerId: customer?.customerId },
+      };
     }
     const recipient = this.directory.resolve(picked.name);
     if (!recipient) return { ok: false, reply: missingDestinationText(picked.name) };
+    const person = matchNamedWallet(picked.name, this.peopleSnapshot());
+    if (person && !classicAddress(person.xrplAddress) && !classicAddress(recipient.rippleDestination)) {
+      return { ok: false, reply: missingRecipientWalletText(person.displayName?.trim() || picked.name) };
+    }
     return { ok: true, recipient };
   }
 
@@ -1027,6 +1068,11 @@ export class PaymentService implements DepositPaymentPort {
 
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : "Error";
+}
+
+function classicAddress(value: string | undefined): string | undefined {
+  const address = value?.trim();
+  return address && isValidClassicAddress(address) ? address : undefined;
 }
 
 function authorized(input: { senderId?: string }, payment: PaymentRecord): boolean {

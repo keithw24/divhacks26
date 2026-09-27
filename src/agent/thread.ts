@@ -32,10 +32,9 @@ export function continuesCapabilityThread(question: string, recent: readonly str
   const trimmed = question.trim();
   if (!trimmed || isPlacePlanningAsk(trimmed) || CONFIRM_OR_CANCEL.test(trimmed)) return false;
   if (isAgentCapabilityTopic(trimmed)) return true;
-  const prior = recent.slice(-6).some((line) => isAgentCapabilityTopic(line));
+  const prior = recent.slice(-6).some((line) => isAgentCapabilityTopic(line) || askedForTestWallet(line));
   if (!prior) return false;
-  if (FOLLOW_UP_OPENER.test(trimmed)) return true;
-  return trimmed.length <= 48 && !isPlacePlanningAsk(trimmed);
+  return FOLLOW_UP_OPENER.test(trimmed);
 }
 
 export function askedForTestWallet(text: string): boolean {

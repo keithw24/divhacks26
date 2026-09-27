@@ -16,7 +16,7 @@ import type { Hono } from 'hono'
 import { computeHmacHex, timingSafeEqualHex } from 'deepspace/worker'
 import type { AppContext, Env } from '../../worker.js'
 import { isAdapterChannel, type OutboxAck } from '../domain/contracts'
-import { ackOutbox, claimOutbox, handleInbound, listWalletDirectory, notifyPaymentReceived, parseInbound } from '../domain/channels'
+import { ackOutbox, claimOutbox, handleInbound, listProfileDirectory, notifyPaymentReceived, parseInbound } from '../domain/channels'
 import { ServiceError } from '../domain/store'
 import { createActionTools } from './action-routes.js'
 import { siteFor } from './site-routes.js'
@@ -133,7 +133,7 @@ export function registerChannelRoutes(app: Hono<AppContext>): void {
   app.get('/api/channels/directory', async (c) => {
     const auth = await authorize(c)
     if (!auth.ok) return c.json({ error: 'Unauthorized' }, 401)
-    const people = await listWalletDirectory(createActionTools(c.env, CHANNEL_ADAPTER_USER, ''))
+    const people = await listProfileDirectory(createActionTools(c.env, CHANNEL_ADAPTER_USER, ''))
     return c.json({ people })
   })
 

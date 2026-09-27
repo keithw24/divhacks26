@@ -26,9 +26,14 @@ export function mergePeopleDirectory(
     if (existing) {
       existing.userId = existing.userId || row.userId;
       existing.xrplAddress = existing.xrplAddress || row.xrplAddress;
+      existing.displayName = existing.displayName || row.displayName;
       continue;
     }
-    byKey.set(row.userId.toLowerCase(), { userId: row.userId, xrplAddress: row.xrplAddress });
+    byKey.set(row.userId.toLowerCase(), {
+      userId: row.userId,
+      ...(row.displayName ? { displayName: row.displayName } : {}),
+      xrplAddress: row.xrplAddress,
+    });
   }
   return [...byKey.values()];
 }
@@ -38,7 +43,7 @@ export function formatPeopleDirectory(people: PeopleDirectoryEntry[]): string[] 
     const bits = [person.displayName || person.userId || "member"];
     if (person.userId) bits.push(`userId ${person.userId}`);
     if (person.xrplAddress && person.xrplAddress !== "0") bits.push(`wallet ${person.xrplAddress}`);
-    else bits.push("wallet not provisioned");
+    else bits.push("no Testnet wallet");
     return bits.join(" — ");
   });
 }

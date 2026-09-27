@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { heuristicIntent } from "../src/agent/intent.js";
+import { heuristicIntent, refineIntent } from "../src/agent/intent.js";
 
 const origin = { label: "Columbia University", latitude: 40.8075, longitude: -73.9626 };
 
@@ -21,6 +21,17 @@ describe("intent routing", () => {
 
   it("asks for location when the message has no usable context", () => {
     expect(heuristicIntent("?", undefined).needsClarification).toBe(true);
+  });
+
+  it("routes a dinner spot to food only, not events", () => {
+    expect(heuristicIntent("could you find a dinner spot", origin).needs).toEqual(["food"]);
+    expect(heuristicIntent("fun dinner nearby", origin).needs).toEqual(["food"]);
+  });
+
+  it("keeps Gemini from sending a dinner ask to Tiger events", () => {
+    const parsed = { ...heuristicIntent("Where should we get dinner?", origin), needs: ["events" as const] };
+    const heuristic = heuristicIntent("Where should we get dinner?", origin);
+    expect(refineIntent("Where should we get dinner?", parsed, heuristic).needs).toEqual(["food"]);
   });
 });
 

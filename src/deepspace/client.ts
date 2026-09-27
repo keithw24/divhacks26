@@ -64,7 +64,10 @@ export interface DeepSpaceClient {
 
 export interface DirectoryPerson {
   userId: string;
+  displayName?: string;
   xrplAddress: string;
+  /** Transient sync input. Never pass this field to Gemini or persist it raw. */
+  photonIdentifier?: string;
 }
 
 export interface PaymentNotifyResult {
@@ -115,7 +118,16 @@ export function createDeepSpaceClient(options: {
       return Array.isArray(payload.people)
         ? payload.people.filter(
             (row) => typeof row?.userId === "string" && typeof row?.xrplAddress === "string" && row.userId && row.xrplAddress,
-          )
+          ).map((row) => ({
+            userId: row.userId.trim(),
+            xrplAddress: row.xrplAddress.trim(),
+            ...(typeof row.displayName === "string" && row.displayName.trim()
+              ? { displayName: row.displayName.trim().slice(0, 80) }
+              : {}),
+            ...(typeof row.photonIdentifier === "string" && row.photonIdentifier.trim()
+              ? { photonIdentifier: row.photonIdentifier.trim() }
+              : {}),
+          }))
         : [];
     },
     notifyPayment: (input) => call<PaymentNotifyResult>("POST", "/api/channels/payments/notify", input),

@@ -57,8 +57,14 @@ export function heuristicIntent(question: string, origin?: Location, recent: str
   if (!capabilityThread) {
     if (focusedRoute || homeTrip) needs.add("route");
     if (/safe|safety|crime|danger|sketch/.test(text) || homeTrip) needs.add("safety");
-    if (/food|eat|dinner|lunch|breakfast|restaurant|cuisine|hungry/.test(text)) needs.add("food");
-    if (!focusedRoute && /event|activity|activities|fun|concert|movie|festival|show|park/.test(text)) needs.add("events");
+    if (/food|eat|dinner|lunch|breakfast|brunch|restaurant|cuisine|hungry|dinner spot|place to eat/.test(text)) {
+      needs.add("food");
+    }
+    const eventCue =
+      /event|activity|activities|concert|festival|\bshow\b/.test(text) ||
+      (/\bfun\b|\bmovie\b|\bpark\b/.test(text) &&
+        !/food|eat|dinner|lunch|breakfast|brunch|restaurant/.test(text));
+    if (!focusedRoute && eventCue) needs.add("events");
     if (/route|direction|take me|travel/.test(text)) needs.add("route");
   }
   // Nothing place-related and not a broad "what should we do": treat it as conversation.
@@ -105,6 +111,44 @@ export function heuristicIntent(question: string, origin?: Location, recent: str
   };
 }
 
+const FOOD_ASK =
+  /food|eat|dinner|lunch|breakfast|brunch|restaurant|hungry|cuisine|bite to eat|place to eat|dinner spot/;
+const PLANNING_NIGHT = /\b(plan a|night out|date night|fun and safe night)\b/;
+const EXPLICIT_EVENTS = /event|concert|festival|parade|fair/;
+const EXPLICIT_SAFETY = /safe|safety|crime|danger|sketch/;
+const EXPLICIT_ROUTE = /how (?:do|can) (?:i|we) get|directions? to|route to/;
+
+/** Dinner / restaurant asks should not pull Tiger city_events unless the user also asked for events. */
+export function isFocusedFoodAsk(question: string): boolean {
+  const text = question.toLowerCase();
+  return FOOD_ASK.test(text) && !PLANNING_NIGHT.test(text);
+}
+
+/**
+ * Keep Gemini from swapping a dinner ask onto events/safety, and restore food when
+ * the heuristic saw it but the model omitted it.
+ */
+export function refineIntent(question: string, parsed: UserIntent, heuristic: UserIntent): UserIntent {
+  const text = question.toLowerCase();
+  const focusedFood = isFocusedFoodAsk(question);
+  if (heuristic.conversational && heuristic.needs.length === 0) return parsed;
+
+  let needs = [...parsed.needs];
+  if (!parsed.conversational && heuristic.needs.includes("food") && !needs.includes("food")) {
+    needs.push("food");
+  }
+
+  if (!focusedFood) return { ...parsed, needs };
+
+  needs = ["food"];
+  if (EXPLICIT_SAFETY.test(text)) needs.push("safety");
+  if (EXPLICIT_EVENTS.test(text)) needs.push("events");
+  if (parsed.needs.includes("route") || heuristic.needs.includes("route") || EXPLICIT_ROUTE.test(text)) {
+    needs.push("route");
+  }
+  return { ...parsed, needs, conversational: undefined };
+}
+
 function validate(json: IntentJson, fallback: UserIntent, origin?: Location): UserIntent {
   const parsedNeeds = (json.needs ?? []).filter((value): value is SkillName => SKILLS.has(value as SkillName));
   const conversational = json.conversational === true || (parsedNeeds.length === 0 && fallback.conversational === true);
@@ -142,6 +186,7 @@ export async function parseIntent(question: string, origin?: Location, recent: s
   const fallback = heuristicIntent(question, origin, recent);
   const prompt = `Classify this NYC iMessage request for an agent with four skills: safety, food, events, route.
 Return JSON only. Select only skills needed to answer the request. A broad request to plan a night may use all skills.
+Food-only requests (dinner, restaurant, where to eat, dinner spot) must use needs=["food"] only. Do not add events or safety unless the user also asked for those. Events come from Tiger city_events; they are not restaurants.
 Extract a named origin/destination as text but never invent coordinates. If the message names no place but the recent chat says where the sender is ("we're in Soho"), use that place as locationQuery. If no shared origin and no place is stated anywhere, ask one short location question.
 Set conversational=true and needs=[] when the message is small talk, a feeling, thanks, or a follow-up about the conversation itself, with nothing to look up.
 A shared location pin is not a reason to run food/events/route. Later messages often complete an earlier one: "can you make me an xrp test wallet" then "to make payments" is one wallet request, not a night plan.
@@ -151,9 +196,9 @@ Shared origin: ${origin ? JSON.stringify(origin) : "none"}
 Recent chat (oldest first): ${JSON.stringify(recent.slice(-8))}
 Message: ${question}`;
   try {
-    return validate(await generateJson<IntentJson>(prompt, schema), fallback, origin);
+    return refineIntent(question, validate(await generateJson<IntentJson>(prompt, schema), fallback, origin), fallback);
   } catch (error) {
     console.warn("Gemini intent parsing unavailable; using deterministic routing:", error);
-    return fallback;
+    return refineIntent(question, fallback, fallback);
   }
 }

@@ -17,6 +17,7 @@ import { createBackboardMemoryService, type MemoryService } from "../memory/back
 import type { Participant, StateStore } from "../store/state.js";
 import { ingestionKey } from "../store/state.js";
 import type { MeetupTurnInput, MeetupTurnResult, PersonLocation } from "../meetup/types.js";
+import { handlePlanInvite } from "../meetup/plan-invite.js";
 import type { OrchestratorTurnInput, OrchestratorTurnResult } from "../orchestration/orchestrator.js";
 import type { TransportationRequest, TransportationResult } from "../transport/service.js";
 
@@ -127,6 +128,10 @@ export interface InboundDeps {
     }): void;
     handleTurn(input: MeetupTurnInput): Promise<MeetupTurnResult>;
   };
+  /** Photon 1:1 send for plan invites. `externalId` is a Photon sender id; never log it. */
+  sendPlanInvite?: (externalId: string, body: string) => Promise<void>;
+  inviteContacts?: () => Promise<Array<{ displayName: string; photonSenderId: string }>>;
+  tigerPeople?: () => Promise<Array<{ displayName?: string; userId: string }>>;
   liveLocations?: (spaceId: string) => MeetupTurnInput["liveLocations"];
   /** "@agent call Alex and ask…" through ElevenLabs. */
   friendCalls?: {
@@ -369,6 +374,49 @@ export async function handleInboundMessage(
               phase: request.phase,
               location: deps.location ? { latitude: deps.location.latitude, longitude: deps.location.longitude } : undefined,
             })
+        : undefined,
+      handlePlanInvite: deps.sendPlanInvite
+        ? async (request) => {
+            const contacts = deps.inviteContacts ? await deps.inviteContacts().catch(() => []) : [];
+            const tigerPeople = deps.tigerPeople ? await deps.tigerPeople().catch(() => []) : [];
+            return handlePlanInvite({
+              text: request.text,
+              senderId: request.senderId,
+              senderName: request.senderName,
+              spaceId: request.spaceId,
+              isGroup: request.isGroup,
+              participants: group.participants,
+              contacts,
+              tigerPeople,
+              meetup: deps.meetup,
+              sendInvite: deps.sendPlanInvite!,
+              buildPlan: async (stripped) => {
+                geminiCalled = true;
+                const answer = await deps.suggest({
+                  isGroup: request.isGroup,
+                  asker: message.senderName || senderId,
+                  question: stripped,
+                  transcript: deps.transcript(),
+                  location: deps.location,
+                  currentUser: { id: loaded.userId, displayName: message.senderName },
+                  userMemories: loaded.memories,
+                  participantMemories: loaded.others,
+                  memoryOverrides: loaded.overrides,
+                  decisionLines: constraints.lines,
+                  groupLines: group.recentMessages.map((line) => ({
+                    senderId: line.senderId,
+                    senderName: line.senderName,
+                    text: line.text,
+                  })),
+                  personalized: true,
+                  social,
+                  peopleDirectory,
+                  userProfile,
+                });
+                return withCheckIn(sanitizeGroupReply(answer, attributed, recentText));
+              },
+            });
+          }
         : undefined,
       handleMeetup: deps.meetup
         ? (request) =>

@@ -11,12 +11,21 @@
  */
 
 import { parseLinkCommand } from './codes'
-import { isAdapterChannel, type AdapterChannel, type InboundMessage, type InboundResult, type OutboxAck, type OutboxItem } from './contracts'
+import {
+  isAdapterChannel,
+  type AdapterChannel,
+  type DirectoryPerson,
+  type InboundMessage,
+  type InboundResult,
+  type OutboxAck,
+  type OutboxItem,
+} from './contracts'
 import { isBetaMember } from './beta'
 import { completeChannelLink, listIdentities, resolveChannelUser } from './identity'
 import { listMyPlans } from './plans'
 import { findAll, getById, insert, patch, ServiceError, tryInsert, type Store } from './store'
 import { findWalletByAddress, listWallets } from './wallets'
+import { siteUserId, type SitePreferences, type SiteUser } from './site'
 
 const OUTBOX_LEASE_SECONDS = 60
 const MAX_ATTEMPTS = 5
@@ -164,9 +173,62 @@ export async function ackOutbox(store: Store, channel: AdapterChannel, ack: Outb
   return updated
 }
 
-/** Public wallet facts for the iMessage agent / Gemini. No phone numbers. */
-export async function listWalletDirectory(store: Store): Promise<Array<{ userId: string; xrplAddress: string }>> {
-  return (await listWallets(store)).map((row) => ({ userId: row.userId, xrplAddress: row.xrplAddress }))
+function profileName(value: unknown): string | undefined {
+  let parsed = value
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      return undefined
+    }
+  }
+  const name = (parsed as Partial<SitePreferences> | undefined)?.name
+  return typeof name === 'string' && name.trim() ? name.trim().slice(0, 80) : undefined
+}
+
+/**
+ * Complete DeepSpace profile feed for the trusted Node adapter. Wallet-less
+ * users are included with literal `0`, so registration appears in Tiger
+ * before a person opts into XRPL. Raw channel identity is transient and must
+ * be hashed by the adapter before persistence.
+ */
+export async function listProfileDirectory(store: Store): Promise<DirectoryPerson[]> {
+  const [siteRows, wallets, identities] = await Promise.all([
+    findAll<SiteUser & { preferences?: unknown }>(store, 'site_users', {}, 1000),
+    listWallets(store),
+    findAll<{ userId: string; channel: string; externalId: string }>(store, 'channel_identities', {}, 1000),
+  ])
+  const walletByUser = new Map(wallets.map((wallet) => [wallet.userId, wallet.xrplAddress]))
+  const photonByUser = new Map(
+    identities.filter((row) => row.data.channel === 'imessage').map((row) => [row.data.userId, row.data.externalId]),
+  )
+  const people = new Map<string, DirectoryPerson>()
+
+  for (const row of siteRows) {
+    const userId = row.data.userId || (await siteUserId(row.data.phone))
+    const displayName = profileName(row.data.preferences)
+    people.set(userId, {
+      userId,
+      ...(displayName ? { displayName } : {}),
+      xrplAddress: row.data.xrplAddress || walletByUser.get(userId) || '0',
+      photonIdentifier: row.data.phone,
+    })
+  }
+
+  for (const wallet of wallets) {
+    if (people.has(wallet.userId)) continue
+    people.set(wallet.userId, {
+      userId: wallet.userId,
+      xrplAddress: wallet.xrplAddress,
+      ...(photonByUser.get(wallet.userId) ? { photonIdentifier: photonByUser.get(wallet.userId) } : {}),
+    })
+  }
+
+  for (const [userId, photonIdentifier] of photonByUser) {
+    if (people.has(userId)) continue
+    people.set(userId, { userId, xrplAddress: '0', photonIdentifier })
+  }
+  return [...people.values()]
 }
 
 export async function queueUserNotice(store: Store, userId: string, body: string): Promise<boolean> {

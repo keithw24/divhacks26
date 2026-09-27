@@ -252,7 +252,7 @@ describe("confirmation flow", () => {
   it("rejects an unknown recipient and does not invent a destination", async () => {
     const { say, provider, service } = setup();
     const reply = await say("space", "Send Alex $10");
-    expect(reply.reply).toBe("I don't have a payment destination for Alex yet.");
+    expect(reply.reply).toBe("I can't send that — Alex doesn't have an XRPL Testnet wallet address. Nothing was processed.");
     expect(provider.calls).toHaveLength(0);
     expect(service.payments.active("space")).toBeUndefined();
   });

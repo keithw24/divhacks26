@@ -90,6 +90,23 @@ async function sendWithOwnResend(
   console.info('[site] email sent')
 }
 
+/** This person's own @agent number from Photon's pool (registers them if needed). */
+async function photonNumberFor(env: Env, phone: string): Promise<string | null> {
+  try {
+    return await assignedAgentNumber(
+      {
+        projectId: env.PHOTON_ID!,
+        secret: env.PHOTON_SECRET!,
+        lineType: env.PHOTON_LINE_TYPE === 'dedicated' ? 'dedicated' : 'shared',
+      },
+      phone,
+    )
+  } catch (error) {
+    console.error(`[site] photon number lookup failed: ${error instanceof Error ? error.message.slice(0, 200) : 'Error'}`)
+    throw error
+  }
+}
+
 export function siteFor(env: Env) {
   const secret = env.SITE_AUTH_SECRET || env.CHANNEL_ADAPTER_SECRET
   if (!secret) throw new ServiceError('site_unconfigured', 'Set SITE_AUTH_SECRET for the website.')
@@ -101,17 +118,7 @@ export function siteFor(env: Env) {
       secret,
       maxUsers: Number(env.BETA_MAX_USERS ?? 100) || 100,
       agentNumber: env.AGENT_NUMBER,
-      agentNumberFor:
-        env.PHOTON_ID && env.PHOTON_SECRET
-          ? async (phone) => {
-              try {
-                return await assignedAgentNumber({ projectId: env.PHOTON_ID!, secret: env.PHOTON_SECRET! }, phone)
-              } catch (error) {
-                console.error(`[site] photon number lookup failed: ${error instanceof Error ? error.message.slice(0, 200) : 'Error'}`)
-                throw error
-              }
-            }
-          : undefined,
+      agentNumberFor: env.PHOTON_ID && env.PHOTON_SECRET ? (phone) => photonNumberFor(env, phone) : undefined,
       sendEmailCode: (email, code) =>
         sendEmail(tools, env, {
           to: email,
@@ -170,7 +177,17 @@ export function registerSiteRoutes(app: Hono<AppContext>): void {
   // Bearer tokens, no cookies, so any origin may call these.
   app.use(`${BASE}/*`, cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type'], maxAge: 600 }))
 
-  app.get(`${BASE}/healthz`, (c) => c.json({ status: 'ok', configured: Boolean(c.env.SITE_AUTH_SECRET || c.env.CHANNEL_ADAPTER_SECRET) }))
+  // Setup at a glance (booleans only, never values), so a deploy can be checked from outside.
+  app.get(`${BASE}/healthz`, (c) =>
+    c.json({
+      status: 'ok',
+      configured: Boolean(c.env.SITE_AUTH_SECRET || c.env.CHANNEL_ADAPTER_SECRET),
+      photon: Boolean(c.env.PHOTON_ID && c.env.PHOTON_SECRET),
+      email: c.env.RESEND_API_KEY ? 'resend' : 'deepspace',
+      agentNumberFallback: Boolean(c.env.AGENT_NUMBER),
+      version: 'site-api-2026-09-27',
+    }),
+  )
   app.get(`${PREFIX}/stats`, handle((c) => siteFor(c.env).site.stats()))
   // Live checks run in the agent; the site shows this as "not checked yet".
   app.get(`${PREFIX}/integrations`, (c) => c.json({ checkedAt: null, integrations: [] }))
@@ -231,8 +248,11 @@ export function registerSiteRoutes(app: Hono<AppContext>): void {
   app.post(
     `${PREFIX}/me/send-number`,
     signedIn(async (c, user, _token, { tools }) => {
-      const number = c.env.AGENT_NUMBER
-      if (!number) throw new ServiceError('email_failed', 'The agent number is not configured.')
+      // Each person has their own @agent number on Photon's shared pool; AGENT_NUMBER is only a fallback.
+      const assigned =
+        c.env.PHOTON_ID && c.env.PHOTON_SECRET ? await photonNumberFor(c.env, user.phone).catch(() => null) : null
+      const number = assigned ?? c.env.AGENT_NUMBER
+      if (!number) throw new ServiceError('email_failed', "Couldn't look up your @agent number. Try again.")
       const name = user.preferences?.name
       await sendEmail(tools, c.env, {
         to: user.email,
@@ -253,16 +273,16 @@ export function registerSiteRoutes(app: Hono<AppContext>): void {
     signedIn(async (c, user, _token, { site }) => {
       const body = await readJson(c)
       if (body.wantWallet !== true) throw new ServiceError('want_wallet_required', 'Say you want a wallet first.')
-      if (user.xrplAddress) return { ok: true, xrplAddress: user.xrplAddress, userId: `site:${user.phone}` }
+      if (user.xrplAddress) return { ok: true, xrplAddress: user.xrplAddress, userId: user.userId }
       const enrolled = await enrollAgentWalletHttp(c.env, {
-        userId: `site:${user.phone}`,
+        userId: user.userId,
         photonSenderId: user.phone,
         displayName: user.preferences?.name,
         wantWallet: true,
       })
       if (!enrolled.xrplAddress) throw new ServiceError('wallet_unavailable', 'The agent could not create a Testnet wallet.')
       await site.recordWallet(user.phone, enrolled.xrplAddress)
-      return { ok: true, xrplAddress: enrolled.xrplAddress, userId: enrolled.userId ?? `site:${user.phone}` }
+      return { ok: true, xrplAddress: enrolled.xrplAddress, userId: enrolled.userId ?? user.userId }
     }),
   )
   app.delete(

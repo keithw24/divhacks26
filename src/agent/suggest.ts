@@ -37,7 +37,7 @@ export interface SuggestInput {
   groupLines?: { senderId: string; senderName?: string; text: string }[];
   /** How the sender and group are feeling and texting right now. */
   social?: SocialRead;
-  /** DeepSpace / onboarded people: userId and Testnet wallet only. */
+  /** Tiger-backed people directory: names, stable user ids, and public Testnet wallets only. */
   peopleDirectory?: Array<{ displayName?: string; userId?: string; xrplAddress?: string }>;
   /** Authenticated identity and public wallet metadata from Tiger. */
   userProfile?: { userId: string; displayName?: string; walletAddress: string; backboardLinked: boolean };
@@ -113,8 +113,9 @@ export function buildContext(input: SuggestInput): string {
       for (const line of input.decisionLines) lines.push(`- ${line}`);
     }
     if (input.peopleDirectory?.length) {
-      lines.push("", "TIGER USER DIRECTORY (replaces DEEPSPACE PEOPLE for wallet lookup; no phone numbers)");
-      lines.push("Tiger is authoritative for wallet lookup. Use these when discussing Testnet payments. Do not invent ids or addresses.");
+      lines.push("", "DEEPSPACE PEOPLE (userId and XRPL Testnet wallet; not phone numbers)");
+      lines.push("Tiger is authoritative for wallet lookup. Use these when talking about who can send or receive Testnet payments. Do not invent ids or addresses.");
+      lines.push("If they ask to pay someone with no Testnet wallet, say that person has no wallet address and that nothing was processed. Do not describe a send.");
       for (const line of formatPeopleDirectory(input.peopleDirectory)) lines.push(`- ${line}`);
     }
     const recentForThread = (input.groupLines ?? input.transcript).map((line) =>
@@ -230,9 +231,9 @@ function isRetryableModelError(err: unknown): boolean {
 
 function fallbackReply(citySketch: string | undefined): string {
   if (citySketch) {
-    return `${citySketch}\n\nGemini is unavailable right now, so this is the city-data sketch only.`;
+    return `${citySketch}\n\nI got your iMessage, but Gemini's API didn't return a reply (quota or model name). Photon is fine — this is the city-data sketch only.`;
   }
-  return "Gemini is unavailable right now (quota or retired model). Try GEMINI_MODEL=gemini-3.5-flash-lite in .env.";
+  return "I got your iMessage, but Gemini's API didn't return a reply (usually quota or a retired/wrong GEMINI_MODEL). Photon is connected; the language model is what failed.";
 }
 
 async function generateWithGemini(input: SuggestInput, citySketch: string | undefined, model: string, useMaps: boolean) {

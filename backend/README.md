@@ -89,9 +89,12 @@ valid for 5 minutes. `../src/deepspace/client.ts` implements it.
 | `POST /api/channels/inbound` | Every inbound message: dedupe, handle `LINK 123456`, return `{ userId, betaMember, activePlans, reply }` |
 | `GET /api/channels/outbox?channel=imessage` | Claim pending notifications (60 s lease) |
 | `POST /api/channels/outbox/ack` | `{ channel, ids, status: sent\|failed }` |
+| `GET /api/channels/directory` | Pull registered user IDs, names, wallet-or-`0`, and transient channel identity for Tiger synchronization |
 | `GET /api/channels/health` | Is the adapter secret configured |
 
 No message text or phone number is logged. Inbound message text is not stored.
+The directory route is server-to-server only: its channel identity is hashed by
+the Node adapter before Tiger stores it and is never included in Gemini context.
 
 ## Set up DeepSpace (one person, once)
 

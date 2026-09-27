@@ -222,7 +222,7 @@ export class MeetupService {
   }
 
   private peopleForSpace(input: MeetupTurnInput): PersonLocation[] {
-    const cutoff = Date.now() - LOCATION_MAX_AGE_MS;
+    const cutoff = (input.now ?? new Date()).getTime() - LOCATION_MAX_AGE_MS;
     const merged = new Map<string, PersonLocation>();
     for (const loc of this.store.locationsFor(input.spaceId)) merged.set(loc.senderId, loc);
     for (const loc of input.liveLocations ?? []) merged.set(loc.senderId, loc);
