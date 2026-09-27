@@ -208,11 +208,13 @@ export function createSite(deps: SiteDeps) {
     }
     const code = sixDigits()
     const data = { key, hash: await hmacHex(deps.secret, `${key}:${code}`), expiresAt: t + CODE_TTL_MS, attempts: 0, sends: [...recent, t] }
-    if (existing) await patch(store, 'site_codes', existing.recordId, data)
-    else await insert(store, 'site_codes', data)
+    const recordId = existing ? existing.recordId : await insert(store, 'site_codes', data)
+    if (existing) await patch(store, 'site_codes', recordId, data)
     try {
       await deliver(code)
     } catch {
+      // A send that never arrived shouldn't count toward the cooldown or hourly cap.
+      await patch(store, 'site_codes', recordId, { hash: '', expiresAt: 0, sends: recent })
       throw new ServiceError('send_failed', "Couldn't send the code. Try again.")
     }
   }

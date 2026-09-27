@@ -44,6 +44,26 @@ const STATUS: Record<string, number> = {
 
 type SiteContext = Context<AppContext>
 
+/** Default sender; override with EMAIL_FROM (wrangler [vars]) once a domain is verified. */
+const DEFAULT_FROM = 'plansaroundus <noreply@plans-around-us.app.space>'
+
+/**
+ * Transactional email through DeepSpace's integration proxy (Resend behind it).
+ * The catalog names it `email/send` and requires `from`. Failures log the
+ * provider's message, never the recipient, so a bad sender shows up in logs.
+ */
+async function sendEmail(
+  tools: ReturnType<typeof createActionTools>,
+  env: Env,
+  message: { to: string; subject: string; text: string },
+): Promise<void> {
+  const result = await tools.integration('email/send', { from: env.EMAIL_FROM || DEFAULT_FROM, ...message })
+  if (!result.success) {
+    console.error(`[site] email/send failed: ${String(result.error ?? 'unknown').slice(0, 300)}`)
+    throw new Error('email send failed')
+  }
+}
+
 function siteFor(env: Env) {
   const secret = env.SITE_AUTH_SECRET || env.CHANNEL_ADAPTER_SECRET
   if (!secret) throw new ServiceError('site_unconfigured', 'Set SITE_AUTH_SECRET for the website.')
@@ -54,14 +74,12 @@ function siteFor(env: Env) {
       store: tools,
       secret,
       maxUsers: Number(env.BETA_MAX_USERS ?? 100) || 100,
-      sendEmailCode: async (email, code) => {
-        const result = await tools.integration('resend/send-email', {
+      sendEmailCode: (email, code) =>
+        sendEmail(tools, env, {
           to: email,
           subject: `${code} is your plansaroundus code`,
           text: `Your plansaroundus verification code is ${code}.\n\nIt expires in 10 minutes. If you didn't try to sign in, you can ignore this email.`,
-        })
-        if (!result.success) throw new Error('email send failed')
-      },
+        }),
     }),
   }
 }
@@ -177,12 +195,13 @@ export function registerSiteRoutes(app: Hono<AppContext>): void {
       const number = c.env.AGENT_NUMBER
       if (!number) throw new ServiceError('email_failed', 'The agent number is not configured.')
       const name = user.preferences?.name
-      const result = await tools.integration('resend/send-email', {
+      await sendEmail(tools, c.env, {
         to: user.email,
         subject: "Your @agent's number",
         text: `Hi${name ? ` ${name}` : ''},\n\nText @agent at ${number}, or add that number to a group chat and mention @agent.\n\n— plansaroundus`,
+      }).catch(() => {
+        throw new ServiceError('email_failed', "Couldn't send the email.")
       })
-      if (!result.success) throw new ServiceError('email_failed', "Couldn't send the email.")
       return { ok: true }
     }),
   )

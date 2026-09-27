@@ -76,6 +76,22 @@ describe('website sign-in on DeepSpace', () => {
     await expect(site.verifyEmail('b@example.com', emailed['b@example.com'])).rejects.toMatchObject({ code: 'expired' })
   })
 
+  it('does not count a failed send toward the rate limit', async () => {
+    const { store } = setup()
+    let fail = true
+    const site = createSite({
+      store,
+      secret: 's',
+      maxUsers: 100,
+      sendEmailCode: async () => {
+        if (fail) throw new Error('provider down')
+      },
+    })
+    await expect(site.startEmail('z@example.com')).rejects.toMatchObject({ code: 'send_failed' })
+    fail = false
+    await expect(site.startEmail('z@example.com')).resolves.toEqual({ ok: true })
+  })
+
   it('rate-limits resends', async () => {
     const { site } = setup()
     await site.startEmail('c@example.com')
