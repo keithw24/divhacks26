@@ -131,6 +131,15 @@ export interface InboundDeps {
   orchestration?: {
     handleTurn(input: OrchestratorTurnInput): Promise<OrchestratorTurnResult>;
   };
+  ledger?: {
+    handleTurn(input: {
+      spaceId: string;
+      senderId?: string;
+      senderName?: string;
+      text: string;
+      participants: Participant[];
+    }): Promise<ReservationHandlerResult>;
+  };
 }
 
 export async function handleInboundMessage(
@@ -348,6 +357,16 @@ export async function handleInboundMessage(
               })),
             })
         : undefined,
+      handleLedger: deps.ledger
+        ? (request) =>
+            deps.ledger!.handleTurn({
+              spaceId: request.spaceId,
+              senderId: request.senderId,
+              senderName: message.senderName,
+              text: request.text,
+              participants: group.participants,
+            })
+        : undefined,
       handleAlerts: deps.alerts
         ? (request) =>
             deps.alerts!.handleTurn({
@@ -381,6 +400,7 @@ export async function handleInboundMessage(
     outcome === "reservation" ||
     outcome === "ticketing" ||
     outcome === "meetup" ||
+    outcome === "ledger" ||
     outcome === "support" ||
     outcome === "transport" ||
     outcome === "orchestration" ||

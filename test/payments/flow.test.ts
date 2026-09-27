@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runConversationTurn } from "../../src/agent/turn.js";
-import { classifyPaymentMessage, paymentInterrupts } from "../../src/payments/intent.js";
+import { classifyPaymentMessage, paymentInterrupts, shouldAskModel } from "../../src/payments/intent.js";
 import { MockPaymentProvider } from "../../src/payments/mock.js";
 import { DEFAULT_TEST_RECIPIENTS, loadRecipientDirectory } from "../../src/payments/recipients.js";
 import { sanitizeExtraction } from "../../src/payments/gemini.js";
@@ -86,6 +86,12 @@ describe("payment intent", () => {
     expect(classifyPaymentMessage("How much did Keith pay?").kind).toBe("none");
     expect(classifyPaymentMessage("Book Carbone").kind).toBe("none");
     expect(classifyPaymentMessage("Send Keith a message").kind).toBe("none");
+    expect(classifyPaymentMessage("Pay everyone $20").kind).toBe("none");
+    expect(classifyPaymentMessage("Send what we owe").kind).toBe("none");
+    expect(classifyPaymentMessage("settle up").kind).toBe("none");
+    expect(paymentInterrupts("Pay everyone $20")).toBe(false);
+    expect(shouldAskModel("Pay everyone $20")).toBe(false);
+    expect(shouldAskModel("Send Keith $20")).toBe(false);
   });
 
   it("parses personal payment max commands", () => {

@@ -46,6 +46,15 @@ export interface PaymentServiceOptions {
    * Reservation deposits still use the provider.
    */
   settlement?: CustomerSettlementPort;
+  /** Quiet group-ledger bookkeeping after a person-to-person send succeeds. */
+  onPersonSettled?: (event: {
+    spaceId: string;
+    fromName: string;
+    toName: string;
+    amountUsd: number;
+    paymentId: string;
+    explorerUrl?: string;
+  }) => Promise<void> | void;
 }
 
 export class PaymentService implements DepositPaymentPort {
@@ -56,6 +65,7 @@ export class PaymentService implements DepositPaymentPort {
   private readonly timeoutMs: number;
   private readonly interpreter?: PaymentInterpreter;
   private readonly settlement?: CustomerSettlementPort;
+  private readonly onPersonSettled?: PaymentServiceOptions["onPersonSettled"];
 
   constructor(options: PaymentServiceOptions) {
     this.maxUsd = options.maxUsd ?? 500;
@@ -65,6 +75,7 @@ export class PaymentService implements DepositPaymentPort {
     this.timeoutMs = options.timeoutMs ?? 20_000;
     this.interpreter = options.interpreter;
     this.settlement = options.settlement;
+    this.onPersonSettled = options.onPersonSettled;
   }
 
   get payments(): PaymentStore {
@@ -293,7 +304,7 @@ export class PaymentService implements DepositPaymentPort {
     }
 
     if (isConfirmed(result)) {
-      this.store.markResult(claimed.id, "SUCCEEDED", {
+      const saved = this.store.markResult(claimed.id, "SUCCEEDED", {
         transactionId: result.transactionId,
         providerStatus: result.status,
         submittedAsset: result.submittedAsset,
@@ -301,6 +312,7 @@ export class PaymentService implements DepositPaymentPort {
         submittedDrops: result.submittedDrops,
         explorerUrl: testnetExplorerLink(result.transactionId) ?? undefined,
       });
+      this.rememberPersonPayout(saved ?? claimed);
       logPayment("payment_succeeded", { paymentId: claimed.id, spaceId: claimed.photonSpaceId, status: result.status });
       return this.finish(
         input,
@@ -356,7 +368,7 @@ export class PaymentService implements DepositPaymentPort {
 
     const evidence = execution.evidence;
     if (evidence) {
-      this.store.markResult(claimed.id, "SUCCEEDED", {
+      const saved = this.store.markResult(claimed.id, "SUCCEEDED", {
         transactionId: evidence.transactionHash,
         providerStatus: evidence.engineResult,
         submittedAsset: "XRP",
@@ -364,6 +376,7 @@ export class PaymentService implements DepositPaymentPort {
         submittedDrops: evidence.amount.drops,
         explorerUrl: evidence.explorerUrl ?? undefined,
       });
+      this.rememberPersonPayout(saved ?? claimed);
       logPayment("payment_succeeded", { paymentId: claimed.id, spaceId: claimed.photonSpaceId, status: evidence.engineResult });
       return this.finish(
         input,
@@ -711,6 +724,23 @@ export class PaymentService implements DepositPaymentPort {
   private finish(input: PaymentTurnInput, reply: string): PaymentTurnResult {
     if (input.messageId) this.store.rememberReply(input.spaceId, input.messageId, reply);
     return { handled: true, reply, acknowledgement: "👍" };
+  }
+
+  private rememberPersonPayout(record: PaymentRecord): void {
+    if (record.purpose === "RESERVATION_DEPOSIT" || record.recipientKind === "MERCHANT") return;
+    const fromName = record.initiatorName?.trim();
+    const toName = record.recipientName?.trim();
+    if (!fromName || !toName) return;
+    void Promise.resolve(
+      this.onPersonSettled?.({
+        spaceId: record.photonSpaceId,
+        fromName,
+        toName,
+        amountUsd: record.amountUsd,
+        paymentId: record.id,
+        explorerUrl: record.explorerUrl,
+      }),
+    ).catch(() => undefined);
   }
 }
 

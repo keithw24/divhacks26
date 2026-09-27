@@ -1,4 +1,5 @@
 import { looksLikeAmount, parseAmount, type AmountParse } from "./amount.js";
+import { isGroupSettleRequest } from "../ledger/intent.js";
 
 export type PaymentMessage =
   | { kind: "none" }
@@ -62,6 +63,7 @@ function tidy(text: string): string {
 export function classifyPaymentMessage(text: string): PaymentMessage {
   const cleaned = tidy(text);
   if (!cleaned) return { kind: "none" };
+  if (isGroupSettleRequest(cleaned)) return { kind: "none" };
   const lower = cleaned.toLowerCase();
   if (CONFIRM.has(lower)) return { kind: "confirm" };
   if (isDispute(lower)) return { kind: "dispute" };
@@ -82,6 +84,7 @@ export function paymentInterrupts(text: string): boolean {
 }
 
 export function shouldAskModel(text: string): boolean {
+  if (isGroupSettleRequest(text)) return false;
   if (classifyPaymentMessage(text).kind !== "none") return false;
   const cleaned = tidy(text);
   const hasVerb = /\b(send|pay|give|transfer)\b/i.test(cleaned);

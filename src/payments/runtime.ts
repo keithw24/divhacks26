@@ -10,6 +10,7 @@ import { PaymentService } from "./service.js";
 import { PaymentStore } from "./state.js";
 import type { PaymentProvider } from "./types.js";
 import type { CustomerSettlementPort } from "./xrpl/settlement.js";
+import type { PaymentServiceOptions } from "./service.js";
 
 export interface PaymentRuntimeEnv {
   mode: PaymentsMode;
@@ -28,6 +29,7 @@ export interface PaymentRuntimeEnv {
   nessieBaseUrl?: string;
   nessieCustomerId?: string;
   nessieAccountId?: string;
+  onPersonSettled?: PaymentServiceOptions["onPersonSettled"];
 }
 
 export function createPaymentRuntime(env: PaymentRuntimeEnv) {
@@ -44,6 +46,7 @@ export function createPaymentRuntime(env: PaymentRuntimeEnv) {
     timeoutMs: env.timeoutMs,
     interpreter,
     settlement: env.mode === "ripple_test" || env.mode === "nessie_ripple" ? env.settlement : undefined,
+    onPersonSettled: env.onPersonSettled,
   });
   return { service, provider };
 }

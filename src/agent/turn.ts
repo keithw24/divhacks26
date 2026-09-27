@@ -1,6 +1,7 @@
 import type { SuggestInput } from "./suggest.js";
 import { ackFor, reactionFor, type SocialRead } from "./social.js";
 import { paymentInterrupts } from "../payments/intent.js";
+import { ledgerInterrupts } from "../ledger/intent.js";
 import type { TransportationRequest, TransportationResult } from "../transport/service.js";
 
 export const FRIENDLY_FAILURE = "Sorry, something went wrong on my end. Try again in a sec?";
@@ -75,6 +76,12 @@ export interface TurnDeps {
     isGroup: boolean;
     messageId?: string;
   }): Promise<ReservationHandlerResult>;
+  handleLedger?(input: {
+    spaceId: string;
+    senderId?: string;
+    senderName?: string;
+    text: string;
+  }): Promise<ReservationHandlerResult>;
   /**
    * Cross-domain step. Resolves messages that only make sense against another agent's state
    * ("yes" with two things pending, "book the first one" after restaurants, "from dinner to the concert").
@@ -106,6 +113,7 @@ export type TurnOutcome =
   | "reservation"
   | "ticketing"
   | "meetup"
+  | "ledger"
   | "support"
   | "transport"
   | "orchestration"
@@ -172,6 +180,22 @@ export async function runConversationTurn(
           await deliverOnce(deliveryActions, answer);
           delivered = true;
           if (payment.afterReply) await payment.afterReply();
+          return;
+        }
+      }
+      if (deps.handleLedger && ledgerInterrupts(question)) {
+        const ledger = await deps.handleLedger({
+          spaceId: input.spaceId,
+          senderId: input.senderId,
+          senderName: input.senderName,
+          text: question,
+        });
+        if (ledger.handled && ledger.reply) {
+          outcome = "ledger";
+          answer = ledger.reply;
+          await reactTo(actions, ackFor(input.social, ledger.acknowledgement ?? "👍"));
+          await deliverOnce(deliveryActions, answer);
+          delivered = true;
           return;
         }
       }

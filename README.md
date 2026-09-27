@@ -498,6 +498,16 @@ iMessage
 
 Gemini may extract a recipient, amount, and memo. It never chooses a wallet and never submits. Amount checks, the directory lookup, the confirmation gate, and the provider call are ordinary TypeScript.
 
+### Group ledger (settle up)
+
+The agent can keep a running tally for a Photon space without nagging. It only talks about the ledger when someone logs a cost or asks to settle.
+
+- “I paid $40 for the Uber” or “Rohan paid $80 for dinner” splits equally among people who have spoken in that chat (the agent is excluded). Names and hashed keys go to Tiger table `group_night_ledger`; phone numbers do not.
+- Person-to-person Testnet sends that succeed are recorded quietly as transfers. No extra message.
+- “Settle up”, “who owes what”, “pay everyone”, or “are we even?” replies with the remaining min-transfers, or “You're all even.” That message is a tally only: the agent does not open or submit any transfer. Each person still has to say `send <name> $<amount>` and confirm with yes. If nobody has logged anything yet: “Nothing on the ledger yet.”
+
+Optional schema: `psql "$DATABASE_URL" -f sql/006_group_ledger.sql`. Without `DATABASE_URL` the tally stays in process memory.
+
 ### What the sandbox actually records
 
 Chat amounts are US dollars. XRPL Testnet does not settle bank dollars. In `ripple_test`, the app converts USD to testnet XRP at `PAYMENTS_XRP_PER_USD` (default **1 USD = 1 testnet XRP**) and submits that as drops (1 XRP = 1,000,000 drops). Testnet XRP has no monetary value. This is not a market rate, not RLUSD, and not a mainnet payment. A reply says "Sent" only after the ledger result is `tesSUCCESS` and includes a transaction hash. Timeouts and unknown results are failures: "Nothing was charged."

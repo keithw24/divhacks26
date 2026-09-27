@@ -17,6 +17,7 @@ import { logIntegration } from "./integrations/log.js";
 import { createBackboardMemoryService } from "./memory/backboard.js";
 import { openAgentStateStore } from "./store/state.js";
 import { createPaymentRuntime } from "./payments/runtime.js";
+import { createLedgerService } from "./ledger/service.js";
 import { XrplDashboardBuilder } from "./payments/xrpl/dashboard.js";
 import { DASHBOARD_PATH, startXrplDashboardServer } from "./payments/xrpl/dashboard-server.js";
 import { xrplPayments } from "./payments/xrpl/payments.js";
@@ -71,6 +72,12 @@ const xrpl = usesCustomerWallets || Boolean(config.deepspaceOnboardingSecret) ? 
 const onboarding = new AccountOnboardingService(onboardingStore, xrpl?.guard.registry);
 const customerSenders = parseCustomerSenders(config.xrplCustomerSendersJson);
 const liveSenders = () => ({ ...customerSenders, ...onboardingStore.senderMap() });
+const ledger = createLedgerService({
+  query: config.databaseUrl
+    ? (sql, params) => getPool(config.databaseUrl).query(sql, params)
+    : undefined,
+  agentName: config.agentName,
+});
 // Merchant payees must be real Testnet addresses whenever the provider submits to XRPL.
 const merchantPaymentMode =
   config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple" ? "ripple_test" : "mock";
@@ -93,6 +100,7 @@ const payments = createPaymentRuntime({
   nessieBaseUrl: config.nessieBaseUrl,
   nessieCustomerId: config.nessieCustomerId,
   nessieAccountId: config.nessieAccountId,
+  onPersonSettled: (event) => ledger.recordSettledPayment(event),
 });
 const meetup = createMeetupRuntime({
   googleMapsApiKey: config.googleMapsApiKey,
@@ -542,6 +550,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       payments: payments.service,
       ticketing: ticketing.service,
       meetup: meetup.service,
+      ledger,
       alerts,
       orchestration,
       liveLocations: (spaceId) => locationsForSpace(spaceId),
