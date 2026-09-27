@@ -123,21 +123,30 @@ export function resolveInviteContact(name: string, contacts: InviteContact[]): I
   return undefined;
 }
 
+function usablePhotonSenderId(value: string | undefined): string | undefined {
+  const id = value?.trim();
+  return id ? id : undefined;
+}
+
 export function mergeInviteContacts(rows: InviteContact[]): InviteContact[] {
-  return uniqueBySender(rows.filter((row) => row.displayName.trim() && row.photonSenderId.trim()));
+  return uniqueBySender(
+    rows.filter((row) => row.displayName.trim() && Boolean(usablePhotonSenderId(row.photonSenderId))),
+  );
 }
 
 /** Join Tiger display names to a sendable Photon id from onboarding, DeepSpace, or photon: user ids. */
 export function collectInviteContacts(input: {
-  onboarded: Array<{ displayName: string; photonSenderId: string; userId?: string }>;
+  onboarded: Array<{ displayName: string; photonSenderId?: string; userId?: string }>;
   directory: Array<{ displayName?: string; userId: string; photonIdentifier?: string }>;
   tiger?: Array<{ displayName?: string; userId: string }>;
 }): InviteContact[] {
   const rows: InviteContact[] = [];
   for (const row of input.onboarded) {
+    const photonSenderId = usablePhotonSenderId(row.photonSenderId) || photonSenderFromUserId(row.userId);
+    if (!photonSenderId) continue;
     rows.push({
       displayName: row.displayName,
-      photonSenderId: row.photonSenderId,
+      photonSenderId,
       ...(row.userId ? { userId: row.userId } : {}),
     });
   }
@@ -182,7 +191,7 @@ export function nameInTigerDirectory(
 function uniqueBySender(rows: InviteContact[]): InviteContact[] {
   const byId = new Map<string, InviteContact>();
   for (const row of rows) {
-    const id = row.photonSenderId.trim();
+    const id = usablePhotonSenderId(row.photonSenderId);
     if (!id) continue;
     const existing = byId.get(id);
     if (!existing) {

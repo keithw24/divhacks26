@@ -55,6 +55,22 @@ describe("plan invite parsing", () => {
     });
     expect(resolveInviteContact("Mike", contacts)?.photonSenderId).toBe("+15555550123");
   });
+
+  it("still texts Mike when another onboarded person has a wallet but no Photon handle", () => {
+    const contacts = collectInviteContacts({
+      onboarded: [
+        { displayName: "Keith", userId: "site:keith" },
+        { displayName: "Mike", photonSenderId: "+15555550123", userId: "photon:+15555550123" },
+      ],
+      directory: [],
+      tiger: [
+        { displayName: "Keith", userId: "site:keith" },
+        { displayName: "Mike", userId: "photon:+15555550123" },
+      ],
+    });
+    expect(resolveInviteContact("Mike", contacts)?.photonSenderId).toBe("+15555550123");
+    expect(resolveInviteContact("Keith", contacts)).toBeUndefined();
+  });
 });
 
 describe("plan invite send", () => {
