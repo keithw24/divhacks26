@@ -58,8 +58,11 @@ export function heuristicIntent(question: string, origin?: Location): UserIntent
   if (!focusedRoute && /event|activity|activities|fun|concert|movie|festival|show|park/.test(text)) needs.add("events");
   if (/route|direction|take me|travel/.test(text)) needs.add("route");
   // Nothing place-related and not a broad "what should we do": treat it as conversation.
-  const conversational = !broad && needs.size === 0 && !/\b(near|nearby|around here|open now|where)\b/.test(text);
-  if (broad || needs.size === 0) {
+  const conversational =
+    !broad &&
+    needs.size === 0 &&
+    !/\b(near|nearby|around here|open now|where|tonight|today|tomorrow|happening|around me)\b/.test(text);
+  if (!conversational && (broad || needs.size === 0)) {
     needs.add("food");
     needs.add("events");
     needs.add("safety");
@@ -97,13 +100,19 @@ export function heuristicIntent(question: string, origin?: Location): UserIntent
 }
 
 function validate(json: IntentJson, fallback: UserIntent, origin?: Location): UserIntent {
-  const needs = (json.needs ?? []).filter((value): value is SkillName => SKILLS.has(value as SkillName));
+  const parsedNeeds = (json.needs ?? []).filter((value): value is SkillName => SKILLS.has(value as SkillName));
+  const conversational = json.conversational === true || (parsedNeeds.length === 0 && fallback.conversational === true);
+  const needs = conversational
+    ? []
+    : parsedNeeds.length
+      ? [...new Set(parsedNeeds)]
+      : fallback.needs;
   const travelMode = MODES.has(json.travelMode as TravelMode)
     ? (json.travelMode as TravelMode)
     : fallback.travelMode;
   const budget = BUDGETS.has(json.budget as Budget) ? (json.budget as Budget) : fallback.budget;
   return {
-    needs: needs.length ? [...new Set(needs)] : fallback.needs,
+    needs,
     ...(origin && { origin }),
     ...(json.locationQuery?.trim() && { locationQuery: json.locationQuery.trim() }),
     ...(json.destinationQuery?.trim() && { destinationQuery: json.destinationQuery.trim() }),
@@ -114,7 +123,7 @@ function validate(json: IntentJson, fallback: UserIntent, origin?: Location): Us
     travelMode,
     ...(Number.isFinite(json.maxTravelMinutes) && { maxTravelMinutes: Math.min(90, Math.max(5, Number(json.maxTravelMinutes))) }),
     needsClarification: Boolean(json.needsClarification),
-    ...(json.conversational === true && { conversational: true }),
+    ...(conversational && { conversational: true }),
     ...(json.clarificationQuestion?.trim() && { clarificationQuestion: json.clarificationQuestion.trim() }),
   };
 }

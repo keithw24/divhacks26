@@ -265,7 +265,7 @@ export async function suggestWithGemini(input: SuggestInput): Promise<string> {
 
 /**
  * Route one chat turn through the shared intent parser and factual skills (safety, food, events, route).
- * Missing evidence is disclosed without a free-form factual fallback.
+ * Small talk uses Gemini with transcript + memory. Place lookups stay evidence-only.
  */
 export async function suggestNext(input: SuggestInput): Promise<string> {
   const fromGroup = (input.groupLines ?? []).map((line) => ({
@@ -273,13 +273,13 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
     who: line.senderName || line.senderId,
     text: line.text,
   }));
-  // Factual suggestions are rendered only from the evidence graph.
   const answer = await orchestrate({
     question: input.question,
     transcript: fromGroup.length ? fromGroup : input.transcript,
     location: input.location,
     now: input.now,
     onEvidence: input.onEvidence,
+    fallback: () => suggestWithGemini(input),
     memoryContext: [untrustedMemory(input), rankingHint(input.social)].filter(Boolean).join("\n") || undefined,
     privateConstraintLines: [
       ...(input.userMemories ?? []).map((text) => ({ who: input.currentUser?.displayName || input.asker, text })),

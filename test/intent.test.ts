@@ -28,8 +28,10 @@ describe("conversational messages", () => {
   it("marks small talk as conversational and place requests as not", () => {
     expect(heuristicIntent("ugh what a day").conversational).toBe(true);
     expect(heuristicIntent("thanks so much!").conversational).toBe(true);
+    expect(heuristicIntent("thanks so much!").needs).toEqual([]);
+    expect(heuristicIntent("ugh what a day").needs).toEqual([]);
     expect(heuristicIntent("what now?").conversational).toBeUndefined();
     expect(heuristicIntent("where can we eat dinner").conversational).toBeUndefined();
-    expect(heuristicIntent("anything open near me").conversational).toBeUndefined();
+    expect(heuristicIntent("what's happening tonight?").conversational).toBeUndefined();
   });
 });

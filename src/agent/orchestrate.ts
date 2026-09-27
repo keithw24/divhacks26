@@ -15,7 +15,7 @@ import { getRoute } from "../skills/routeSkill.js";
 import type { BlockSafetyReport } from "../safety.js";
 import { getSafety } from "../skills/safetySkill.js";
 import { renderResponse, rankRecommendationsSync } from "./compose.js";
-import { parseIntent } from "./intent.js";
+import { parseIntent, heuristicIntent } from "./intent.js";
 
 export interface OrchestratorInput {
   question: string;
@@ -82,9 +82,10 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
   }
   const recent = input.transcript.slice(-8).map(({ who, text }) => `${who}: ${text}`);
   const intent = await parseIntent(input.question, sharedLocation(input), recent);
-  // Small talk, feelings and follow-ups have nothing to look up: let the conversational
-  // model answer with the chat history instead of demanding a location.
-  if (intent.conversational && input.fallback) return input.fallback();
+  const heuristic = heuristicIntent(input.question, sharedLocation(input));
+  // Small talk, feelings, and follow-ups belong with the conversational model and chat memory.
+  // Do not run empty food/event lookups just because a last-shared pin exists.
+  if ((intent.conversational || heuristic.conversational) && input.fallback) return input.fallback();
   const origin = await resolveOrigin(intent, input);
   const homeTrip = asksDirectionsHome(input.question);
   const wantsSafety = wantsSafetySketch(input.question) || intent.needs.includes("safety") || homeTrip;

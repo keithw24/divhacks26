@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/agent/intent.js", () => ({ parseIntent: vi.fn() }));
+vi.mock("../src/agent/intent.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/intent.js")>();
+  return { ...actual, parseIntent: vi.fn() };
+});
 vi.mock("../src/agent/compose.js", () => ({
   rankRecommendations: vi.fn(),
   rankRecommendationsSync: vi.fn(() => ({ picks: [], offerMore: false })),
@@ -127,6 +130,16 @@ describe("skill dispatcher", () => {
     vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, origin: undefined, needs: ["food"], conversational: true });
     const fallback = vi.fn(async () => "haha same, long week?");
     await expect(orchestrate({ question: "ugh what a day", transcript: [], fallback })).resolves.toBe("haha same, long week?");
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(findFood).not.toHaveBeenCalled();
+  });
+
+  it("answers small talk with the conversational model even if Gemini tagged a skill", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["food"] });
+    const fallback = vi.fn(async () => "haha same, long week?");
+    await expect(orchestrate({ question: "thanks so much!", transcript: [], location, fallback })).resolves.toBe(
+      "haha same, long week?",
+    );
     expect(fallback).toHaveBeenCalledOnce();
     expect(findFood).not.toHaveBeenCalled();
   });
