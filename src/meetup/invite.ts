@@ -201,6 +201,7 @@ function uniqueBySender(rows: InviteContact[]): InviteContact[] {
     byId.set(id, {
       ...existing,
       ...row,
+      photonSenderId: existing.photonSenderId || row.photonSenderId,
       displayName: row.displayName.length >= existing.displayName.length ? row.displayName : existing.displayName,
       userId: row.userId || existing.userId,
     });

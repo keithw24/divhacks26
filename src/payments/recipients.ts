@@ -90,6 +90,7 @@ export interface NamedWallet {
   displayName?: string;
   userId?: string;
   xrplAddress?: string;
+  imessage?: string;
 }
 
 function usableClassicAddress(value: string | undefined): string | undefined {
@@ -140,6 +141,7 @@ export function preferNamedWallets(...groups: NamedWallet[][]): NamedWallet[] {
         displayName: existing.displayName || person.displayName,
         userId: existing.userId || person.userId,
         xrplAddress: nextAddress ?? existing.xrplAddress ?? person.xrplAddress,
+        imessage: existing.imessage?.trim() || person.imessage?.trim(),
       };
     }
   }

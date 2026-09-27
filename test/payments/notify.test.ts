@@ -133,6 +133,23 @@ describe("Gemini people directory", () => {
     expect(formatPeopleDirectory(people).join("\n")).not.toContain("no Testnet wallet");
   });
 
+  it("keeps an existing iMessage handle when DeepSpace has the same person without one", () => {
+    const people = mergePeopleDirectory(
+      [
+        {
+          displayName: "Rohan",
+          userId: "photon:+15555550999",
+          xrplAddress: ADDRESS,
+          imessage: "+15555550999",
+        },
+      ],
+      [{ userId: "photon:+15555550999", displayName: "Rohan", xrplAddress: "0" }],
+    );
+    expect(people).toHaveLength(1);
+    expect(people[0]?.imessage).toBe("+15555550999");
+    expect(formatPeopleDirectory(people).join("\n")).toContain("+15555550999");
+  });
+
   it("pays Mike even when another directory row uses the same name without a wallet", () => {
     const hit = matchNamedWallet("Mike", [
       { displayName: "Mike", userId: "site:mike", xrplAddress: "0" },

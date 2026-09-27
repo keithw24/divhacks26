@@ -71,6 +71,25 @@ describe("plan invite parsing", () => {
     expect(resolveInviteContact("Mike", contacts)?.photonSenderId).toBe("+15555550123");
     expect(resolveInviteContact("Keith", contacts)).toBeUndefined();
   });
+
+  it("still texts Alan and Rohan when Keith has no Photon handle", () => {
+    const contacts = collectInviteContacts({
+      onboarded: [
+        { displayName: "Alan", photonSenderId: "alan-id", userId: "photon:alan-id" },
+        { displayName: "Rohan", photonSenderId: "rohan-id", userId: "photon:rohan-id" },
+        { displayName: "Keith", userId: "site:keith" },
+      ],
+      directory: [{ displayName: "Rohan", userId: "photon:rohan-id", photonIdentifier: "rohan-id" }],
+      tiger: [
+        { displayName: "Alan", userId: "photon:alan-id" },
+        { displayName: "Rohan", userId: "photon:rohan-id" },
+        { displayName: "Keith", userId: "site:keith" },
+      ],
+    });
+    expect(resolveInviteContact("Alan", contacts)?.photonSenderId).toBe("alan-id");
+    expect(resolveInviteContact("Rohan", contacts)?.photonSenderId).toBe("rohan-id");
+    expect(resolveInviteContact("Keith", contacts)).toBeUndefined();
+  });
 });
 
 describe("plan invite send", () => {

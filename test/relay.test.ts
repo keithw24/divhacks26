@@ -67,6 +67,29 @@ describe("relay send", () => {
     expect(sendMessage).not.toHaveBeenCalled();
     expect(result.reply).toMatch(/hasn't texted this iMessage number/i);
   });
+
+  it("still texts Rohan when Keith is in Tiger without a Photon id", async () => {
+    const sendMessage = vi.fn(async () => undefined);
+    const result = await handleRelay({
+      text: "text Rohan that the table is ready",
+      senderId: "alan-id",
+      senderName: "Alan",
+      contacts: [
+        { displayName: "Alan", photonSenderId: "alan-id" },
+        { displayName: "Rohan", photonSenderId: "rohan-id" },
+      ],
+      tigerPeople: [
+        { displayName: "Rohan", userId: "photon:rohan-id" },
+        { displayName: "Keith", userId: "site:keith" },
+      ],
+      sendMessage,
+    });
+
+    expect(result.handled).toBe(true);
+    expect(result.reply).toMatch(/I texted Rohan/i);
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(sendMessage.mock.calls[0]?.[0]).toBe("rohan-id");
+  });
 });
 
 describe("relay turn", () => {
