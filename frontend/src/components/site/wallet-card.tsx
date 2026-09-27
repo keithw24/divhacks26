@@ -29,7 +29,12 @@ export function WalletChoice({
   );
   return (
     <fieldset className="space-y-2">
-      <legend className="font-bold mb-1">Testnet wallet</legend>
+      <legend className="font-bold mb-1 flex items-center gap-2">
+        Testnet wallet
+        <span className="text-xs font-medium text-muted-foreground border border-border rounded-full px-2 py-0.5">
+          Optional
+        </span>
+      </legend>
       <p className="text-sm text-muted-foreground mb-3">
         Needed to send or receive in iMessage. Test XRP only — not real money. The agent holds the
         signing key; you never paste a seed.
@@ -39,7 +44,11 @@ export function WalletChoice({
         "Yes, I want a wallet",
         "Create an XRPL Testnet wallet for this iMessage number.",
       )}
-      {option(false, "Not now", "You can still chat. Payments stay off until you opt in.")}
+      {option(
+        false,
+        "Not now",
+        "You can still chat. Payments stay off until you add one from the dashboard.",
+      )}
     </fieldset>
   );
 }

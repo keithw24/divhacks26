@@ -28,6 +28,7 @@
     "xrpl:transactions": "tsx src/payments/xrpl/cli.ts transactions",
     "xrpl:api": "tsx src/payments/xrpl/cli.ts api",
     "test:xrpl-live": "tsx test/live/xrpl-smoke-live.ts",
+    "test:wallet-live": "XRPL_LIVE=1 vitest run test/live/wallet-creation.live.test.ts",
     "test:reservation-deposit-live": "tsx test/live/reservation-deposit-live.ts",
     "payments:fund-testnet": "tsx scripts/fund-xrpl-testnet.ts",
     "transport:demo": "tsx src/transport/demo.ts",

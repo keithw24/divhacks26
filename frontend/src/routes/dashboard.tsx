@@ -16,10 +16,16 @@ import { WalletStatusCard } from "@/components/site/wallet-card";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Your @agent — plansaroundus" }] }),
-  validateSearch: (search: Record<string, unknown>): { welcome?: "emailed" | "saved" } =>
-    search["welcome"] === "emailed" || search["welcome"] === "saved"
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { welcome?: "emailed" | "saved"; wallet?: "created" | "failed" } => ({
+    ...(search["welcome"] === "emailed" || search["welcome"] === "saved"
       ? { welcome: search["welcome"] }
-      : {},
+      : {}),
+    ...(search["wallet"] === "created" || search["wallet"] === "failed"
+      ? { wallet: search["wallet"] }
+      : {}),
+  }),
   component: Dashboard,
 });
 
@@ -40,7 +46,7 @@ type SendState = { busy?: boolean; message?: string };
 function Dashboard() {
   const me = useMe({ requireOnboarded: true });
   const queryClient = useQueryClient();
-  const { welcome } = Route.useSearch();
+  const { welcome, wallet: walletResult } = Route.useSearch();
   const [copied, setCopied] = useState<string>();
   const [email, setEmail] = useState<SendState>({});
   const [intro, setIntro] = useState<SendState>({});
@@ -332,7 +338,12 @@ function Dashboard() {
         <WalletStatusCard
           wallet={me.wallet}
           busy={wallet.busy}
-          message={wallet.message}
+          message={
+            wallet.message ??
+            (walletResult === "failed"
+              ? "We couldn't create your wallet during sign-up. Chat works fine — try again here."
+              : undefined)
+          }
           onCreate={() => {
             void send(
               async () => {
