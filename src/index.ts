@@ -633,8 +633,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       payments: {
         observe: (spaceId, observed) => payments.service.observe(spaceId, observed),
         handleTurn: async (request) => {
-          // The payment resolver is synchronous by design; refresh its Tiger-backed
-          // snapshot immediately before Gemini extraction and recipient resolution.
+          // Snapshot Tiger wallets before recipient resolution. Missing table or a down DB must not fail the chat.
           if (tigerDirectory) await tigerDirectory.refresh(true);
           return payments.service.handleTurn(request);
         },

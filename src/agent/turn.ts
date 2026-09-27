@@ -370,7 +370,8 @@ export async function runConversationTurn(
     if (delivered) deps.recordAssistant(answer, outcome);
     return outcome;
   } catch (error) {
-    console.error(`reply failed: ${errorCategory(error)}`);
+    const detail = error instanceof Error ? `${error.name}: ${error.message.slice(0, 200)}` : "Error";
+    console.error(`reply failed: ${detail}`);
     if (!deliveryAttempted) {
       const notify = actions.send ?? actions.reply;
       await notify(FRIENDLY_FAILURE).catch(() => undefined);
