@@ -24,7 +24,8 @@ describe('assignedAgentNumber', () => {
     await expect(assignedAgentNumber(creds, '+19175550102', { fetchImpl })).resolves.toBe('+14155550002')
     const [, init] = fetchImpl.mock.calls[1] as [string, RequestInit]
     expect(init.method).toBe('POST')
-    expect(JSON.parse(String(init.body))).toMatchObject({ phoneNumber: '+19175550102', sendInvite: false })
+    // Photon's API rejects a create without `type` (422 VALIDATION_ERROR).
+    expect(JSON.parse(String(init.body))).toEqual({ type: 'shared', phoneNumber: '+19175550102', firstName: 'plansaroundus' })
   })
 
   it('reads the number back when assignment lags creation', async () => {

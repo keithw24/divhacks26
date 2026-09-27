@@ -93,7 +93,14 @@ async function sendWithOwnResend(
 /** This person's own @agent number from Photon's pool (registers them if needed). */
 async function photonNumberFor(env: Env, phone: string): Promise<string | null> {
   try {
-    return await assignedAgentNumber({ projectId: env.PHOTON_ID!, secret: env.PHOTON_SECRET! }, phone)
+    return await assignedAgentNumber(
+      {
+        projectId: env.PHOTON_ID!,
+        secret: env.PHOTON_SECRET!,
+        lineType: env.PHOTON_LINE_TYPE === 'dedicated' ? 'dedicated' : 'shared',
+      },
+      phone,
+    )
   } catch (error) {
     console.error(`[site] photon number lookup failed: ${error instanceof Error ? error.message.slice(0, 200) : 'Error'}`)
     throw error

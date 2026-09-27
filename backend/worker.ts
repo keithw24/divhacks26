@@ -139,6 +139,8 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
    */
   PHOTON_ID?: string
   PHOTON_SECRET?: string
+  /** Photon line type for new users ("shared" on Free/Pro, "dedicated" on Business). */
+  PHOTON_LINE_TYPE?: string
   /**
    * The team's own Resend key (`npx deepspace secrets set RESEND_API_KEY=...`). When set,
    * website emails go through it from EMAIL_FROM on a domain verified in that account.
