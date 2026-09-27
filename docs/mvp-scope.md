@@ -13,6 +13,32 @@ One text with a shared location produces **one** reply containing:
 
 Nothing else ships on this branch until that works live.
 
+## Status (2026-09-27)
+
+| Ticket | State |
+|---|---|
+| 1 Workspace, CI job | Done (npm workspaces, Biome, `mvp` job in `deployment-ci.yml`; Docker build first runs in CI) |
+| 2 `core` | Done |
+| 3 Router skeleton + terminal adapter | Done |
+| 4–7 Skills ported with contract tests | Done (owners should review their package) |
+| 8 `parseIntent` + routing tests | Done (fake-Gemini tests; live Gemini checked manually) |
+| 9 `compose` + `check` | Done |
+| 10 Photon adapter + `app.chat_context` | Code done; **not yet run against Photon**; migration not applied |
+| 11 Deploy | `mvp/Dockerfile` + `mvp/compose.yaml` written; not deployed |
+| 12 Demo rehearsal | Blocked on a Google Maps key and Photon credentials |
+| 0 Hour-one checks | Gemini structured output ✓ and Tiger ✓ (live terminal run). Maps key, Photon and group chat not yet checked. |
+
+Found during the live run:
+- `city_events` holds NYC Parks only (486 events in the next 7 days, mostly daytime). The permitted-events feed (`tvpp-9vvx`) has never been ingested.
+- Parks titles carry HTML entities; the events skill now decodes them.
+
+Deviations from the plan below:
+- **npm workspaces instead of pnpm** (pnpm isn't installed). Skill isolation is enforced by `router/test/boundaries.test.ts` instead of by pnpm's strict dependencies.
+- **Injected `fetch`/`query` fakes instead of msw.** Same coverage, less setup.
+- **An extra `resolveLocations` node.** Missing-location clarification is decided in code after geocoding, not by Gemini.
+- **Event radius widens once, 2 km → 5 km**, when nothing is nearby.
+- **Safety drops the shooting/collision/streetlight layers.** It needs only `nypd_complaints`, per CLAUDE.md.
+
 ## Approach
 
 - Build the MVP as a **new, self-contained pnpm workspace in `mvp/`**. Leave `src/` untouched on this branch as a reference. Deleting old code is a separate step after the MVP passes its acceptance checks.
