@@ -2,7 +2,14 @@ import { EvidenceHistory } from "@/components/site/evidence-history";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { AppPage, buttonPrimary, Card, PageTitle, useMe } from "@/components/site/shell";
+import {
+  AppPage,
+  buttonPrimary,
+  buttonSecondary,
+  Card,
+  PageTitle,
+  useMe,
+} from "@/components/site/shell";
 import { api, errorMessage } from "@/lib/api";
 import { Lock, ShieldCheck } from "lucide-react";
 import { WalletStatusCard } from "@/components/site/wallet-card";
@@ -45,6 +52,7 @@ function Dashboard() {
   const { welcome, wallet: walletResult } = Route.useSearch();
   const [copied, setCopied] = useState<string>();
   const [intro, setIntro] = useState<SendState>({});
+  const [emailed, setEmailed] = useState<SendState>({});
   const [wallet, setWallet] = useState<SendState>({});
 
   const copy = async (text: string) => {
@@ -118,9 +126,23 @@ function Dashboard() {
           >
             {intro.busy ? "Sending…" : "Send me a hello"}
           </button>
-          {intro.message && (
+          <button
+            type="button"
+            className={buttonSecondary}
+            disabled={emailed.busy}
+            onClick={() =>
+              void send(
+                api.sendNumber,
+                setEmailed,
+                "Sent. Check your inbox for your @agent number.",
+              )
+            }
+          >
+            {emailed.busy ? "Sending…" : "Email me my @agent number"}
+          </button>
+          {(emailed.message ?? intro.message) && (
             <span role="status" className="text-sm font-medium">
-              {intro.message}
+              {emailed.message ?? intro.message}
             </span>
           )}
         </div>
