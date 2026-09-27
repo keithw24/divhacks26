@@ -112,7 +112,11 @@ export function overMaxText(maxUsd: number): string {
 }
 
 export function missingDestinationText(name: string): string {
-  return `I don't have a payment destination for ${name} yet.`;
+  return `I can't send that — ${name} doesn't have an XRPL Testnet wallet address. Nothing was processed.`;
+}
+
+export function missingRecipientWalletText(name: string): string {
+  return `I can't send that — ${name} doesn't have an XRPL Testnet wallet address yet. Nothing was processed. They need to set up a Testnet wallet first.`;
 }
 
 export function unknownCustomerText(name: string): string {

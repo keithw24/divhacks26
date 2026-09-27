@@ -28,9 +28,11 @@ export function createGeminiPaymentInterpreter(options: { apiKey: string; model?
           "intent is SEND_PAYMENT only when they are asking to transfer money to a person.",
           "Ride requests, fare questions, and questions about a past payment are NONE.",
           "Do not invent a wallet, address, or destination. Do not decide to send the payment.",
+          "If the named person has no Testnet wallet in the people list, still set SEND_PAYMENT and recipientName so the app can refuse. Do not invent an address.",
           "amountUsd must be the exact dollar amount the user stated. Do not convert, round up, or invent a number.",
           "If they stated more than one amount, omit amountUsd.",
           "memo is the short reason, such as Uber or dinner, if stated.",
+          peopleBlock(input.people),
           input.recentTexts.length ? `Recent messages:\n${input.recentTexts.slice(-6).join("\n")}` : "",
           `User: ${input.text}`,
         ]
@@ -54,4 +56,15 @@ export function sanitizeExtraction(value: Record<string, unknown>): PaymentExtra
   const amountUsd = typeof value.amountUsd === "number" && Number.isFinite(value.amountUsd) ? value.amountUsd : null;
   const memo = typeof value.memo === "string" && value.memo.trim() ? value.memo.trim() : null;
   return { intent, recipientName, amountUsd, memo };
+}
+
+function peopleBlock(people?: Array<{ displayName?: string; userId?: string; xrplAddress?: string }>): string {
+  if (!people?.length) return "";
+  const lines = people.map((person) => {
+    const name = person.displayName || person.userId || "member";
+    const wallet = person.xrplAddress?.trim() || "no Testnet wallet";
+    const userId = person.userId ? ` userId ${person.userId}` : "";
+    return `- ${name}${userId}: ${wallet}`;
+  });
+  return `People (userId and wallet only; no phones):\n${lines.join("\n")}`;
 }

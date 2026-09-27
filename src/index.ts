@@ -43,6 +43,7 @@ import { readSocialContext } from "./agent/social.js";
 import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
 import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./deepspace/client.js";
 import { startDeepSpaceProfileSync } from "./deepspace/profile-sync.js";
+import { createDirectoryCache, mergePeopleDirectory, type PeopleDirectoryEntry } from "./deepspace/directory.js";
 import { notifyPaymentReceived } from "./payments/notify.js";
 import { getPool } from "./safety.js";
 import { TigerProfileDirectory, TigerUserProfileStore } from "./profiles/tiger.js";
@@ -86,6 +87,7 @@ const paymentNotice: {
 } = {
   sendToExternalId: async () => undefined,
 };
+const peopleSnapshot: { current: PeopleDirectoryEntry[] } = { current: [] };
 const ledger = createLedgerService({
   query: config.databaseUrl
     ? (sql, params) => getPool(config.databaseUrl).query(sql, params)
@@ -98,7 +100,16 @@ const merchantPaymentMode =
 const payments = createPaymentRuntime({
   settlement:
     xrpl && usesCustomerWallets
-      ? new CustomerWalletSettlement(xrpl.guard.executor, liveSenders, () => onboardingStore.displayNames(), tigerDirectory)
+      ? new CustomerWalletSettlement(
+          xrpl.guard.executor,
+          liveSenders,
+          () => onboardingStore.displayNames(),
+          (customerId) =>
+            tigerDirectory?.walletForCustomer(customerId) ??
+            xrpl.guard.registry.getAddress(customerId) ??
+            onboardingStore.findByCustomerId(customerId)?.xrplAddress,
+          tigerDirectory,
+        )
       : undefined,
   mode: config.paymentsMode,
   maxUsd: config.paymentsMaxUsd,
@@ -125,6 +136,10 @@ const payments = createPaymentRuntime({
     });
   },
   audit: xrpl?.guard.audit,
+  peopleDirectory: () =>
+    peopleSnapshot.current.length
+      ? peopleSnapshot.current
+      : onboardingStore.peopleDirectory(),
 });
 const meetup = createMeetupRuntime({
   googleMapsApiKey: config.googleMapsApiKey,
@@ -497,6 +512,7 @@ if (deepspace) {
     },
   });
 }
+const loadDeepSpaceDirectory = createDirectoryCache(async () => (deepspace ? deepspace.directory() : []));
 paymentNotice.sendToExternalId = async (externalId, body) => {
   if (config.chatProvider !== "imessage") return;
   const chat = await imessage(app as never).space.create(externalId);
@@ -632,12 +648,19 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
       peopleDirectory: async () => {
-        if (!tigerDirectory) return [];
-        return (await tigerDirectory.refresh()).map((person) => ({
-          displayName: person.displayName,
-          userId: person.userId,
-          ...(person.walletAddress !== "0" ? { xrplAddress: person.walletAddress } : {}),
-        }));
+        const tigerPeople = tigerDirectory
+          ? (await tigerDirectory.refresh()).map((person) => ({
+              displayName: person.displayName,
+              userId: person.userId,
+              ...(person.walletAddress && person.walletAddress !== "0" ? { xrplAddress: person.walletAddress } : {}),
+            }))
+          : [];
+        const merged = mergePeopleDirectory(
+          [...tigerPeople, ...onboardingStore.peopleDirectory()],
+          await loadDeepSpaceDirectory(),
+        );
+        peopleSnapshot.current = merged;
+        return merged;
       },
       userProfile: async (senderId) => {
         const person = await tigerProfiles?.findByPhotonIdentifier(senderId);

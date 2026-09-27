@@ -108,13 +108,11 @@ export class AccountOnboardingStore {
 
   /** Public facts Gemini may use. Never includes a phone number. */
   peopleDirectory(): Array<{ displayName: string; userId?: string; xrplAddress?: string }> {
-    return this.accounts
-      .filter((row) => row.xrplAddress || row.userId)
-      .map((row) => ({
-        displayName: row.customerName,
-        ...(row.userId && { userId: row.userId }),
-        ...(row.xrplAddress && { xrplAddress: row.xrplAddress }),
-      }));
+    return this.accounts.map((row) => ({
+      displayName: row.customerName,
+      ...(row.userId && { userId: row.userId }),
+      ...(row.xrplAddress && { xrplAddress: row.xrplAddress }),
+    }));
   }
 
   displayNames(): string[] {

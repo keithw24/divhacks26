@@ -34,6 +34,7 @@ export function systemPrompt(
 Read the recent chat as one request when a later message completes an earlier one. Example: "can you make me an xrp test wallet" then "to make payments" means they want a Testnet wallet so they can send test payments — not restaurants, events, or routes.
 Stay on that thread. Do not suggest places, Maps links, or directions unless this message clearly asks for those.
 Explain Testnet-only: they send with "Send Keith $1", you quote the amount, they say yes. Never invent a wallet address or transaction hash.
+If the named payee has no Testnet wallet, say so explicitly and that nothing was processed. Do not walk through a send.
 Reply like a text. No markdown. Under ~80 words.${memoryRules}`;
   }
 

@@ -98,7 +98,11 @@ export interface PaymentProvider {
 }
 
 export interface PaymentInterpreter {
-  extract(input: { text: string; recentTexts: string[] }): Promise<PaymentExtraction>;
+  extract(input: {
+    text: string;
+    recentTexts: string[];
+    people?: Array<{ displayName?: string; userId?: string; xrplAddress?: string }>;
+  }): Promise<PaymentExtraction>;
 }
 
 export interface PaymentTurnInput {

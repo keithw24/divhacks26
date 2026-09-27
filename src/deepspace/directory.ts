@@ -43,7 +43,7 @@ export function formatPeopleDirectory(people: PeopleDirectoryEntry[]): string[] 
     const bits = [person.displayName || person.userId || "member"];
     if (person.userId) bits.push(`userId ${person.userId}`);
     if (person.xrplAddress && person.xrplAddress !== "0") bits.push(`wallet ${person.xrplAddress}`);
-    else bits.push("wallet not provisioned");
+    else bits.push("no Testnet wallet");
     return bits.join(" — ");
   });
 }

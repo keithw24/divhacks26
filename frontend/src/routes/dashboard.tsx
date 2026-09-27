@@ -2,7 +2,14 @@ import { EvidenceHistory } from "@/components/site/evidence-history";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { AppPage, buttonPrimary, Card, PageTitle, useMe } from "@/components/site/shell";
+import {
+  AppPage,
+  buttonPrimary,
+  buttonSecondary,
+  Card,
+  PageTitle,
+  useMe,
+} from "@/components/site/shell";
 import { api, errorMessage } from "@/lib/api";
 import { Lock, ShieldCheck } from "lucide-react";
 import { WalletStatusCard } from "@/components/site/wallet-card";
@@ -24,6 +31,9 @@ export const Route = createFileRoute("/dashboard")({
 
 const PROMPTS = [
   "Can you get tickets for me, Alex, and Maya for the concert Friday?",
+  "Watch my area tonight",
+  "I paid $40 for the Uber",
+  "Settle up",
   "Organize dinner for me, Elena, and David at Carbone around 8",
   "Pay Carbone $82 for the reservation deposit",
   "Is this walk okay at midnight?",
@@ -42,6 +52,7 @@ function Dashboard() {
   const { welcome, wallet: walletResult } = Route.useSearch();
   const [copied, setCopied] = useState<string>();
   const [intro, setIntro] = useState<SendState>({});
+  const [emailed, setEmailed] = useState<SendState>({});
   const [wallet, setWallet] = useState<SendState>({});
 
   const copy = async (text: string) => {
@@ -87,23 +98,24 @@ function Dashboard() {
           role="status"
           className="bg-lime text-lime-foreground outline-card rounded-2xl px-4 py-3 mb-6 font-bold"
         >
-          You're set. @agent will text you in iMessage in a moment.
+          You're set. @agent is in your iMessage, in the thread where you texted your code.
         </div>
       )}
       <PageTitle
         kicker="Your @agent"
         title={name ? `Hey ${name}.` : "You're in."}
-        sub="Everything happens in private 1:1 threads in iMessage. @agent reaches out to you there first."
+        sub="Everything happens in your private 1:1 thread with @agent in iMessage."
       />
 
       <Card className="bg-ink text-ink-foreground shadow-[var(--shadow-hard-primary)]">
-        <div className="text-xs font-bold uppercase tracking-[0.15em] opacity-70">Next step</div>
-        <div className="font-display text-3xl md:text-4xl tracking-tight mt-1">Check iMessage</div>
+        <div className="text-xs font-bold uppercase tracking-[0.15em] opacity-70">Your @agent</div>
+        <div className="font-display text-3xl md:text-4xl tracking-tight mt-1">
+          It's in iMessage
+        </div>
         <p className="mt-2 text-ink-foreground/75 text-sm">
-          A message from @agent will pop up in iMessage from a new number, sent to{" "}
-          <span className="font-bold text-ink-foreground">{me.phone}</span>. Reply there to start,
-          and save the number as @agent. Please don't share it publicly: the beta is limited to 100
-          people.
+          The number you texted your sign-in code to is your own @agent line, linked to{" "}
+          <span className="font-bold text-ink-foreground">{me.phone}</span>. Save it as @agent and
+          message it any time. Please don't share it publicly: the beta is limited to 100 people.
         </p>
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button
@@ -112,11 +124,25 @@ function Dashboard() {
             disabled={intro.busy}
             onClick={() => void send(api.startChat, setIntro, "Sent. Check iMessage.")}
           >
-            {intro.busy ? "Sending…" : "Text me again"}
+            {intro.busy ? "Sending…" : "Send me a hello"}
           </button>
-          {intro.message && (
+          <button
+            type="button"
+            className={buttonSecondary}
+            disabled={emailed.busy}
+            onClick={() =>
+              void send(
+                api.sendNumber,
+                setEmailed,
+                "Sent. Check your inbox for your @agent number.",
+              )
+            }
+          >
+            {emailed.busy ? "Sending…" : "Email me my @agent number"}
+          </button>
+          {(emailed.message ?? intro.message) && (
             <span role="status" className="text-sm font-medium">
-              {intro.message}
+              {emailed.message ?? intro.message}
             </span>
           )}
         </div>
@@ -288,7 +314,7 @@ function Dashboard() {
         </p>
         <ol className="mt-3 space-y-2">
           {[
-            "Open the iMessage from @agent and save the number, so it shows up by name in your contacts.",
+            "Save the number you texted your sign-in code to as @agent, so it shows up by name in your contacts.",
             "Message @agent privately with what you want to coordinate (e.g. “Can you get tickets for me, Alex, and Maya for the concert Friday?”).",
             "The agent reaches out to each person in their own separate 1:1 thread, gathers their response, and coordinates the final action.",
           ].map((step, i) => (

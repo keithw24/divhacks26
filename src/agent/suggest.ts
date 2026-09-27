@@ -113,8 +113,9 @@ export function buildContext(input: SuggestInput): string {
       for (const line of input.decisionLines) lines.push(`- ${line}`);
     }
     if (input.peopleDirectory?.length) {
-      lines.push("", "TIGER USER DIRECTORY (replaces DEEPSPACE PEOPLE for wallet lookup; no phone numbers)");
-      lines.push("Tiger is authoritative for wallet lookup. Use these when discussing Testnet payments. Do not invent ids or addresses.");
+      lines.push("", "DEEPSPACE PEOPLE (userId and XRPL Testnet wallet; not phone numbers)");
+      lines.push("Tiger is authoritative for wallet lookup. Use these when talking about who can send or receive Testnet payments. Do not invent ids or addresses.");
+      lines.push("If they ask to pay someone with no Testnet wallet, say that person has no wallet address and that nothing was processed. Do not describe a send.");
       for (const line of formatPeopleDirectory(input.peopleDirectory)) lines.push(`- ${line}`);
     }
     const recentForThread = (input.groupLines ?? input.transcript).map((line) =>

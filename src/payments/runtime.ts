@@ -34,6 +34,7 @@ export interface PaymentRuntimeEnv {
   onPersonSettled?: PaymentServiceOptions["onPersonSettled"];
   audit?: PaymentAuditLog;
   intentTtlMs?: number;
+  peopleDirectory?: PaymentServiceOptions["peopleDirectory"];
 }
 
 export function createPaymentRuntime(env: PaymentRuntimeEnv) {
@@ -53,6 +54,7 @@ export function createPaymentRuntime(env: PaymentRuntimeEnv) {
     onPersonSettled: env.onPersonSettled,
     audit: env.audit,
     intentTtlMs: env.intentTtlMs,
+    peopleDirectory: env.peopleDirectory,
     latestTestnetTx:
       env.mode === "ripple_test" || env.mode === "nessie_ripple"
         ? createLatestTestnetTxLookup(env.serverUrl)
