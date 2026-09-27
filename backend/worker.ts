@@ -34,6 +34,7 @@ import {
 } from './src/server/http-routes.js'
 import { registerRealtimeRoutes } from './src/server/realtime-routes.js'
 import { registerChannelRoutes } from './src/server/channel-routes.js'
+import { registerSiteRoutes } from './src/server/site-routes.js'
 
 // Dynamic deploy reads this manifest to create the app's DO bindings.
 export const __DO_MANIFEST__ = [
@@ -125,6 +126,13 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
   CHANNEL_ADAPTER_SECRET?: string
   /** Beta admission cap (wrangler [vars]); defaults to 100. */
   BETA_MAX_USERS?: string
+  /**
+   * HMAC key for the website's sign-in codes (`npx deepspace secrets set SITE_AUTH_SECRET --stdin`).
+   * Falls back to CHANNEL_ADAPTER_SECRET when unset.
+   */
+  SITE_AUTH_SECRET?: string
+  /** The agent's iMessage number, emailed to new website users (wrangler [vars]). */
+  AGENT_NUMBER?: string
 }
 
 export type AppContext = { Bindings: Env }
@@ -146,6 +154,8 @@ registerRealtimeRoutes(app)
 registerActionRoutes(app, resolveAuth)
 // Signed server-to-server routes for the Photon / SMS / voice adapters.
 registerChannelRoutes(app)
+// The public website's API (plansaroundus.tech), under /site/api/*.
+registerSiteRoutes(app)
 // The in-app assistant stores chat history in `ai-chats` / `ai-messages`,
 // which only the copilot overlay declares. When present, registerAgent enables
 // both that website AI and the user's local Codex/Claude/etc. assistant.
