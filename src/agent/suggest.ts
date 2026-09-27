@@ -231,9 +231,9 @@ function isRetryableModelError(err: unknown): boolean {
 
 function fallbackReply(citySketch: string | undefined): string {
   if (citySketch) {
-    return `${citySketch}\n\nGemini is unavailable right now, so this is the city-data sketch only.`;
+    return `${citySketch}\n\nI got your iMessage, but Gemini's API didn't return a reply (quota or model name). Photon is fine — this is the city-data sketch only.`;
   }
-  return "Gemini is unavailable right now (quota or retired model). Try GEMINI_MODEL=gemini-3.5-flash-lite in .env.";
+  return "I got your iMessage, but Gemini's API didn't return a reply (usually quota or a retired/wrong GEMINI_MODEL). Photon is connected; the language model is what failed.";
 }
 
 async function generateWithGemini(input: SuggestInput, citySketch: string | undefined, model: string, useMaps: boolean) {
