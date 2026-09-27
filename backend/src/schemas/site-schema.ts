@@ -96,10 +96,23 @@ export const siteWaitlistSchema: CollectionSchema = {
   permissions: SERVER_ONLY,
 }
 
+/**
+ * Public read-only snapshots the agent pushes for the website: "xrpl" (the
+ * XRPL Testnet dashboard) and "integrations" (the last live integration check).
+ * The agent runs on its own machine, so the site can't read it directly.
+ */
+export const siteSnapshotsSchema: CollectionSchema = {
+  name: 'site_snapshots',
+  columns: [text('key', { required: true }), json('data'), text('updatedAt', { required: true })],
+  uniqueOn: ['key'],
+  permissions: SERVER_ONLY,
+}
+
 export const siteSchemas: CollectionSchema[] = [
   siteUsersSchema,
   siteCodesSchema,
   siteChallengesSchema,
   siteSessionsSchema,
   siteWaitlistSchema,
+  siteSnapshotsSchema,
 ]

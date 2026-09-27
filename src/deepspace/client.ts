@@ -60,6 +60,8 @@ export interface DeepSpaceClient {
   ack(channel: AdapterChannel, ids: string[], status: "sent" | "failed", error?: string): Promise<void>;
   directory(): Promise<DirectoryPerson[]>;
   notifyPayment(input: { body: string; xrplAddress?: string; userId?: string }): Promise<PaymentNotifyResult>;
+  /** Publish a public read-only snapshot for the website ("xrpl" dashboard or "integrations"). */
+  putSnapshot(key: "xrpl" | "integrations", data: unknown): Promise<void>;
 }
 
 export interface DirectoryPerson {
@@ -131,6 +133,9 @@ export function createDeepSpaceClient(options: {
         : [];
     },
     notifyPayment: (input) => call<PaymentNotifyResult>("POST", "/api/channels/payments/notify", input),
+    putSnapshot: async (key, data) => {
+      await call("POST", `/api/channels/snapshots/${key}`, data);
+    },
   };
 }
 

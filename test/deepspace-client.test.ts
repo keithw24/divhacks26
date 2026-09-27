@@ -95,6 +95,7 @@ describe("outbox poller", () => {
       ack,
       directory: vi.fn(async () => []),
       notifyPayment: vi.fn(),
+      putSnapshot: vi.fn(async () => undefined),
     };
     const poller = startOutboxPoller({
       client,
@@ -117,6 +118,7 @@ describe("outbox poller", () => {
       ack: vi.fn(),
       directory: vi.fn(async () => []),
       notifyPayment: vi.fn(),
+      putSnapshot: vi.fn(async () => undefined),
     };
     const poller = startOutboxPoller({ client, channel: "imessage", intervalMs: 60_000, send: vi.fn() });
     expect(await poller.pollOnce()).toBe(0);

@@ -17,6 +17,7 @@ import { cors } from 'hono/cors'
 import type { AppContext, Env } from '../../worker.js'
 import { createSite, type SiteUser, publicUser } from '../domain/site'
 import { ServiceError } from '../domain/store'
+import { readSnapshot } from '../domain/snapshots'
 import { enrollAgentWalletHttp } from '../domain/wallets'
 import { createActionTools } from './action-routes.js'
 import { assignedAgentNumber } from './photon-users.js'
@@ -42,6 +43,7 @@ const STATUS: Record<string, number> = {
   memory_unavailable: 503,
   site_unconfigured: 503,
   number_unavailable: 503,
+  dashboard_unavailable: 503,
 }
 
 type SiteContext = Context<AppContext>
@@ -190,7 +192,22 @@ export function registerSiteRoutes(app: Hono<AppContext>): void {
   )
   app.get(`${PREFIX}/stats`, handle((c) => siteFor(c.env).site.stats()))
   // Live checks run in the agent; the site shows this as "not checked yet".
-  app.get(`${PREFIX}/integrations`, (c) => c.json({ checkedAt: null, integrations: [] }))
+  // Pushed by the agent (POST /api/channels/snapshots/:key); empty until it has.
+  app.get(
+    `${PREFIX}/integrations`,
+    handle(async (c) => {
+      const snapshot = await readSnapshot(createActionTools(c.env, SITE_USER, ''), 'integrations')
+      return snapshot?.data ?? { checkedAt: null, integrations: [] }
+    }),
+  )
+  app.get(
+    `${PREFIX}/xrpl/dashboard`,
+    handle(async (c) => {
+      const snapshot = await readSnapshot(createActionTools(c.env, SITE_USER, ''), 'xrpl')
+      if (!snapshot) throw new ServiceError('dashboard_unavailable', 'The agent has not published a dashboard yet.')
+      return snapshot.data
+    }),
+  )
 
   app.post(`${PREFIX}/auth/email/start`, handle(async (c) => siteFor(c.env).site.startEmail((await readJson(c)).email)))
   app.post(

@@ -5,6 +5,7 @@ import type { MeetupPersistence, MeetupPlan, PersonLocation } from "../meetup/ty
 import { emptyPhoneCallBook, type PhoneCallBook, type PhoneCallRecord } from "../phone/types.js";
 import type { CheckIn } from "../agent/checkin.js";
 import type { AreaWatch } from "../alerts/service.js";
+import type { FriendCallState } from "../phone/friend-call.js";
 
 export interface Participant {
   id: string;
@@ -70,6 +71,8 @@ export interface AgentState {
   checkIns?: Record<string, CheckIn>;
   /** Opt-in area alerts keyed by Photon space id (coordinates rounded to ~100 m). */
   areaWatches?: Record<string, AreaWatch[]>;
+  /** "@agent call Alex and ask…": pending confirmations, placed calls, saved numbers. */
+  friendCalls?: FriendCallState;
 }
 
 /** Enough to match a webhook back to a Photon space after restart. */

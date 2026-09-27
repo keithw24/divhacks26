@@ -71,6 +71,8 @@ export interface TurnDeps {
     messageId?: string;
     phase: "priority" | "fallback";
   }): Promise<ReservationHandlerResult>;
+  /** "@agent call Alex and ask…": confirm, then an ElevenLabs call to the friend. */
+  handleFriendCall?(input: { spaceId: string; senderName?: string; text: string }): Promise<ReservationHandlerResult>;
   /** Area alerts: "watch my area", "anything going on near me?", "stop alerts". */
   handleAlerts?(input: { spaceId: string; text: string }): Promise<ReservationHandlerResult>;
   /** Friend-style reply for venting with nothing to look up. */
@@ -142,6 +144,7 @@ export type TurnOutcome =
   | "transport"
   | "orchestration"
   | "alerts"
+  | "friend_call"
   | "gemini"
   | "failed";
 
@@ -223,6 +226,18 @@ export async function runConversationTurn(
           return;
         }
       }
+      // Before orchestration: a pending call's "yes" must confirm the call.
+      if (deps.handleFriendCall) {
+        const friendCall = await deps.handleFriendCall({ spaceId: input.spaceId, senderName: input.senderName, text: question });
+        if (friendCall.handled && friendCall.reply) {
+          outcome = "friend_call";
+          answer = friendCall.reply;
+          await reactTo(actions, ackFor(input.social, friendCall.acknowledgement ?? "👍"));
+          await deliverOnce(deliveryActions, answer);
+          delivered = true;
+          return;
+        }
+      }
       if (deps.handleOrchestration) {
         const orchestrated = await deps.handleOrchestration({
           spaceId: input.spaceId,
@@ -265,6 +280,11 @@ export async function runConversationTurn(
           phase,
         });
         if (!result.handled || !result.reply) return false;
+        if (/didn't find any ticketed events|no ticketed events/i.test(result.reply)) {
+          // A zero-result response from one provider is not proof that nothing is happening.
+          // Fall through so other integrations (local events, Google Places, orchestrator) are checked.
+          return false;
+        }
         outcome = "ticketing";
         answer = result.reply;
         await reactTo(actions, ackFor(input.social, result.acknowledgement ?? "👍"));

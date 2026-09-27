@@ -14,6 +14,8 @@ import { setCalendarIcsBase } from "./calendar/links.js";
 import { config } from "./config.js";
 import { safetyChartImage } from "./safetyChart.js";
 import { createAlertService, startAreaAlertWatcher } from "./alerts/service.js";
+import { createLiveOutboundCaller } from "./elevenlabs/client.js";
+import { createFriendCallService, isFriendCallId, type FriendCallService } from "./phone/friend-call.js";
 import { liveDemoProblems } from "./integrations/live-demo.js";
 import { logIntegration } from "./integrations/log.js";
 import { createBackboardMemoryService } from "./memory/backboard.js";
@@ -32,6 +34,7 @@ import { geocodeNyc } from "./geocode.js";
 import { createMerchantDirectory } from "./payments/merchants.js";
 import { createTicketingRuntime } from "./ticketing/runtime.js";
 import { publicTicketPurchase } from "./ticketing/service.js";
+import { createMeetupRuntime } from "./meetup/index.js";
 import { collectInviteContacts } from "./meetup/invite.js";
 import { ConversationContextStore } from "./orchestration/context.js";
 import { createPlacesRestaurantSearch } from "./orchestration/dining.js";
@@ -43,6 +46,8 @@ import { createMailer } from "./web/email.js";
 import { readSocialContext } from "./agent/social.js";
 import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
 import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./deepspace/client.js";
+import { startSnapshotPush } from "./deepspace/snapshots.js";
+import { readPublicIntegrations } from "./integrations/report.js";
 import { startDeepSpaceProfileSync } from "./deepspace/profile-sync.js";
 import { createDirectoryCache, mergePeopleDirectory, type PeopleDirectoryEntry } from "./deepspace/directory.js";
 import { notifyPaymentReceived } from "./payments/notify.js";
@@ -147,7 +152,19 @@ const meetup = createMeetupRuntime({
   timeZone: config.timezone,
   stateStore: agentState,
 });
+// Set once the friend-call service exists (it needs spaceSenders); ElevenLabs results check it first.
+let friendCalls: FriendCallService | undefined;
 const reservations = createReservationRuntime({
+  otherCallCompletion: async (completion) =>
+    isFriendCallId(completion.reservationId) && friendCalls
+      ? friendCalls.handleCompletion({
+          conversationId: completion.conversationId,
+          callId: completion.reservationId,
+          failed: completion.type === "call_initiation_failure",
+          transcript: completion.transcript,
+          terminationReason: completion.terminationReason,
+        })
+      : false,
   callMode: reservationCallMode,
   providers: config.liveDemoMode ? [] : undefined,
   mockScenario: config.reservationMockScenario,
@@ -179,6 +196,38 @@ const reservations = createReservationRuntime({
       console.info(JSON.stringify({ event: "reservation_result_undelivered", spaceId }));
       return;
     }
+    await send(text);
+  },
+});
+// "@agent call Alex and ask…": live ElevenLabs calls only (the mock caller simulates restaurants).
+friendCalls = createFriendCallService({
+  store: agentState,
+  caller:
+    reservationCallMode === "live" && config.elevenLabsApiKey && config.elevenLabsAgentId && config.elevenLabsAgentPhoneNumberId
+      ? createLiveOutboundCaller({
+          apiKey: config.elevenLabsApiKey,
+          agentId: config.elevenLabsAgentId,
+          agentPhoneNumberId: config.elevenLabsAgentPhoneNumberId,
+        })
+      : undefined,
+  // Group members (their iMessage handles are numbers) and people who onboarded a wallet.
+  knownPeople: (spaceId) => {
+    const people: Array<{ name: string; phone: string }> = [];
+    for (const p of agentState.getState().spaces[spaceId]?.participants ?? []) {
+      if (p.displayName && /^\+\d{10,15}$/.test(p.id)) people.push({ name: p.displayName, phone: p.id });
+    }
+    for (const row of onboardingStore.list()) {
+      if (/^\+\d{10,15}$/.test(row.photonSenderId)) people.push({ name: row.customerName, phone: row.photonSenderId });
+    }
+    return people;
+  },
+  notify: async (spaceId, text) => {
+    const send = spaceSenders.get(spaceId);
+    if (!send) {
+      console.info(JSON.stringify({ event: "friend_call_result_undelivered", spaceId }));
+      return;
+    }
+    recordMessage(spaceId, config.agentName, text);
     await send(text);
   },
 });
@@ -368,6 +417,8 @@ console.info(
   `Ticketing: ${ticketing.provider.name} provider, ${ticketing.service.effectiveMode} checkout` +
     (ticketing.service.effectiveMode === "link" ? " (official purchase links only; nothing is bought)." : "."),
 );
+// Set when XRPL Testnet payments are on; also published to the website through DeepSpace.
+let xrplDashboard: XrplDashboardBuilder | undefined;
 if (xrpl) {
   console.info("Payments: XRPL Testnet. Person payments are signed by each customer's own Testnet wallet. No real money moves.");
   console.info(
@@ -388,14 +439,14 @@ if (xrpl) {
   } else {
     console.warn("No XRPL test wallet is configured for the payment service. Reservation deposits will be refused (run npm run xrpl:status).");
   }
-  const dashboard = new XrplDashboardBuilder({
+  const dashboard = (xrplDashboard = new XrplDashboardBuilder({
     registry: xrpl.guard.registry,
     audit: xrpl.guard.audit,
     ledger: xrpl.ledger,
     secrets: () => xrpl.secrets.knownSecrets(),
     operatorPayments: () => xrplPayments.listPublicTransactions({ limit: 20 }),
     ticketPurchases: () => ticketing.service.store.listPurchases(20).map(publicTicketPurchase),
-  });
+  }));
   void startXrplDashboardServer(config.xrplDashboardPort, () => dashboard.build())
     .then((server) => console.info(`XRPL Testnet dashboard: http://127.0.0.1:${server.port}${DASHBOARD_PATH}`))
     .catch((error) => console.warn(`XRPL dashboard did not start: ${errorCategory(error)}`));
@@ -505,6 +556,12 @@ if (deepspace) {
       intervalMs: config.deepspaceOutboxPollMs,
     });
   }
+  // The website's XRPL and "Built with" panels read these; it can't reach this machine directly.
+  if (xrplDashboard) {
+    const builder = xrplDashboard;
+    startSnapshotPush({ client: deepspace, key: "xrpl", build: () => builder.build(), intervalMs: 15_000 });
+  }
+  startSnapshotPush({ client: deepspace, key: "integrations", build: readPublicIntegrations, intervalMs: 60_000 });
   startOutboxPoller({
     client: deepspace,
     channel: "imessage",
@@ -577,7 +634,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
     await onboarding.enroll({
       photonSenderId: who,
       displayName: senderDisplayName(message.sender),
-      userId: backend?.userId,
+      userId: backend?.userId ?? undefined,
       provisionWallet: false,
     }).catch((error) => {
       console.error(`Tiger profile sync failed: ${error instanceof Error ? error.message.slice(0, 120) : "Error"}`);
@@ -654,6 +711,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       wallets: walletChat,
       ticketing: ticketing.service,
       meetup: meetup.service,
+      friendCalls,
       sendPlanInvite: (externalId, body) => paymentNotice.sendToExternalId(externalId, body),
       inviteContacts: async () => {
         const remote = await loadDeepSpaceDirectory();
@@ -709,6 +767,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       suggest: (input) =>
         suggestNext({
           ...input,
+          ticketProvider: ticketing.provider,
           onEvidence: (plan) => saveEvidencePlan(agentState, who, plan),
           // The chart follows the text card; it is dropped if Gemini's restyle fails the read-back check.
           onSafetyReport: (report) => {
@@ -727,6 +786,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       recordChatMessage: recordMessage,
       recordAssistant: (replyText, meta) => {
         recordMessage(space.id, config.agentName, replyText);
+        conversationContext.noteAssistantTurn(space.id, replyText, meta?.outcome);
         // A signed-up user's own voice setting from the website wins over the global default.
         const speak = shouldSpeak({
           mode: web?.voicePreference(who) ?? config.voiceReplies,

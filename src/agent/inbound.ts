@@ -134,6 +134,10 @@ export interface InboundDeps {
   inviteContacts?: () => Promise<Array<{ displayName: string; photonSenderId: string }>>;
   tigerPeople?: () => Promise<Array<{ displayName?: string; userId: string }>>;
   liveLocations?: (spaceId: string) => MeetupTurnInput["liveLocations"];
+  /** "@agent call Alex and ask…" through ElevenLabs. */
+  friendCalls?: {
+    handleTurn(input: { spaceId: string; senderName?: string; text: string }): Promise<ReservationHandlerResult>;
+  };
   /** Opt-in area alerts (permitted street events + MTA subway alerts). */
   alerts?: {
     handleTurn(input: {
@@ -471,6 +475,14 @@ export async function handleInboundMessage(
               senderName: message.senderName,
               text: request.text,
               participants: group.participants,
+            })
+        : undefined,
+      handleFriendCall: deps.friendCalls
+        ? (request) =>
+            deps.friendCalls!.handleTurn({
+              spaceId: request.spaceId,
+              senderName: request.senderName || message.senderName,
+              text: request.text,
             })
         : undefined,
       handleAlerts: deps.alerts

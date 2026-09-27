@@ -45,6 +45,7 @@ export interface SuggestInput {
   onSafetyReport?: (report: BlockSafetyReport) => void;
   /** After Gemini composes a shared plan, Photon-text the named people. */
   notifySharedPlan?: (invitees: string[], plan: string) => Promise<string | undefined>;
+  ticketProvider?: import("../ticketing/types.js").TicketProvider;
 }
 
 const clock = (d: Date) =>
@@ -328,6 +329,7 @@ export async function suggestNext(input: SuggestInput): Promise<string> {
       .map((person) => person.displayName?.trim())
       .filter((name): name is string => Boolean(name)),
     onSharedPlan: input.notifySharedPlan,
+    ticketProvider: input.ticketProvider,
   });
   return answer;
 }

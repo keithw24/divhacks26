@@ -62,6 +62,10 @@ export function heuristicIntent(
   const broad = /plan|night out|what should (?:i|we) do|what now|date night/.test(text);
   const focusedRoute = /how (?:do|can) (?:i|we) get|directions? to|route to|take me to/.test(text);
   const homeTrip = asksDirectionsHome(question);
+  const hasLocationMention =
+    /\b(?:in|near|around|at|visiting|going to|headed to|interested in)\s+[a-z0-9]/i.test(text) ||
+    /\b(?:i'm|im|i am|we're|were|we are)\s+(?:in|at|near|around|visiting)\b/i.test(text);
+
   if (!capabilityThread) {
     if (focusedRoute || homeTrip) needs.add("route");
     if (/safe|safety|crime|danger|sketch/.test(text) || homeTrip) needs.add("safety");
@@ -82,6 +86,7 @@ export function heuristicIntent(
     invitees.length === 0 &&
     (capabilityThread ||
       (!broad &&
+        !hasLocationMention &&
         needs.size === 0 &&
         !/\b(near|nearby|around here|open now|where|tonight|today|tomorrow|happening|around me)\b/.test(text)));
   if (!conversational && (broad || needs.size === 0)) {
@@ -238,6 +243,7 @@ Food-only requests (dinner, restaurant, where to eat, dinner spot) must use need
 If the user wants to make a plan WITH another named person (with Rohan, me and Keith, plan something for Alan and me), set invitees to those first names. Photon will text them the plan. Solo plans ("plan a night near Columbia") have invitees=[]. Never invent a person, never invite "me"/"we"/"friend", never treat a restaurant as an invitee.
 ${directory}
 Extract a named origin/destination as text but never invent coordinates. If the message names no place but the recent chat says where the sender is ("we're in Soho"), use that place as locationQuery. If no shared origin and no place is stated anywhere, ask one short location question.
+Treat any location mentioned by the user as actionable context. If the user says they are in, near, visiting, going to, or interested in a specific location, extract that location as locationQuery. Use the most specific location available (e.g., 'SoHo' not all of New York City). Never mark conversational=true if the user mentions being in, near, visiting, going to, or interested in a location; set needs to include events and food to find concrete things happening around them.
 Set conversational=true and needs=[] when the message is small talk, a feeling, thanks, or a follow-up about the conversation itself, with nothing to look up. Shared-plan requests with invitees are not conversational.
 A shared location pin is not a reason to run food/events/route. Later messages often complete an earlier one: "can you make me an xrp test wallet" then "to make payments" is one wallet request, not a night plan.
 XRPL / XRP / Testnet wallets, how this agent sends Testnet payments, and onboarding are conversational (needs=[]). Do not classify those as route, food, events, or safety.
