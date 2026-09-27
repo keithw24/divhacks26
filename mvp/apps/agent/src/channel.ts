@@ -6,6 +6,11 @@ export interface InboundMessage {
   text: string;
   location?: { latitude: number; longitude: number };
   isGroup: boolean;
+  /**
+   * The sender's address on the channel (E.164 phone or Apple ID email). Used only to verify
+   * website sign-in codes; never logged or stored.
+   */
+  senderAddress?: string;
 }
 
 /**
@@ -16,6 +21,8 @@ export interface ChannelAdapter {
   name: string;
   start(onMessage: (message: InboundMessage) => void): Promise<void>;
   send(spaceId: string, text: string): Promise<void>;
+  /** Open a 1:1 chat with a phone number and send the first message (website "say hi"). */
+  sendTo?(phone: string, text: string): Promise<void>;
 }
 
 /** In group chats the agent answers only when mentioned: "@agent where should we eat?". */

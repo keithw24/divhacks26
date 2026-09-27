@@ -1,6 +1,21 @@
 # Migration plan: DeepSpace → DigitalOcean + Tiger
 
-Status: proposal, not started. Owner: Keith (integration).
+Status: **code done on branch `mvp-site-api`; not deployed.** Owner: Keith (integration). Runbook: [digitalocean-setup.md](digitalocean-setup.md).
+
+Decisions (2026-09-27):
+- The site API lives in the **MVP app** (`mvp/`), not the old `src/` agent.
+- The **4 DeepSpace users sign up again**; no export.
+- The team has **no droplet yet**; setup is in the runbook.
+
+What changed from the plan below:
+- **Steps 1–2:** `backend/src/domain/site.ts` was ported unchanged into `mvp/packages/accounts`, on a jsonb `Store` over `app.records` (`mvp/sql/002`). All 14 DeepSpace site tests and 4 Photon tests pass, plus a live test of the full sign-up on Tiger.
+- **Step 3:** Hono API in `mvp/apps/agent/src/site-api.ts`, same paths under `/api`.
+  - Memories, evidence, wallets and the XRPL dashboard are out of MVP scope and return the empty or `*_unavailable` states the site already handles.
+  - Checked in a browser against the real frontend: sign-up, onboarding, hello text, email-my-number, delete account.
+- **Step 4:** only the sign-in code relay was needed. The turn handler calls `confirmPhoneText` in process. Plans, outbox, directory and payment notifications aren't part of the MVP.
+- **Step 5:** `app` schema on Tiger.
+- **Step 7:** re-sign-up.
+
 
 ## Why
 

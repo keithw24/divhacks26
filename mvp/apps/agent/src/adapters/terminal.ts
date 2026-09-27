@@ -6,7 +6,7 @@ import type { ChannelAdapter } from "../channel";
  * Local development and demo rehearsal, no Photon needed. Paste a Maps link or
  * "40.8075,-73.9626" to share a location. Prefix with "group:" to act like a group chat.
  */
-export function createTerminalAdapter(options: { spaceId?: string } = {}): ChannelAdapter {
+export function createTerminalAdapter(options: { spaceId?: string; senderAddress?: string } = {}): ChannelAdapter {
   const spaceId = options.spaceId ?? "terminal";
   let counter = 0;
   return {
@@ -26,6 +26,7 @@ export function createTerminalAdapter(options: { spaceId?: string } = {}): Chann
           text: location ? "" : line,
           ...(location && { location }),
           isGroup,
+          ...(options.senderAddress && { senderAddress: options.senderAddress }),
         });
         if (location) console.log("(location saved)");
       });
@@ -33,6 +34,9 @@ export function createTerminalAdapter(options: { spaceId?: string } = {}): Chann
     async send(_spaceId, text) {
       console.log(`\nagent> ${text.replace(/\n/g, "\n       ")}\n`);
       process.stdout.write("you> ");
+    },
+    async sendTo(phone, text) {
+      console.log(`\nagent → ${phone.slice(0, -4).replace(/\d/g, "•")}${phone.slice(-4)}> ${text}\n`);
     },
   };
 }

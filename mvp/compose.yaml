@@ -1,5 +1,7 @@
-# Around Me MVP on the DigitalOcean droplet: `docker compose -f mvp/compose.yaml up -d --build`.
-# Exactly one agent instance may run: Photon delivers each message to every listener.
+# Around Me MVP on the DigitalOcean droplet. See docs/digitalocean-setup.md.
+#   docker compose -f mvp/compose.yaml --profile tools run --rm migrate   # once, and after new sql/ files
+#   GIT_SHA=$(git rev-parse --short HEAD) docker compose -f mvp/compose.yaml up -d --build
+# Exactly one agent may run per Photon project: Photon delivers each message to every listener.
 name: around-me-mvp
 
 services:
@@ -12,7 +14,7 @@ services:
     env_file: .env
     environment:
       CHAT_PROVIDER: photon
-      HEALTH_PORT: 8080
+      HTTP_PORT: 8080
     expose:
       - "8080"
     healthcheck:
@@ -22,7 +24,23 @@ services:
       retries: 5
       start_period: 30s
 
-  # One-off: `docker compose -f mvp/compose.yaml run --rm migrate`
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      agent:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in mvp/.env, e.g. api.plansaroundus.tech}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
   migrate:
     image: postgres:17-alpine
     profiles: ["tools"]
@@ -30,3 +48,7 @@ services:
     volumes:
       - ./sql:/sql:ro
     entrypoint: ["sh", "-c", "for f in /sql/*.sql; do echo \"Applying $$f\"; psql \"$$DATABASE_URL\" -v ON_ERROR_STOP=1 -f \"$$f\" || exit 1; done"]
+
+volumes:
+  caddy_data:
+  caddy_config:

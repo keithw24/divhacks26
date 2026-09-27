@@ -15,14 +15,35 @@ export function createTurnHandler(deps: {
   agentName: string;
   log: Logger;
   now?: () => Date;
+  /**
+   * Website sign-in: returns the reply when the text is a "CODE 123456" message, else null.
+   * The sender's address is the proof of the number (see @mvp/accounts site.confirmPhoneText).
+   */
+  confirmSignIn?: (senderAddress: string, text: string) => Promise<string | null>;
 }) {
   const mention = mentionOf(deps.agentName);
-  return async (spaceId: string, batch: InboundMessage[]) => {
+  return async (spaceId: string, messages: InboundMessage[]) => {
+    let batch = messages;
     const shared = batch.findLast((m) => m.location)?.location;
     if (shared) {
       const location: Location = { label: "your shared location", ...shared };
       await deps.store.recordLocation(spaceId, location);
     }
+
+    // Sign-in codes are answered on their own and never reach the router or chat memory.
+    const rest: InboundMessage[] = [];
+    for (const message of batch) {
+      const reply =
+        deps.confirmSignIn && message.senderAddress && !message.isGroup
+          ? await deps.confirmSignIn(message.senderAddress, message.text).catch((error) => {
+              deps.log.error({ err: (error as Error).message }, "sign-in code check failed");
+              return "Sorry, I couldn't check that code. Try again in a minute.";
+            })
+          : null;
+      if (reply) await deps.channel.send(spaceId, reply);
+      else rest.push(message);
+    }
+    batch = rest;
 
     const isGroup = batch.some((m) => m.isGroup);
     const lines = batch.map((m) => m.text.trim()).filter(Boolean);
