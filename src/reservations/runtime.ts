@@ -1,4 +1,5 @@
 import { createOutboundCaller } from "../elevenlabs/calls.js";
+import type { NormalizedCompletion } from "./result.js";
 import { RestaurantCallService } from "../phone/service.js";
 import { createMemoryStateStore } from "../store/state.js";
 import { startWebhookServer } from "../elevenlabs/server.js";
@@ -30,6 +31,8 @@ const SCENARIOS = new Set<MockScenario>([
 ]);
 
 export interface ReservationRuntimeEnv {
+  /** Non-reservation ElevenLabs calls (friend calls) get first look at completions. */
+  otherCallCompletion?: (completion: NormalizedCompletion) => Promise<boolean>;
   callMode: "mock" | "live";
   mockScenario?: string;
   allowGazetteerDial?: boolean;
@@ -117,6 +120,7 @@ export function createReservationRuntime(env: ReservationRuntimeEnv) {
     autoComplete: env.autoComplete ?? env.callMode === "mock",
     mockScenario,
     webhookSecret: env.webhookSecret,
+    otherCallCompletion: env.otherCallCompletion,
     timeZone: env.timeZone,
     callTimeoutMs: env.callTimeoutMs,
     store: env.stateStore ? ReservationStore.open(env.stateStore) : undefined,

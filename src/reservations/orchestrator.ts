@@ -170,6 +170,11 @@ export class ReservationOrchestrator {
       mockScenario?: MockScenario;
       callTimeoutMs?: number;
       webhookSecret?: string;
+      /**
+       * Calls that aren't reservations (e.g. friend calls). Return true when the
+       * completion was theirs; it's then acknowledged without touching reservations.
+       */
+      otherCallCompletion?: (completion: NormalizedCompletion) => Promise<boolean>;
       store?: ReservationStore;
       deposits?: DemoDepositCatalog;
       /** Guarded restaurant payment path. Without it, no reservation can require payment. */
@@ -288,6 +293,9 @@ export class ReservationOrchestrator {
       return parsed.reason === "ignore"
         ? { status: 200, body: { ignored: true } }
         : { status: 400, body: { error: "malformed" } };
+    }
+    if (this.options.otherCallCompletion && (await this.options.otherCallCompletion(parsed.completion))) {
+      return { status: 200, body: { received: true } };
     }
     return this.acceptCompletion(parsed.completion, `${parsed.completion.type}:${parsed.completion.conversationId}`);
   }
