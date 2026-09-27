@@ -877,14 +877,14 @@ function Index() {
             </ul>
           </div>
           <div className="bg-primary text-primary-foreground outline-card rounded-2xl p-5">
-            <div className="font-display text-2xl tracking-tight">Google Maps</div>
+            <div className="font-display text-2xl tracking-tight">DeepSpace</div>
             <div className="text-sm opacity-90 mt-1 font-bold uppercase tracking-wider">
-              Real-world location context
+              Accounts, plans, and delivery
             </div>
             <ul className="mt-3 text-sm space-y-1 opacity-90">
-              <li>Place lookup and multi-origin routes</li>
-              <li>Optimal central meeting spots</li>
-              <li>Grounded geographic information</li>
+              <li>Sign-in: email code, then one text to @agent</li>
+              <li>Stores accounts, plans, and each person's own @agent number</li>
+              <li>Queues plan and payment notices for the iMessage agent to deliver</li>
             </ul>
           </div>
           <div className="bg-foreground text-background outline-card rounded-2xl p-5">

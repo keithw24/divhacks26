@@ -7,8 +7,8 @@ export interface RegisteredCustomer {
 export const REGISTERED_CUSTOMERS: readonly RegisteredCustomer[] = Object.freeze([
   { customerId: "rohan", customerName: "Rohan" },
   { customerId: "keith", customerName: "Keith" },
-  { customerId: "ben", customerName: "Ben" },
-  { customerId: "sarah", customerName: "Sarah" },
+  { customerId: "mike", customerName: "Mike" },
+  { customerId: "alan", customerName: "Alan" },
 ]);
 
 const onboarded = new Map<string, RegisteredCustomer>();
