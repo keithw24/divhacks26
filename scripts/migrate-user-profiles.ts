@@ -52,7 +52,11 @@ function postgresConnectionString(raw: string | undefined): string {
 const databaseUrl = postgresConnectionString(process.env.DATABASE_URL);
 
 const sql = await readFile(new URL("../sql/007_user_profiles.sql", import.meta.url), "utf8");
-const client = new pg.Client({ connectionString: databaseUrl, ssl: { rejectUnauthorized: false } });
+// Same as src/safety.ts: an sslmode in the URL would override the ssl option below.
+const client = new pg.Client({
+  connectionString: databaseUrl.replace(/[?&]sslmode=[^&]*/g, ""),
+  ssl: { rejectUnauthorized: false },
+});
 try {
   await client.connect();
   await client.query(sql);
