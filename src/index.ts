@@ -33,6 +33,7 @@ import { geocodeNyc } from "./geocode.js";
 import { createMerchantDirectory } from "./payments/merchants.js";
 import { createTicketingRuntime } from "./ticketing/runtime.js";
 import { publicTicketPurchase } from "./ticketing/service.js";
+import { createMeetupRuntime } from "./meetup/index.js";
 import { collectInviteContacts } from "./meetup/invite.js";
 import { ConversationContextStore } from "./orchestration/context.js";
 import { createPlacesRestaurantSearch } from "./orchestration/dining.js";
