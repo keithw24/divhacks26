@@ -76,12 +76,9 @@ export class PaymentService implements DepositPaymentPort {
   private readonly timeoutMs: number;
   private readonly interpreter?: PaymentInterpreter;
   private readonly settlement?: CustomerSettlementPort;
-<<<<<<< HEAD
   private readonly onPersonSettled?: PaymentServiceOptions["onPersonSettled"];
-=======
   private readonly audit?: PaymentAuditLog;
   private readonly intentTtlMs: number;
->>>>>>> 6585e28552a2c171f06a1e26c5958887ae048aa7
 
   constructor(options: PaymentServiceOptions) {
     this.maxUsd = options.maxUsd ?? 500;
@@ -91,12 +88,9 @@ export class PaymentService implements DepositPaymentPort {
     this.timeoutMs = options.timeoutMs ?? 20_000;
     this.interpreter = options.interpreter;
     this.settlement = options.settlement;
-<<<<<<< HEAD
     this.onPersonSettled = options.onPersonSettled;
-=======
     this.audit = options.audit;
     this.intentTtlMs = options.intentTtlMs ?? 10 * 60 * 1000;
->>>>>>> 6585e28552a2c171f06a1e26c5958887ae048aa7
   }
 
   get payments(): PaymentStore {
