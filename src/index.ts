@@ -25,6 +25,7 @@ import { xrplPayments } from "./payments/xrpl/payments.js";
 import { createLiveRippleGuard } from "./payments/xrpl/runtime.js";
 import { CustomerWalletSettlement, parseCustomerSenders } from "./payments/xrpl/settlement.js";
 import { AccountOnboardingService, AccountOnboardingStore, ONBOARDING_ACCOUNTS_PATH } from "./payments/xrpl/onboarding.js";
+import { WalletChatService } from "./payments/wallet-chat.js";
 import { createReservationRuntime } from "./reservations/runtime.js";
 import { geocodeNyc } from "./geocode.js";
 import { createMerchantDirectory } from "./payments/merchants.js";
@@ -71,6 +72,7 @@ const onboardingStore = new AccountOnboardingStore(ONBOARDING_ACCOUNTS_PATH);
 const usesCustomerWallets = config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple";
 const xrpl = usesCustomerWallets || Boolean(config.deepspaceOnboardingSecret) ? createLiveRippleGuard() : undefined;
 const onboarding = new AccountOnboardingService(onboardingStore, xrpl?.guard.registry);
+const walletChat = new WalletChatService({ onboarding });
 const customerSenders = parseCustomerSenders(config.xrplCustomerSendersJson);
 const liveSenders = () => ({ ...customerSenders, ...onboardingStore.senderMap() });
 const ledger = createLedgerService({
@@ -553,6 +555,7 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       ].filter(Boolean),
       reservations: reservations.orchestrator,
       payments: payments.service,
+      wallets: walletChat,
       ticketing: ticketing.service,
       meetup: meetup.service,
       ledger,

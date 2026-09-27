@@ -53,6 +53,8 @@ function isUsefulPlace(value: string | undefined): value is string {
   if (STOP_WORDS.has(cleaned.toLowerCase())) return false;
   if (/^(here|there|it|that|this)$/i.test(cleaned)) return false;
   if (/^(subway|train|walk|walking|uber|lyft|taxi|cab|bus|metro|bike|biking|transit|car)$/i.test(cleaned)) return false;
+  // "to make payments" / "to pay Keith" is purpose, not a destination.
+  if (/^(make|made|pay|paying|send|sending|do|doing|use|using|get|getting|have|having)\b/i.test(cleaned)) return false;
   return true;
 }
 

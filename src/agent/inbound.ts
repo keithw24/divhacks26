@@ -97,6 +97,15 @@ export interface InboundDeps {
       recentTexts?: string[];
     }): Promise<ReservationHandlerResult>;
   };
+  wallets?: {
+    handleTurn(input: {
+      spaceId: string;
+      senderId?: string;
+      senderName?: string;
+      text: string;
+      recentTexts?: string[];
+    }): Promise<ReservationHandlerResult>;
+  };
   ticketing?: {
     handleTurn(input: {
       spaceId: string;
@@ -327,6 +336,18 @@ export async function handleInboundMessage(
                 .map((line) => line.text),
             })
         : undefined,
+      handleWallet: deps.wallets
+        ? (request) =>
+            deps.wallets!.handleTurn({
+              spaceId: request.spaceId,
+              senderId: request.senderId,
+              senderName: message.senderName,
+              text: request.text,
+              recentTexts: group.recentMessages
+                .filter((line) => line.id !== message.messageId)
+                .map((line) => line.text),
+            })
+        : undefined,
       handleTicketing: deps.ticketing
         ? (request) =>
             deps.ticketing!.handleTurn({
@@ -397,6 +418,7 @@ export async function handleInboundMessage(
 
   const responseSent =
     outcome === "payment" ||
+    outcome === "wallet" ||
     outcome === "reservation" ||
     outcome === "ticketing" ||
     outcome === "meetup" ||

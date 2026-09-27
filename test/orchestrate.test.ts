@@ -144,6 +144,22 @@ describe("skill dispatcher", () => {
     expect(findFood).not.toHaveBeenCalled();
   });
 
+  it("does not route a wallet follow-up through places even if Gemini tagged route", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["route", "food"] });
+    const fallback = vi.fn(async () => "wallet howto");
+    await expect(
+      orchestrate({
+        question: "to make payments",
+        transcript: [{ at: new Date(), who: "alan", text: "can you make me an xrp test wallet" }],
+        location,
+        fallback,
+      }),
+    ).resolves.toBe("wallet howto");
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(getRoute).not.toHaveBeenCalled();
+    expect(findFood).not.toHaveBeenCalled();
+  });
+
   it("gives intent parsing the recent chat so an earlier place counts", async () => {
     vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["safety"] });
     const at = new Date();

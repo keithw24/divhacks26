@@ -18,12 +18,24 @@ const TONE_RULES = `Read the SOCIAL CONTEXT if present and let it shape how you 
 
 export function systemPrompt(
   isGroup: boolean,
-  modeOrOptions: "safety" | "hangout" | { personalized?: boolean; mode?: "safety" | "hangout"; toned?: boolean } = "hangout",
+  modeOrOptions:
+    | "safety"
+    | "hangout"
+    | "capability"
+    | { personalized?: boolean; mode?: "safety" | "hangout" | "capability"; toned?: boolean } = "hangout",
 ): string {
   const mode = typeof modeOrOptions === "string" ? modeOrOptions : (modeOrOptions.mode ?? "hangout");
   const personalized = typeof modeOrOptions === "object" && Boolean(modeOrOptions.personalized);
   const toned = typeof modeOrOptions === "object" && Boolean(modeOrOptions.toned);
   const memoryRules = (personalized ? `\n\n${MEMORY_RULES}` : "") + (toned ? `\n\n${TONE_RULES}` : "") + `\n\n${MESSAGE_WRITING_RULES}`;
+
+  if (mode === "capability") {
+    return `You are ${config.agentName}, texting over iMessage about this agent's own features (XRPL Testnet wallets, how to send a test payment, onboarding).
+Read the recent chat as one request when a later message completes an earlier one. Example: "can you make me an xrp test wallet" then "to make payments" means they want a Testnet wallet so they can send test payments — not restaurants, events, or routes.
+Stay on that thread. Do not suggest places, Maps links, or directions unless this message clearly asks for those.
+Explain Testnet-only: they send with "Send Keith $1", you quote the amount, they say yes. Never invent a wallet address or transaction hash.
+Reply like a text. No markdown. Under ~80 words.${memoryRules}`;
+  }
 
   if (mode === "safety") {
     return `You are ${config.agentName}, texting someone in New York City about area safety.

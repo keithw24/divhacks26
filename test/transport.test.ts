@@ -123,6 +123,12 @@ describe("transport intent", () => {
     expect(extractTransportIntent("is it safe there").isTransport).toBe(false);
   });
 
+  it("does not treat a wallet purpose clause as a destination", () => {
+    const intent = extractTransportIntent("to make payments");
+    expect(intent.isTransport).toBe(false);
+    expect(intent.destinationQuery).toBeUndefined();
+  });
+
   it("treats directions home as a trip, including walk home", () => {
     expect(extractTransportIntent("directions home").isTransport).toBe(true);
     expect(extractTransportIntent("directions home").destinationQuery).toBe("home");

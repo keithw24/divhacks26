@@ -11,6 +11,7 @@ import { wantsSafetySketch } from "../safetyIntent.js";
 import { orchestrate } from "./orchestrate.js";
 import { systemPrompt } from "./prompt.js";
 import { isNotable, rankingHint, socialContextLines, withOpener, type SocialRead } from "./social.js";
+import { continuesCapabilityThread } from "./thread.js";
 
 function gemini() {
   if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is not set (see .env.example)");
@@ -96,11 +97,16 @@ export function buildContext(input: SuggestInput): string {
       lines.push("", "DECISION CONSTRAINTS");
       for (const line of input.decisionLines) lines.push(`- ${line}`);
     }
-    lines.push(
-      "",
-      "AVAILABLE PHOTON TOOLS / CAPABILITIES",
-      "Transportation directions for walk, subway, bus, bike, and car via the transportation handler. Place suggestions grounded in Google Maps.",
+    const recentForThread = (input.groupLines ?? input.transcript).map((line) =>
+      "text" in line ? line.text : String(line),
     );
+    if (!continuesCapabilityThread(input.question, recentForThread)) {
+      lines.push(
+        "",
+        "AVAILABLE PHOTON TOOLS / CAPABILITIES",
+        "Transportation directions for walk, subway, bus, bike, and car via the transportation handler. Place suggestions grounded in Google Maps.",
+      );
+    }
   }
 
   lines.push(...socialContextLines(input.social));
@@ -126,11 +132,15 @@ export function placeLinks(response: GenerateContentResponse, reply: string): st
 
 /** System instructions stay separate from retrieved memory, which is only in the user message. */
 export function modelInstructions(input: SuggestInput): { system: string; user: string } {
+  const recentTexts = (input.groupLines ?? input.transcript).map((line) =>
+    "text" in line ? line.text : String(line),
+  );
+  const capability = continuesCapabilityThread(input.question, recentTexts);
   return {
     system: systemPrompt(input.isGroup, {
       personalized: input.personalized,
       toned: isNotable(input.social),
-      mode: wantsSafetySketch(input.question) ? "safety" : "hangout",
+      mode: wantsSafetySketch(input.question) ? "safety" : capability ? "capability" : "hangout",
     }),
     user: buildContext(input),
   };

@@ -34,4 +34,13 @@ describe("conversational messages", () => {
     expect(heuristicIntent("where can we eat dinner").conversational).toBeUndefined();
     expect(heuristicIntent("what's happening tonight?").conversational).toBeUndefined();
   });
+
+  it("keeps a wallet request and its follow-up off the place skills", () => {
+    expect(heuristicIntent("can you make me an xrp test wallet", origin).conversational).toBe(true);
+    expect(heuristicIntent("can you make me an xrp test wallet", origin).needs).toEqual([]);
+    expect(
+      heuristicIntent("to make payments", origin, ["can you make me an xrp test wallet"]).conversational,
+    ).toBe(true);
+    expect(heuristicIntent("to make payments", origin, ["can you make me an xrp test wallet"]).needs).toEqual([]);
+  });
 });

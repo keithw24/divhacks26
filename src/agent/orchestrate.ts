@@ -81,8 +81,9 @@ export async function orchestrate(input: OrchestratorInput): Promise<string> {
     } finally { call.retrievedAt = new Date().toISOString(); }
   }
   const recent = input.transcript.slice(-8).map(({ who, text }) => `${who}: ${text}`);
+  const recentTexts = input.transcript.slice(-8).map(({ text }) => text);
   const intent = await parseIntent(input.question, sharedLocation(input), recent);
-  const heuristic = heuristicIntent(input.question, sharedLocation(input));
+  const heuristic = heuristicIntent(input.question, sharedLocation(input), recentTexts);
   // Small talk, feelings, and follow-ups belong with the conversational model and chat memory.
   // Do not run empty food/event lookups just because a last-shared pin exists.
   if ((intent.conversational || heuristic.conversational) && input.fallback) return input.fallback();
