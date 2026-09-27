@@ -133,6 +133,11 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
   SITE_AUTH_SECRET?: string
   /** The agent's iMessage number, emailed to new website users (wrangler [vars]). */
   AGENT_NUMBER?: string
+  /**
+   * The team's own Resend key (`npx deepspace secrets set RESEND_API_KEY=...`). When set,
+   * website emails go through it from EMAIL_FROM on a domain verified in that account.
+   */
+  RESEND_API_KEY?: string
   /** Sender for website emails, e.g. "plansaroundus <noreply@plansaroundus.tech>" (wrangler [vars]). */
   EMAIL_FROM?: string
   /** Public base URL of the Photon agent (e.g. https://agent.example.com). */

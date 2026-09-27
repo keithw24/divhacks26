@@ -57,11 +57,35 @@ async function sendEmail(
   env: Env,
   message: { to: string; subject: string; text: string },
 ): Promise<void> {
+  if (env.RESEND_API_KEY) return sendWithOwnResend(env.RESEND_API_KEY, env.EMAIL_FROM || DEFAULT_FROM, message)
   const result = await tools.integration('email/send', { from: env.EMAIL_FROM || DEFAULT_FROM, ...message })
   if (!result.success) {
     console.error(`[site] email/send failed: ${String(result.error ?? 'unknown').slice(0, 300)}`)
     throw new Error('email send failed')
   }
+}
+
+/**
+ * Send through the team's own Resend account. DeepSpace's shared Resend account can't
+ * send from our domain (it only accepts domains verified there, and *.app.space is not),
+ * so with RESEND_API_KEY set we call Resend directly with a sender on plansaroundus.tech.
+ */
+async function sendWithOwnResend(
+  apiKey: string,
+  from: string,
+  message: { to: string; subject: string; text: string },
+): Promise<void> {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, ...message }),
+  })
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 300)
+    console.error(`[site] resend send failed (${res.status}): ${detail}`)
+    throw new Error('email send failed')
+  }
+  console.info('[site] email sent')
 }
 
 function siteFor(env: Env) {
