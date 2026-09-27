@@ -1,4 +1,4 @@
-# DivHacks 26 — Around Me iMessage agent
+# DivHacks 26 — Around Us iMessage agent
 
 Hackathon project for **Concrete Jungle**: one Photon iMessage agent that combines
 NYC events, restaurants, historical safety context, and real routes. Public
@@ -7,6 +7,11 @@ and official city events land in Tiger Data; Gemini routes intent between the
 skills, and Google Maps Platform supplies factual places and directions.
 
 Fits **Hack the City** (messy urban data, visual + actionable) and **Know Your City**.
+
+User identity, public XRPL Testnet wallet lookup, and Backboard assistant links
+now use Tiger's `user_profiles` table. See
+[`docs/tiger-user-profiles.md`](docs/tiger-user-profiles.md) and run
+`npm run db:migrate:user-profiles` after setting a real `DATABASE_URL`.
 
 Confirmed live: YTD dataset `5uac-w243` ≈ **279,513** complaints; historic `qgea-i56i` ≈ **10.1M**.
 

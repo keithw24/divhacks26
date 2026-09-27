@@ -53,7 +53,18 @@ export function parseInbound(body: unknown): InboundMessage {
   return message
 }
 
-export async function handleInbound(store: Store, message: InboundMessage, now = new Date()): Promise<InboundResult> {
+/**
+ * Website sign-in codes texted to @agent (see site.ts confirmPhoneText).
+ * Returns the reply when the text was a sign-in code, else null.
+ */
+export type ConfirmSiteCode = (externalId: string, text: string) => Promise<string | null>
+
+export async function handleInbound(
+  store: Store,
+  message: InboundMessage,
+  now = new Date(),
+  confirmSiteCode?: ConfirmSiteCode,
+): Promise<InboundResult> {
   // The unique deliveryKey makes a redelivered message a no-op, even across adapter restarts.
   const firstTime = await tryInsert(store, 'inbound_deliveries', {
     deliveryKey: `${message.channel}:${message.deliveryId}`,
@@ -61,6 +72,12 @@ export async function handleInbound(store: Store, message: InboundMessage, now =
     receivedAt: now.toISOString(),
   })
   if (!firstTime) return { duplicate: true, userId: null, betaMember: false, activePlans: [], reply: null }
+
+  // "CODE 482913" from the website's sign-in: the sender's number is the proof.
+  if (confirmSiteCode && message.channel === 'imessage') {
+    const reply = await confirmSiteCode(message.externalId, message.text)
+    if (reply) return { duplicate: false, userId: null, betaMember: false, activePlans: [], reply }
+  }
 
   const linkCode = parseLinkCommand(message.text)
   if (linkCode) {

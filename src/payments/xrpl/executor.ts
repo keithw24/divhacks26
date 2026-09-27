@@ -70,6 +70,11 @@ export class XrplPaymentExecutor {
     return this.options.engine.limits;
   }
 
+  /** Public metadata only. Used to verify Tiger's address before settlement. */
+  walletAddressFor(customerId: string): string | undefined {
+    return this.options.registry.getWallet(customerId)?.xrplAddress;
+  }
+
   async execute(input: PaymentInput): Promise<PaymentExecution> {
     const now = this.options.now ?? (() => new Date());
     if (input.tamperedProposal && !this.options.allowTamperHook) {

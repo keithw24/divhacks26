@@ -73,13 +73,8 @@ function Onboarding() {
     setError(undefined);
     try {
       await api.savePreferences(prefs);
-      const [emailed] = await Promise.all([
-        api.sendNumber().then(
-          () => true,
-          () => false,
-        ),
-        api.startChat().catch(() => undefined),
-      ]);
+      // They already texted @agent to sign in, so the thread exists; this sends a welcome in it.
+      await api.startChat().catch(() => undefined);
       // A failed wallet never blocks sign-up; the dashboard offers a retry.
       const wallet = createWallet
         ? await api.createWallet().then(
@@ -90,7 +85,7 @@ function Onboarding() {
       await queryClient.invalidateQueries({ queryKey: ["me"] });
       await navigate({
         to: "/dashboard",
-        search: { welcome: emailed ? "emailed" : "saved", ...(wallet && { wallet }) },
+        search: { welcome: "saved", ...(wallet && { wallet }) },
       });
     } catch (err) {
       setError(errorMessage(err));
@@ -170,7 +165,7 @@ function Onboarding() {
                 : "Saving…"
               : last
                 ? wantWallet
-                  ? "Create wallet and email me the number"
+                  ? "Create wallet and finish"
                   : "Finish without a wallet"
                 : "Continue"}
           </button>

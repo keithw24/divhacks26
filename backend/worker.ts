@@ -134,6 +134,12 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
   /** The agent's iMessage number, emailed to new website users (wrangler [vars]). */
   AGENT_NUMBER?: string
   /**
+   * Photon project id and secret (`npx deepspace secrets set PHOTON_ID` / `PHOTON_SECRET`).
+   * Sign-up registers each phone as a Photon user and shows their own assigned @agent number.
+   */
+  PHOTON_ID?: string
+  PHOTON_SECRET?: string
+  /**
    * The team's own Resend key (`npx deepspace secrets set RESEND_API_KEY=...`). When set,
    * website emails go through it from EMAIL_FROM on a domain verified in that account.
    */

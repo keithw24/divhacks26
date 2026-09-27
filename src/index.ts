@@ -45,6 +45,7 @@ import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./
 import { createDirectoryCache, mergePeopleDirectory, type PeopleDirectoryEntry } from "./deepspace/directory.js";
 import { notifyPaymentReceived } from "./payments/notify.js";
 import { getPool } from "./safety.js";
+import { TigerProfileDirectory, TigerUserProfileStore } from "./profiles/tiger.js";
 import { shouldSpeak } from "./voice/decide.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled } from "./voice/index.js";
 
@@ -71,9 +72,11 @@ const transport = createTransportationServiceFromEnv({
 const spaceSenders = new Map<string, (text: string) => Promise<unknown>>();
 const agentState = openAgentStateStore(config.agentStatePath);
 const onboardingStore = new AccountOnboardingStore(ONBOARDING_ACCOUNTS_PATH);
+const tigerProfiles = config.databaseUrl ? new TigerUserProfileStore(getPool(config.databaseUrl)) : undefined;
+const tigerDirectory = tigerProfiles ? new TigerProfileDirectory(tigerProfiles) : undefined;
 const usesCustomerWallets = config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple";
 const xrpl = usesCustomerWallets || Boolean(config.deepspaceOnboardingSecret) ? createLiveRippleGuard() : undefined;
-const onboarding = new AccountOnboardingService(onboardingStore, xrpl?.guard.registry);
+const onboarding = new AccountOnboardingService(onboardingStore, xrpl?.guard.registry, tigerProfiles);
 const walletChat = new WalletChatService({ onboarding });
 const customerSenders = parseCustomerSenders(config.xrplCustomerSendersJson);
 const liveSenders = () => ({ ...customerSenders, ...onboardingStore.senderMap() });
@@ -100,7 +103,11 @@ const payments = createPaymentRuntime({
           xrpl.guard.executor,
           liveSenders,
           () => onboardingStore.displayNames(),
-          (customerId) => xrpl.guard.registry.getAddress(customerId) ?? onboardingStore.findByCustomerId(customerId)?.xrplAddress,
+          (customerId) =>
+            tigerDirectory?.walletForCustomer(customerId) ??
+            xrpl.guard.registry.getAddress(customerId) ??
+            onboardingStore.findByCustomerId(customerId)?.xrplAddress,
+          tigerDirectory,
         )
       : undefined,
   mode: config.paymentsMode,
@@ -241,6 +248,21 @@ const memory = config.backboardApiKey
       store: agentState,
       memoryPro: config.backboardMemoryPro,
       writeMode: config.backboardMemoryMode,
+      onProfileResolved: async (profile) => {
+        if (!tigerProfiles) return;
+        try {
+          const existing = await tigerProfiles.findByPhotonIdentifier(profile.photonIdentifier);
+          await tigerProfiles.upsert({
+            userId: existing?.userId ?? profile.userId,
+            displayName: profile.displayName,
+            photonIdentifier: profile.photonIdentifier,
+            walletAddress: existing?.walletAddress ?? "0",
+            backboardAssistantId: profile.backboardAssistantId,
+          });
+        } catch (error) {
+          console.error(`Backboard profile sync failed: ${error instanceof Error ? error.message.slice(0, 120) : "Error"}`);
+        }
+      },
     })
   : undefined;
 
@@ -531,8 +553,14 @@ async function processMessages(items: { space: Space; message: Message }[]) {
 
   const backend = await checkInWithBackend(space, message, who, text);
   if (backend?.userId && who !== "someone") {
-    const existing = onboardingStore.findByPhoton(who);
-    if (existing) onboardingStore.upsert({ ...existing, userId: backend.userId });
+    await onboarding.enroll({
+      photonSenderId: who,
+      displayName: senderDisplayName(message.sender),
+      userId: backend.userId,
+      provisionWallet: false,
+    }).catch((error) => {
+      console.error(`Tiger profile sync failed: ${error instanceof Error ? error.message.slice(0, 120) : "Error"}`);
+    });
   }
   if (backend?.duplicate) return;
   if (backend?.reply) {
@@ -594,7 +622,15 @@ async function processMessages(items: { space: Space; message: Message }[]) {
         ...(xrpl?.secrets.knownSecrets() ?? []),
       ].filter(Boolean),
       reservations: reservations.orchestrator,
-      payments: payments.service,
+      payments: {
+        observe: (spaceId, observed) => payments.service.observe(spaceId, observed),
+        handleTurn: async (request) => {
+          // The payment resolver is synchronous by design; refresh its Tiger-backed
+          // snapshot immediately before Gemini extraction and recipient resolution.
+          if (tigerDirectory) await tigerDirectory.refresh(true);
+          return payments.service.handleTurn(request);
+        },
+      },
       wallets: walletChat,
       ticketing: ticketing.service,
       meetup: meetup.service,
@@ -604,9 +640,30 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
       peopleDirectory: async () => {
-        const merged = mergePeopleDirectory(onboardingStore.peopleDirectory(), await loadDeepSpaceDirectory());
+        const tigerPeople = tigerDirectory
+          ? (await tigerDirectory.refresh()).map((person) => ({
+              displayName: person.displayName,
+              userId: person.userId,
+              ...(person.walletAddress && person.walletAddress !== "0" ? { xrplAddress: person.walletAddress } : {}),
+            }))
+          : [];
+        const merged = mergePeopleDirectory(
+          [...tigerPeople, ...onboardingStore.peopleDirectory()],
+          await loadDeepSpaceDirectory(),
+        );
         peopleSnapshot.current = merged;
         return merged;
+      },
+      userProfile: async (senderId) => {
+        const person = await tigerProfiles?.findByPhotonIdentifier(senderId);
+        return person
+          ? {
+              userId: person.userId,
+              displayName: person.displayName,
+              walletAddress: person.walletAddress,
+              backboardLinked: Boolean(person.backboardAssistantId),
+            }
+          : undefined;
       },
       suggest: (input) =>
         suggestNext({

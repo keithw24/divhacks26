@@ -158,7 +158,7 @@ async function main(): Promise<number> {
     }
     return 0;
   } finally {
-    await xrpl.ledger.disconnect?.().catch(() => undefined);
+    await xrpl.ledger.close().catch(() => undefined);
   }
 }
 

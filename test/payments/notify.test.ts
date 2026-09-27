@@ -34,7 +34,7 @@ describe("payment received notice", () => {
       createdAt: new Date().toISOString(),
       userId: "keith-user",
     });
-    const sendToExternalId = vi.fn(async () => undefined);
+    const sendToExternalId = vi.fn(async (_externalId: string, _body: string) => undefined);
     const sent = await notifyPaymentReceived(
       {
         spaceId: "s",
@@ -64,7 +64,7 @@ describe("payment received notice", () => {
       xrplAddress: ADDRESS,
       createdAt: new Date().toISOString(),
     });
-    const sendToExternalId = vi.fn(async () => undefined);
+    const sendToExternalId = vi.fn(async (_externalId: string, _body: string) => undefined);
     const sent = await notifyPaymentReceived(
       {
         spaceId: "s",

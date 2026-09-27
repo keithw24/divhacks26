@@ -83,9 +83,11 @@ export async function latestTestnetPaymentLink(input: {
       return { failed: true };
     }
   }
-  const url = hash ? testnetTransactionUrl(hash) : null;
+  const confirmedHash = hash;
+  if (!confirmedHash) return { failed: true };
+  const url = testnetTransactionUrl(confirmedHash);
   if (!url) return { failed: true };
-  return { url, hash };
+  return { url, hash: confirmedHash };
 }
 
 export function createLatestTestnetTxLookup(serverUrl: string): LatestTestnetTxLookup {

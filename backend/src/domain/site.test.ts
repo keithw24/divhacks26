@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createSite, MAX_ATTEMPTS, maskEmail, maskPhone, normalizeEmail, normalizeUsPhone, RESEND_COOLDOWN_MS } from './site'
+import { handleInbound } from './channels'
+import { createSite, MAX_ATTEMPTS, maskEmail, maskPhone, normalizeEmail, normalizeUsPhone, parsePhoneCodeText, RESEND_COOLDOWN_MS } from './site'
 import { createFakeStore } from './testing/fake-store'
 
 function setup(maxUsers = 100) {
@@ -10,24 +11,24 @@ function setup(maxUsers = 100) {
     store,
     secret: 'test-secret',
     maxUsers,
+    agentNumber: '+15555550100',
     now: () => t,
     sendEmailCode: async (email, code) => {
       emailed[email] = code
     },
   })
-  /** The last iMessage code queued for a number. */
-  const texted = (phone: string) => {
-    const rows = store.rows('notification_outbox').filter((r) => r.data.externalId === phone)
-    return /^(\d{6})/.exec(String(rows.at(-1)?.data.body ?? ''))?.[1] ?? ''
-  }
+  /** Email → text the shown code from the phone → poll. Returns the signed-in result. */
   const signUp = async (email: string, phone: string) => {
     t += RESEND_COOLDOWN_MS + 1
     await site.startEmail(email)
     const { challenge } = await site.verifyEmail(email, emailed[normalizeEmail(email)!])
-    await site.startPhone(challenge, phone)
-    return site.verifyPhone(challenge, phone, texted(normalizeUsPhone(phone)!))
+    const { code } = await site.startPhone(challenge, phone)
+    expect(await site.confirmPhoneText(normalizeUsPhone(phone)!, `CODE ${code}`)).toMatch(/^You're verified!/)
+    const result = await site.verifyPhone(challenge, phone)
+    if (!('token' in result)) throw new Error('still pending')
+    return result
   }
-  return { store, site, emailed, texted, signUp, advance: (ms: number) => (t += ms) }
+  return { store, site, emailed, signUp, advance: (ms: number) => (t += ms) }
 }
 
 describe('website sign-in on DeepSpace', () => {
@@ -44,13 +45,90 @@ describe('website sign-in on DeepSpace', () => {
     expect((await site.session(token))?.email).toBe('keith@example.com')
     expect(await site.stats()).toEqual({ spotsTaken: 1, spotsTotal: 100 })
 
-    // The iMessage code goes out through the outbox the Photon agent drains.
-    const outbox = store.rows('notification_outbox')
-    expect(outbox[0]?.data).toMatchObject({ channel: 'imessage', externalId: '+19177824515', status: 'pending' })
+    // Nothing is sent to the phone: the person texts the bot instead.
+    expect(store.rows('notification_outbox')).toHaveLength(0)
 
     // Only hashes are stored.
     const stored = JSON.stringify(['site_codes', 'site_sessions', 'site_challenges'].map((c) => store.rows(c)))
     expect(stored).not.toContain(token)
+  })
+
+  it('shows a code and @agent\'s number, then waits for the person to text it', async () => {
+    const { site, emailed } = setup()
+    await site.startEmail('p@example.com')
+    const { challenge } = await site.verifyEmail('p@example.com', emailed['p@example.com'])
+    const started = await site.startPhone(challenge, '9175550120')
+    expect(started).toMatchObject({ ok: true, agentNumber: '+15555550100' })
+    expect(started.code).toMatch(/^\d{6}$/)
+    expect(await site.verifyPhone(challenge, '9175550120')).toEqual({ pending: true })
+
+    // Wrong code, another number, and an email sender don't verify it.
+    expect(await site.confirmPhoneText('+19175550120', 'CODE 000000')).toMatch(/doesn't match/)
+    expect(await site.confirmPhoneText('+19175550199', `CODE ${started.code}`)).toMatch(/don't see a sign-in/)
+    expect(await site.confirmPhoneText('p@icloud.com', `CODE ${started.code}`)).toMatch(/from the phone number/)
+    expect(await site.verifyPhone(challenge, '9175550120')).toEqual({ pending: true })
+
+    // Ordinary chat isn't treated as a code.
+    expect(await site.confirmPhoneText('+19175550120', 'where should we eat')).toBeNull()
+
+    expect(await site.confirmPhoneText('+19175550120', `code: ${started.code}`)).toMatch(/^You're verified!/)
+    const done = await site.verifyPhone(challenge, '9175550120')
+    expect('token' in done).toBe(true)
+    // One sign-in per text.
+    await expect(site.verifyPhone(challenge, '9175550120')).rejects.toMatchObject({ code: 'challenge_expired' })
+  })
+
+  it("shows each person their own @agent number, and fails clearly without one", async () => {
+    const store = createFakeStore()
+    const emailed: Record<string, string> = {}
+    const numbers: Record<string, string> = { '+19175550130': '+14155550030', '+19175550131': '+14155550031' }
+    const make = (agentNumberFor?: (p: string) => Promise<string | null>) =>
+      createSite({ store, secret: 's', maxUsers: 100, agentNumberFor, sendEmailCode: async (e, c) => { emailed[e] = c } })
+    const site = make(async (phone) => numbers[phone] ?? null)
+    for (const [phone, agent] of Object.entries(numbers)) {
+      const email = `${phone.slice(-4)}@example.com`
+      await site.startEmail(email)
+      const { challenge } = await site.verifyEmail(email, emailed[email])
+      expect((await site.startPhone(challenge, phone)).agentNumber).toBe(agent)
+    }
+    const broken = make(async () => {
+      throw new Error('photon down')
+    })
+    await broken.startEmail('x@example.com')
+    const { challenge } = await broken.verifyEmail('x@example.com', emailed['x@example.com'])
+    await expect(broken.startPhone(challenge, '9175550132')).rejects.toMatchObject({ code: 'number_unavailable' })
+  })
+
+  it('reads code texts loosely but not ordinary numbers', () => {
+    expect(parsePhoneCodeText('CODE 482913')).toBe('482913')
+    expect(parsePhoneCodeText(' code:482-913 ')).toBe('482913')
+    expect(parsePhoneCodeText('482913')).toBe('482913')
+    expect(parsePhoneCodeText('meet at 482913 broadway')).toBeNull()
+    expect(parsePhoneCodeText('CODE 4829')).toBeNull()
+  })
+
+  it('verifies through the agent inbound route and replies in the thread', async () => {
+    const { store, site, emailed } = setup()
+    await site.startEmail('q@example.com')
+    const { challenge } = await site.verifyEmail('q@example.com', emailed['q@example.com'])
+    const { code } = await site.startPhone(challenge, '9175550121')
+    const result = await handleInbound(
+      store,
+      { deliveryId: 'd1', channel: 'imessage', externalId: '+19175550121', text: `CODE ${code}`, receivedAt: new Date().toISOString() },
+      new Date(),
+      (id, text) => site.confirmPhoneText(id, text),
+    )
+    expect(result.reply).toMatch(/^You're verified!/)
+    expect('token' in (await site.verifyPhone(challenge, '9175550121'))).toBe(true)
+  })
+
+  it('locks a phone code after too many wrong texts', async () => {
+    const { site, emailed } = setup()
+    await site.startEmail('r@example.com')
+    const { challenge } = await site.verifyEmail('r@example.com', emailed['r@example.com'])
+    const { code } = await site.startPhone(challenge, '9175550122')
+    for (let i = 0; i < MAX_ATTEMPTS; i++) await site.confirmPhoneText('+19175550122', 'CODE 000000')
+    expect(await site.confirmPhoneText('+19175550122', `CODE ${code}`)).toMatch(/Too many tries/)
   })
 
   it('rejects wrong codes, then locks after too many tries', async () => {

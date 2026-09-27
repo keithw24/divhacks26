@@ -51,7 +51,10 @@ export const siteUsersSchema: CollectionSchema = {
   permissions: SERVER_ONLY,
 }
 
-/** A pending 6-digit code, keyed "email:<address>" or "phone:<+1...>". Only its HMAC is stored. */
+/**
+ * A pending 6-digit code, keyed "email:<address>" or "phone:<+1...>". Only its HMAC is stored.
+ * Email codes are emailed to the person; phone codes are shown on the site and texted by the person to @agent.
+ */
 export const siteCodesSchema: CollectionSchema = {
   name: 'site_codes',
   columns: [
@@ -60,6 +63,8 @@ export const siteCodesSchema: CollectionSchema = {
     num('expiresAt'),
     num('attempts', { default: 0 }),
     json('sends', { default: [] }),
+    /** When the person texted this phone code to @agent (0 = not yet). */
+    num('verifiedAt', { default: 0 }),
   ],
   uniqueOn: ['key'],
   permissions: SERVER_ONLY,
