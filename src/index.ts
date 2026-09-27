@@ -42,6 +42,8 @@ import { createMailer } from "./web/email.js";
 import { readSocialContext } from "./agent/social.js";
 import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
 import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./deepspace/client.js";
+import { createDirectoryCache, mergePeopleDirectory } from "./deepspace/directory.js";
+import { notifyPaymentReceived } from "./payments/notify.js";
 import { getPool } from "./safety.js";
 import { shouldSpeak } from "./voice/decide.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled } from "./voice/index.js";
@@ -75,6 +77,12 @@ const onboarding = new AccountOnboardingService(onboardingStore, xrpl?.guard.reg
 const walletChat = new WalletChatService({ onboarding });
 const customerSenders = parseCustomerSenders(config.xrplCustomerSendersJson);
 const liveSenders = () => ({ ...customerSenders, ...onboardingStore.senderMap() });
+const paymentNotice: {
+  sendToExternalId: (externalId: string, body: string) => Promise<void>;
+  notifyDeepSpace?: (input: { xrplAddress?: string; userId?: string; body: string }) => Promise<{ queued: boolean; userId?: string | null }>;
+} = {
+  sendToExternalId: async () => undefined,
+};
 const ledger = createLedgerService({
   query: config.databaseUrl
     ? (sql, params) => getPool(config.databaseUrl).query(sql, params)
@@ -103,7 +111,17 @@ const payments = createPaymentRuntime({
   nessieBaseUrl: config.nessieBaseUrl,
   nessieCustomerId: config.nessieCustomerId,
   nessieAccountId: config.nessieAccountId,
-  onPersonSettled: (event) => ledger.recordSettledPayment(event), audit: xrpl?.guard.audit,
+  onPersonSettled: async (event) => {
+    await ledger.recordSettledPayment(event);
+    await notifyPaymentReceived(event, {
+      onboarding: onboardingStore,
+      sendToExternalId: (externalId, body) => paymentNotice.sendToExternalId(externalId, body),
+      notifyDeepSpace: paymentNotice.notifyDeepSpace,
+    }).catch((error) => {
+      console.error(`payment notify failed: ${error instanceof Error ? error.name : "Error"}`);
+    });
+  },
+  audit: xrpl?.guard.audit,
 });
 const meetup = createMeetupRuntime({
   googleMapsApiKey: config.googleMapsApiKey,
@@ -442,6 +460,7 @@ const deepspace =
     : undefined;
 console.info(deepspace ? `DeepSpace backend: ${config.deepspaceApiUrl}` : "DeepSpace backend: off (set DEEPSPACE_API_URL and DEEPSPACE_CHANNEL_SECRET).");
 if (deepspace) {
+  paymentNotice.notifyDeepSpace = (input) => deepspace.notifyPayment(input);
   startOutboxPoller({
     client: deepspace,
     channel: "imessage",
@@ -453,6 +472,13 @@ if (deepspace) {
     },
   });
 }
+const loadDeepSpaceDirectory = createDirectoryCache(async () => (deepspace ? deepspace.directory() : []));
+paymentNotice.sendToExternalId = async (externalId, body) => {
+  if (config.chatProvider !== "imessage") return;
+  const chat = await imessage(app as never).space.create(externalId);
+  await chat.send(body);
+  recordMessage(chat.id, config.agentName, body);
+};
 
 /** Tell the backend who is talking. Fails open: the agent still answers if DeepSpace is down. */
 async function checkInWithBackend(space: Space, message: Message, who: string, text: string): Promise<InboundResult | null> {
@@ -494,6 +520,10 @@ async function processMessages(items: { space: Space; message: Message }[]) {
   const text = texts.join("\n");
 
   const backend = await checkInWithBackend(space, message, who, text);
+  if (backend?.userId && who !== "someone") {
+    const existing = onboardingStore.findByPhoton(who);
+    if (existing) onboardingStore.upsert({ ...existing, userId: backend.userId });
+  }
   if (backend?.duplicate) return;
   if (backend?.reply) {
     // The backend handled it (e.g. "LINK 123456"); don't also run the agent on it.
@@ -563,6 +593,8 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       orchestration,
       liveLocations: (spaceId) => locationsForSpace(spaceId),
       transport,
+      peopleDirectory: async () =>
+        mergePeopleDirectory(onboardingStore.peopleDirectory(), await loadDeepSpaceDirectory()),
       suggest: (input) =>
         suggestNext({
           ...input,

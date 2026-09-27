@@ -16,7 +16,7 @@ import type { Hono } from 'hono'
 import { computeHmacHex, timingSafeEqualHex } from 'deepspace/worker'
 import type { AppContext, Env } from '../../worker.js'
 import { isAdapterChannel, type OutboxAck } from '../domain/contracts'
-import { ackOutbox, claimOutbox, handleInbound, parseInbound } from '../domain/channels'
+import { ackOutbox, claimOutbox, handleInbound, listWalletDirectory, notifyPaymentReceived, parseInbound } from '../domain/channels'
 import { ServiceError } from '../domain/store'
 import { createActionTools } from './action-routes.js'
 
@@ -114,6 +114,36 @@ export function registerChannelRoutes(app: Hono<AppContext>): void {
         error: typeof body.error === 'string' ? body.error : undefined,
       })
       return c.json({ updated })
+    } catch (error) {
+      const bad = badRequest(error)
+      if (bad) return c.json(bad.body, bad.status)
+      throw error
+    }
+  })
+
+  app.get('/api/channels/directory', async (c) => {
+    const auth = await authorize(c)
+    if (!auth.ok) return c.json({ error: 'Unauthorized' }, 401)
+    const people = await listWalletDirectory(createActionTools(c.env, CHANNEL_ADAPTER_USER, ''))
+    return c.json({ people })
+  })
+
+  app.post('/api/channels/payments/notify', async (c) => {
+    const auth = await authorize(c)
+    if (!auth.ok) return c.json({ error: 'Unauthorized' }, 401)
+    try {
+      const body = JSON.parse(auth.body) as { body?: unknown; xrplAddress?: unknown; userId?: unknown }
+      const text = typeof body.body === 'string' ? body.body : ''
+      const xrplAddress = typeof body.xrplAddress === 'string' ? body.xrplAddress : undefined
+      const userId = typeof body.userId === 'string' ? body.userId : undefined
+      if (!text.trim()) return c.json({ error: 'body is required' }, 400)
+      if (!xrplAddress && !userId) return c.json({ error: 'xrplAddress or userId is required' }, 400)
+      const result = await notifyPaymentReceived(createActionTools(c.env, CHANNEL_ADAPTER_USER, ''), {
+        body: text,
+        xrplAddress,
+        userId,
+      })
+      return c.json(result)
     } catch (error) {
       const bad = badRequest(error)
       if (bad) return c.json(bad.body, bad.status)

@@ -52,6 +52,21 @@ describe("DeepSpace channel client", () => {
     );
   });
 
+  it("loads the wallet directory for Gemini without phone numbers", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(JSON.stringify({ people: [{ userId: "keith", xrplAddress: "rBQUYX8GqNYUdRJeSkuessmd6x4eiUW2JD" }] })),
+    );
+    const client = createDeepSpaceClient({ baseUrl: "https://plans.example", secret: "s", fetcher: fetcher as typeof fetch, now: () => 0 });
+    await expect(client.directory()).resolves.toEqual([
+      { userId: "keith", xrplAddress: "rBQUYX8GqNYUdRJeSkuessmd6x4eiUW2JD" },
+    ]);
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(url).toBe("https://plans.example/api/channels/directory");
+    expect((init!.headers as Record<string, string>)["X-Plans-Signature"]).toBe(
+      sign("s", "0", "GET", "/api/channels/directory", ""),
+    );
+  });
+
   it("surfaces backend errors with the status", async () => {
     const fetcher = vi.fn(async () => new Response("nope", { status: 401 }));
     const client = createDeepSpaceClient({ baseUrl: "https://x.example", secret: "s", fetcher: fetcher as typeof fetch });
@@ -68,6 +83,8 @@ describe("outbox poller", () => {
       inbound: vi.fn(),
       claimOutbox: vi.fn(async () => [item("a"), item("b")]),
       ack,
+      directory: vi.fn(async () => []),
+      notifyPayment: vi.fn(),
     };
     const poller = startOutboxPoller({
       client,
@@ -88,6 +105,8 @@ describe("outbox poller", () => {
       inbound: vi.fn(),
       claimOutbox: vi.fn(async () => Promise.reject(new Error("ECONNREFUSED"))),
       ack: vi.fn(),
+      directory: vi.fn(async () => []),
+      notifyPayment: vi.fn(),
     };
     const poller = startOutboxPoller({ client, channel: "imessage", intervalMs: 60_000, send: vi.fn() });
     expect(await poller.pollOnce()).toBe(0);

@@ -64,6 +64,9 @@ export interface PaymentServiceOptions {
     amountUsd: number;
     paymentId: string;
     explorerUrl?: string;
+    destination?: string;
+    recipientCustomerId?: string;
+    initiatorId?: string;
   }) => Promise<void> | void;
   audit?: PaymentAuditLog;
   intentTtlMs?: number;
@@ -998,6 +1001,9 @@ export class PaymentService implements DepositPaymentPort {
         amountUsd: record.amountUsd,
         paymentId: record.id,
         explorerUrl: record.explorerUrl,
+        destination: record.destination,
+        recipientCustomerId: record.recipientCustomerId,
+        initiatorId: record.initiatorId,
       }),
     ).catch(() => undefined);
   }

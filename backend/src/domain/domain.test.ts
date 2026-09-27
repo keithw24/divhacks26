@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { betaCap, createBetaInvite, isBetaMember, redeemBetaInvite } from './beta'
-import { ackOutbox, claimOutbox, handleInbound } from './channels'
+import { ackOutbox, claimOutbox, handleInbound, listWalletDirectory, notifyPaymentReceived } from './channels'
 import { normalizeCode, parseLinkCommand } from './codes'
 import { normalizeExternalId, resolveChannelUser, startChannelLink } from './identity'
 import { createPlan, createPlanInvite, getPlan, joinPlan, leavePlan, listMyPlans, setPreferences } from './plans'
@@ -236,5 +236,32 @@ describe('DeepSpace wallets', () => {
         },
       }),
     ).rejects.toMatchObject({ code: 'link_imessage_first' })
+  })
+})
+
+describe('payment notices', () => {
+  it('queues an iMessage for the userId that owns the destination wallet', async () => {
+    const store = await admitted(undefined, 'keith')
+    await linked(store, 'keith', '+19175551313')
+    await requestWallet(store, 'keith', {
+      wantWallet: true,
+      enroll: async () => ({
+        userId: 'keith',
+        customerId: 'user_keith',
+        xrplAddress: 'rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH',
+        photonSenderId: '+19175551313',
+      }),
+    })
+    const directory = await listWalletDirectory(store)
+    expect(directory).toEqual([{ userId: 'keith', xrplAddress: 'rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH' }])
+    const result = await notifyPaymentReceived(store, {
+      xrplAddress: 'rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH',
+      body: 'Alan sent you $1 in test XRP.',
+    })
+    expect(result).toEqual({ queued: true, userId: 'keith' })
+    const items = await claimOutbox(store, 'imessage')
+    expect(items).toHaveLength(1)
+    expect(items[0]?.externalId).toBe('+19175551313')
+    expect(items[0]?.body).toContain('Alan sent you $1')
   })
 })

@@ -149,6 +149,7 @@ export interface InboundDeps {
       participants: Participant[];
     }): Promise<ReservationHandlerResult>;
   };
+  peopleDirectory?: () => Promise<SuggestInput["peopleDirectory"]>;
 }
 
 export async function handleInboundMessage(
@@ -226,9 +227,10 @@ export async function handleInboundMessage(
     isVoice: message.isVoice,
     audioEvents: message.audioEvents,
   };
-  const [loaded, social] = await Promise.all([
+  const [loaded, social, peopleDirectory] = await Promise.all([
     loadMemory(message, senderId, question, group.recentMessages.map((line) => line.text), group.participants, deps),
     (deps.readSocial ?? (async (input: SocialInput) => localSocialRead(input)))(socialInput).catch(() => localSocialRead(socialInput)),
+    deps.peopleDirectory?.().catch(() => undefined),
   ]);
   logSocialRead(social);
   void rememberFeeling(message, senderId, social, deps);
@@ -305,6 +307,7 @@ export async function handleInboundMessage(
           })),
           personalized: true,
           social,
+          peopleDirectory,
         });
         return withCheckIn(sanitizeGroupReply(answer, attributed, recentText));
       },

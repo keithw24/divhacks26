@@ -12,6 +12,7 @@ import { orchestrate } from "./orchestrate.js";
 import { systemPrompt } from "./prompt.js";
 import { isNotable, rankingHint, socialContextLines, withOpener, type SocialRead } from "./social.js";
 import { continuesCapabilityThread } from "./thread.js";
+import { formatPeopleDirectory } from "../deepspace/directory.js";
 
 function gemini() {
   if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is not set (see .env.example)");
@@ -36,6 +37,8 @@ export interface SuggestInput {
   groupLines?: { senderId: string; senderName?: string; text: string }[];
   /** How the sender and group are feeling and texting right now. */
   social?: SocialRead;
+  /** DeepSpace / onboarded people: userId and Testnet wallet only. */
+  peopleDirectory?: Array<{ displayName?: string; userId?: string; xrplAddress?: string }>;
   /** Receives the Tiger report when the user asked about safety. */
   onSafetyReport?: (report: BlockSafetyReport) => void;
 }
@@ -96,6 +99,11 @@ export function buildContext(input: SuggestInput): string {
     if (input.decisionLines?.length) {
       lines.push("", "DECISION CONSTRAINTS");
       for (const line of input.decisionLines) lines.push(`- ${line}`);
+    }
+    if (input.peopleDirectory?.length) {
+      lines.push("", "DEEPSPACE PEOPLE (userId and XRPL Testnet wallet; not phone numbers)");
+      lines.push("Use these when talking about who can send or receive Testnet payments. Do not invent ids or addresses.");
+      for (const line of formatPeopleDirectory(input.peopleDirectory)) lines.push(`- ${line}`);
     }
     const recentForThread = (input.groupLines ?? input.transcript).map((line) =>
       "text" in line ? line.text : String(line),

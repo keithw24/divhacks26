@@ -78,6 +78,23 @@ export interface OutboxAck {
   error?: string
 }
 
+/** Public XRPL Testnet wallet linked to a DeepSpace user. No channel addresses. */
+export interface DirectoryPerson {
+  userId: string
+  xrplAddress: string
+}
+
+export interface PaymentNotifyRequest {
+  body: string
+  xrplAddress?: string
+  userId?: string
+}
+
+export interface PaymentNotifyResult {
+  queued: boolean
+  userId: string | null
+}
+
 // ---------------------------------------------------------------------------
 // Plan model
 // ---------------------------------------------------------------------------

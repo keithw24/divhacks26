@@ -58,6 +58,18 @@ export interface DeepSpaceClient {
   inbound(message: InboundMessage): Promise<InboundResult>;
   claimOutbox(channel: AdapterChannel, limit?: number): Promise<OutboxItem[]>;
   ack(channel: AdapterChannel, ids: string[], status: "sent" | "failed", error?: string): Promise<void>;
+  directory(): Promise<DirectoryPerson[]>;
+  notifyPayment(input: { body: string; xrplAddress?: string; userId?: string }): Promise<PaymentNotifyResult>;
+}
+
+export interface DirectoryPerson {
+  userId: string;
+  xrplAddress: string;
+}
+
+export interface PaymentNotifyResult {
+  queued: boolean;
+  userId: string | null;
 }
 
 export function createDeepSpaceClient(options: {
@@ -98,6 +110,15 @@ export function createDeepSpaceClient(options: {
     ack: async (channel, ids, status, error) => {
       await call("POST", "/api/channels/outbox/ack", { channel, ids, status, ...(error ? { error } : {}) });
     },
+    directory: async () => {
+      const payload = await call<{ people?: DirectoryPerson[] }>("GET", "/api/channels/directory");
+      return Array.isArray(payload.people)
+        ? payload.people.filter(
+            (row) => typeof row?.userId === "string" && typeof row?.xrplAddress === "string" && row.userId && row.xrplAddress,
+          )
+        : [];
+    },
+    notifyPayment: (input) => call<PaymentNotifyResult>("POST", "/api/channels/payments/notify", input),
   };
 }
 

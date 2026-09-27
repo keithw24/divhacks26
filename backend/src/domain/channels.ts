@@ -13,9 +13,10 @@
 import { parseLinkCommand } from './codes'
 import { isAdapterChannel, type AdapterChannel, type InboundMessage, type InboundResult, type OutboxAck, type OutboxItem } from './contracts'
 import { isBetaMember } from './beta'
-import { completeChannelLink, resolveChannelUser } from './identity'
+import { completeChannelLink, listIdentities, resolveChannelUser } from './identity'
 import { listMyPlans } from './plans'
-import { findAll, getById, patch, ServiceError, tryInsert, type Store } from './store'
+import { findAll, getById, insert, patch, ServiceError, tryInsert, type Store } from './store'
+import { findWalletByAddress, listWallets } from './wallets'
 
 const OUTBOX_LEASE_SECONDS = 60
 const MAX_ATTEMPTS = 5
@@ -144,4 +145,44 @@ export async function ackOutbox(store: Store, channel: AdapterChannel, ack: Outb
     updated++
   }
   return updated
+}
+
+/** Public wallet facts for the iMessage agent / Gemini. No phone numbers. */
+export async function listWalletDirectory(store: Store): Promise<Array<{ userId: string; xrplAddress: string }>> {
+  return (await listWallets(store)).map((row) => ({ userId: row.userId, xrplAddress: row.xrplAddress }))
+}
+
+export async function queueUserNotice(store: Store, userId: string, body: string): Promise<boolean> {
+  const text = body.trim().slice(0, MAX_TEXT)
+  if (!text) return false
+  const identities = await listIdentities(store, userId)
+  const target = identities.find((row) => row.channel === 'imessage') ?? identities.find((row) => isAdapterChannel(row.channel))
+  if (!target) return false
+  await insert(store, 'notification_outbox', {
+    userId,
+    channel: target.channel,
+    externalId: target.externalId,
+    body: text,
+    status: 'pending',
+    attempts: 0,
+  })
+  return true
+}
+
+/**
+ * Find the DeepSpace user for a Testnet address (or an explicit userId) and
+ * queue an iMessage that a payment arrived.
+ */
+export async function notifyPaymentReceived(
+  store: Store,
+  input: { xrplAddress?: string; userId?: string; body: string },
+): Promise<{ queued: boolean; userId: string | null }> {
+  let userId = input.userId?.trim() || null
+  if (!userId && input.xrplAddress?.trim()) {
+    const wallet = await findWalletByAddress(store, input.xrplAddress)
+    userId = wallet?.userId ?? null
+  }
+  if (!userId) return { queued: false, userId: null }
+  const queued = await queueUserNotice(store, userId, input.body)
+  return { queued, userId }
 }

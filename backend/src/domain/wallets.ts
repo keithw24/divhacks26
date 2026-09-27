@@ -7,7 +7,7 @@
  */
 
 import { listIdentities } from './identity'
-import { findOne, insert, patch, ServiceError, type Store } from './store'
+import { findAll, findOne, insert, patch, ServiceError, type Store } from './store'
 
 export interface WalletRecord {
   userId: string
@@ -29,6 +29,17 @@ export type EnrollAgentWallet = (input: {
   displayName?: string
   wantWallet: true
 }) => Promise<AgentWalletEnrollment>
+
+export async function findWalletByAddress(store: Store, xrplAddress: string): Promise<WalletRecord | null> {
+  const address = xrplAddress.trim()
+  if (!address) return null
+  const row = await findOne<WalletRecord>(store, 'wallets', { xrplAddress: address })
+  return row?.data ?? null
+}
+
+export async function listWallets(store: Store): Promise<WalletRecord[]> {
+  return (await findAll<WalletRecord>(store, 'wallets', {}, 200)).map((row) => row.data)
+}
 
 export async function getWallet(store: Store, userId: string): Promise<WalletRecord | null> {
   const row = await findOne<WalletRecord>(store, 'wallets', { userId })

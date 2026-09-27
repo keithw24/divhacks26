@@ -93,6 +93,29 @@ export class AccountOnboardingStore {
     return row ? { customerId: row.customerId, customerName: row.customerName } : undefined;
   }
 
+  findByAddress(xrplAddress: string): OnboardedAccount | undefined {
+    const address = xrplAddress.trim();
+    if (!isValidClassicAddress(address)) return undefined;
+    return this.accounts.find((row) => row.xrplAddress === address);
+  }
+
+  findByCustomerId(customerId: string): OnboardedAccount | undefined {
+    const id = customerId.trim().toLowerCase();
+    if (!id) return undefined;
+    return this.accounts.find((row) => row.customerId.toLowerCase() === id);
+  }
+
+  /** Public facts Gemini may use. Never includes a phone number. */
+  peopleDirectory(): Array<{ displayName: string; userId?: string; xrplAddress?: string }> {
+    return this.accounts
+      .filter((row) => row.xrplAddress || row.userId)
+      .map((row) => ({
+        displayName: row.customerName,
+        ...(row.userId && { userId: row.userId }),
+        ...(row.xrplAddress && { xrplAddress: row.xrplAddress }),
+      }));
+  }
+
   displayNames(): string[] {
     return this.accounts.map((row) => row.customerName);
   }

@@ -123,6 +123,15 @@ export function unlinkedSenderText(): string {
   return "Your number isn't linked to an XRPL Testnet customer wallet yet, so I can't send from it.";
 }
 
+export function receivedPaymentText(input: {
+  fromName: string;
+  amountUsd: number;
+  explorerUrl?: string;
+}): string {
+  const base = `${input.fromName} sent you ${formatUsd(input.amountUsd)} in test XRP.`;
+  return input.explorerUrl ? `${base} XRPL Testnet: ${input.explorerUrl}` : `${base} Testnet only, not real money.`;
+}
+
 export function xrplSuccessText(input: {
   recipientName: string;
   amountUsd: number;
