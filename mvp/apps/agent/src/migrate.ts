@@ -11,7 +11,9 @@ if (!databaseUrl) throw new Error("DATABASE_URL is not set");
 const dir = join(import.meta.dirname, "../../../sql");
 const pool = createPool(databaseUrl);
 try {
-  for (const file of readdirSync(dir).filter((name) => name.endsWith(".sql")).sort()) {
+  for (const file of readdirSync(dir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()) {
     console.log(`Applying sql/${file}`);
     await pool.query(readFileSync(join(dir, file), "utf8"));
   }
