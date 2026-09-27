@@ -150,6 +150,7 @@ export interface InboundDeps {
     }): Promise<ReservationHandlerResult>;
   };
   peopleDirectory?: () => Promise<SuggestInput["peopleDirectory"]>;
+  userProfile?: (senderId: string) => Promise<SuggestInput["userProfile"] | undefined>;
 }
 
 export async function handleInboundMessage(
@@ -227,10 +228,11 @@ export async function handleInboundMessage(
     isVoice: message.isVoice,
     audioEvents: message.audioEvents,
   };
-  const [loaded, social, peopleDirectory] = await Promise.all([
+  const [loaded, social, peopleDirectory, userProfile] = await Promise.all([
     loadMemory(message, senderId, question, group.recentMessages.map((line) => line.text), group.participants, deps),
     (deps.readSocial ?? (async (input: SocialInput) => localSocialRead(input)))(socialInput).catch(() => localSocialRead(socialInput)),
     deps.peopleDirectory?.().catch(() => undefined),
+    deps.userProfile?.(senderId).catch(() => undefined),
   ]);
   logSocialRead(social);
   void rememberFeeling(message, senderId, social, deps);
@@ -308,6 +310,7 @@ export async function handleInboundMessage(
           personalized: true,
           social,
           peopleDirectory,
+          userProfile,
         });
         return withCheckIn(sanitizeGroupReply(answer, attributed, recentText));
       },
