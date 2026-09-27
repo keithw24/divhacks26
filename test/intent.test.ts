@@ -23,3 +23,13 @@ describe("intent routing", () => {
     expect(heuristicIntent("?", undefined).needsClarification).toBe(true);
   });
 });
+
+describe("conversational messages", () => {
+  it("marks small talk as conversational and place requests as not", () => {
+    expect(heuristicIntent("ugh what a day").conversational).toBe(true);
+    expect(heuristicIntent("thanks so much!").conversational).toBe(true);
+    expect(heuristicIntent("what now?").conversational).toBeUndefined();
+    expect(heuristicIntent("where can we eat dinner").conversational).toBeUndefined();
+    expect(heuristicIntent("anything open near me").conversational).toBeUndefined();
+  });
+});

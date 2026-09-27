@@ -35,6 +35,11 @@ export interface UserIntent {
   travelMode: TravelMode;
   maxTravelMinutes?: number;
   needsClarification: boolean;
+  /**
+   * Small talk, feelings, follow-ups about the conversation: nothing to look up.
+   * Answered by the conversational model with chat context, not the place skills.
+   */
+  conversational?: boolean;
   clarificationQuestion?: string;
 }
 

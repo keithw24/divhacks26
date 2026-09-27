@@ -123,6 +123,25 @@ describe("skill dispatcher", () => {
     expect(fallback).not.toHaveBeenCalled();
   });
 
+  it("answers small talk with the conversational model instead of asking for a location", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, origin: undefined, needs: ["food"], conversational: true });
+    const fallback = vi.fn(async () => "haha same, long week?");
+    await expect(orchestrate({ question: "ugh what a day", transcript: [], fallback })).resolves.toBe("haha same, long week?");
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(findFood).not.toHaveBeenCalled();
+  });
+
+  it("gives intent parsing the recent chat so an earlier place counts", async () => {
+    vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, needs: ["safety"] });
+    const at = new Date();
+    await orchestrate({
+      question: "is it safe to walk?",
+      transcript: [{ at, who: "keith", text: "we're in soho" }],
+      location,
+    });
+    expect(vi.mocked(parseIntent).mock.calls[0]?.[2]).toEqual(["keith: we're in soho"]);
+  });
+
   it("asks for location without a generative fallback", async () => {
     vi.mocked(parseIntent).mockResolvedValue({ ...intentBase, origin: undefined, needs: ["food"] });
     const fallback = vi.fn(async () => "where are you?");
