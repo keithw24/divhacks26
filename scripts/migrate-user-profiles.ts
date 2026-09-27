@@ -1,16 +1,55 @@
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
 import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { TigerUserProfileStore } from "../src/profiles/tiger.js";
 
-const databaseUrl = process.env.DATABASE_URL?.trim();
-if (!databaseUrl) throw new Error("DATABASE_URL is required");
-try {
-  new URL(databaseUrl);
-} catch {
-  throw new Error("DATABASE_URL is not a valid PostgreSQL URL; replace the placeholder/redacted value in .env");
+loadEnv({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../.env") });
+
+function postgresConnectionString(raw: string | undefined): string {
+  let value = (raw ?? "").trim().replace(/^\uFEFF/, "");
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1).trim();
+  }
+  if (!value) {
+    throw new Error("DATABASE_URL is required. Set it in .env to your Tiger Cloud connection string.");
+  }
+  if (!/^postgres(ql)?:\/\//i.test(value)) {
+    throw new Error("DATABASE_URL must start with postgresql:// or postgres://");
+  }
+  if (/PASSWORD@HOST|:PORT\/|:password@.*host/i.test(value) || /<[^>]+>/.test(value)) {
+    throw new Error(
+      "DATABASE_URL still looks like the .env.example placeholder. Paste the string from `tiger db connection-string --with-password`.",
+    );
+  }
+  try {
+    // eslint-disable-next-line no-new
+    new URL(value);
+    return value;
+  } catch {
+    // Passwords often contain @ # or /. Encode userinfo so pg and URL parsers agree.
+    const schemeEnd = value.indexOf("://");
+    const at = value.lastIndexOf("@");
+    if (schemeEnd < 0 || at < schemeEnd) {
+      throw new Error(
+        "DATABASE_URL could not be parsed. Percent-encode reserved characters in the password (for example @ → %40).",
+      );
+    }
+    const userinfo = value.slice(schemeEnd + 3, at);
+    const colon = userinfo.indexOf(":");
+    if (colon < 0) return value;
+    const user = userinfo.slice(0, colon);
+    const password = userinfo.slice(colon + 1);
+    return `${value.slice(0, schemeEnd + 3)}${encodeURIComponent(user)}:${encodeURIComponent(password)}${value.slice(at)}`;
+  }
 }
+
+const databaseUrl = postgresConnectionString(process.env.DATABASE_URL);
 
 const sql = await readFile(new URL("../sql/007_user_profiles.sql", import.meta.url), "utf8");
 const client = new pg.Client({ connectionString: databaseUrl, ssl: { rejectUnauthorized: false } });
