@@ -90,6 +90,16 @@ async function sendWithOwnResend(
   console.info('[site] email sent')
 }
 
+/** This person's own @agent number from Photon's pool (registers them if needed). */
+async function photonNumberFor(env: Env, phone: string): Promise<string | null> {
+  try {
+    return await assignedAgentNumber({ projectId: env.PHOTON_ID!, secret: env.PHOTON_SECRET! }, phone)
+  } catch (error) {
+    console.error(`[site] photon number lookup failed: ${error instanceof Error ? error.message.slice(0, 200) : 'Error'}`)
+    throw error
+  }
+}
+
 export function siteFor(env: Env) {
   const secret = env.SITE_AUTH_SECRET || env.CHANNEL_ADAPTER_SECRET
   if (!secret) throw new ServiceError('site_unconfigured', 'Set SITE_AUTH_SECRET for the website.')
@@ -101,17 +111,7 @@ export function siteFor(env: Env) {
       secret,
       maxUsers: Number(env.BETA_MAX_USERS ?? 100) || 100,
       agentNumber: env.AGENT_NUMBER,
-      agentNumberFor:
-        env.PHOTON_ID && env.PHOTON_SECRET
-          ? async (phone) => {
-              try {
-                return await assignedAgentNumber({ projectId: env.PHOTON_ID!, secret: env.PHOTON_SECRET! }, phone)
-              } catch (error) {
-                console.error(`[site] photon number lookup failed: ${error instanceof Error ? error.message.slice(0, 200) : 'Error'}`)
-                throw error
-              }
-            }
-          : undefined,
+      agentNumberFor: env.PHOTON_ID && env.PHOTON_SECRET ? (phone) => photonNumberFor(env, phone) : undefined,
       sendEmailCode: (email, code) =>
         sendEmail(tools, env, {
           to: email,
@@ -231,8 +231,11 @@ export function registerSiteRoutes(app: Hono<AppContext>): void {
   app.post(
     `${PREFIX}/me/send-number`,
     signedIn(async (c, user, _token, { tools }) => {
-      const number = c.env.AGENT_NUMBER
-      if (!number) throw new ServiceError('email_failed', 'The agent number is not configured.')
+      // Each person has their own @agent number on Photon's shared pool; AGENT_NUMBER is only a fallback.
+      const assigned =
+        c.env.PHOTON_ID && c.env.PHOTON_SECRET ? await photonNumberFor(c.env, user.phone).catch(() => null) : null
+      const number = assigned ?? c.env.AGENT_NUMBER
+      if (!number) throw new ServiceError('email_failed', "Couldn't look up your @agent number. Try again.")
       const name = user.preferences?.name
       await sendEmail(tools, c.env, {
         to: user.email,
