@@ -247,8 +247,9 @@ describe("restaurant deposits through the Ripple payment layer", () => {
     expect(sent.idempotencyKey).toBe(active()?.deposit?.requirement?.obligationId);
     expect(bistro.confirmations).toEqual([expect.objectContaining({ transactionHash: TX })]);
     expect(paid.reply).toMatch(
-      /^Booked Ripple Bistro for 4 tonight at 8:00 PM\. The \$100 deposit was paid successfully on XRPL Testnet (?:https:\/\/testnet\.xrpl\.org\/transactions\/[0-9A-F]{64}|\(tx AAAAAAAA\))\. Confirmation RB-[0-9A-F]{6}\.$/,
+      /^Booked Ripple Bistro for 4 tonight at 8:00 PM\. The \$100 deposit was paid successfully on XRPL Testnet (?:https:\/\/testnet\.xrpl\.org\/transactions\/[0-9A-F]{64}|\(tx AAAAAAAA\))\. Confirmation RB-[0-9A-F]{6}\./,
     );
+    expect(paid.reply).toContain("calendar.google.com");
     const reservation = active();
     expect(reservation?.status).toBe("BOOKED");
     expect(reservation?.deposit?.transactionId).toBe(TX);
@@ -748,7 +749,8 @@ describe("deposits stated by a restaurant on an ElevenLabs call", () => {
     const paid = await say("Yes", { messageId: "pay-yes" });
     expect(sends(provider)).toBe(1);
     expect(caller.calls).toHaveLength(2);
-    expect(paid.reply).toBe("Booked Carbone for 4 tomorrow at 8:00 PM. The $100 deposit was a mock test payment, so no XRPL transaction was sent.");
+    expect(paid.reply).toMatch(/^Booked Carbone for 4 tomorrow at 8:00 PM\. The \$100 deposit was a mock test payment, so no XRPL transaction was sent\./);
+    expect(paid.reply).toContain("calendar.google.com");
     expect(active()?.status).toBe("BOOKED");
     expect(active()?.deposit?.state).toBe("RESERVATION_CONFIRMED");
   });

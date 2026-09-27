@@ -35,6 +35,8 @@ export interface UserProfile {
   photonIdentifier: string;
   displayName?: string;
   backboardAssistantId?: string;
+  /** Known to leave late for meetups; leave times include extra buffer. */
+  habituallyLate?: boolean;
   /** Raw texts already sent for memory. Search can lag or return a paraphrase. */
   recentMemoryTexts?: string[];
 }
@@ -104,7 +106,7 @@ export function emptyPaymentBook(): PaymentPersistence {
 }
 
 export function emptyMeetupBook(): MeetupPersistence {
-  return { records: {}, activeBySpace: {}, locationsBySpace: {} };
+  return { records: {}, activeBySpace: {}, locationsBySpace: {}, habits: {} };
 }
 
 export function emptyState(): AgentState {
@@ -254,7 +256,17 @@ function readMeetupBook(value: unknown): MeetupPersistence {
       locationsBySpace[spaceId] = next;
     }
   }
-  return { records, activeBySpace: stringMap(record.activeBySpace), locationsBySpace };
+  const habits: MeetupPersistence["habits"] = {};
+  if (record.habits && typeof record.habits === "object") {
+    for (const [key, habit] of Object.entries(record.habits)) {
+      if (!habit || typeof habit !== "object") continue;
+      habits[key] = {
+        habituallyLate: Boolean(habit.habituallyLate),
+        lateIncidents: Number.isFinite(habit.lateIncidents) ? Math.max(0, Math.floor(habit.lateIncidents)) : 0,
+      };
+    }
+  }
+  return { records, activeBySpace: stringMap(record.activeBySpace), locationsBySpace, habits };
 }
 
 function readPhoneCallBook(value: unknown): PhoneCallBook {

@@ -66,8 +66,9 @@ export function meetAtFromClock(
   return meet;
 }
 
-export function leaveByIso(meetAt: Date, durationSeconds: number): string {
-  return new Date(meetAt.getTime() - durationSeconds * 1000 - BUFFER_MS).toISOString();
+export function leaveByIso(meetAt: Date, durationSeconds: number, extraMinutes = 0): string {
+  const extraMs = Math.max(0, extraMinutes) * 60_000;
+  return new Date(meetAt.getTime() - durationSeconds * 1000 - BUFFER_MS - extraMs).toISOString();
 }
 
 export function etaIso(now: Date, durationSeconds: number, delayMinutes = 0): string {

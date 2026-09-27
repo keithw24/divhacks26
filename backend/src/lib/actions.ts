@@ -60,6 +60,12 @@ export const api = {
   startChannelLink: (channel: 'imessage' | 'sms' | 'voice') =>
     callAction<{ code: string; expiresAt: string }>('startChannelLink', { channel }),
   myChannels: () => callAction<Array<{ channel: string; externalId: string; verifiedAt: string }>>('myChannels'),
+  myWallet: () =>
+    callAction<{ status: 'none' } | { status: 'ready'; userId: string; customerId: string; xrplAddress: string; linkedAt: string }>(
+      'myWallet',
+    ),
+  createWallet: () =>
+    callAction<{ userId: string; customerId: string; xrplAddress: string; linkedAt: string }>('createWallet', { wantWallet: true }),
   myPlans: () => callAction<PlanSummary[]>('myPlans'),
   createPlan: (title: string, when?: string, area?: string) =>
     callAction<{ planId: string }>('createPlan', { title, when, area }),

@@ -115,10 +115,10 @@ describe("definition of done", () => {
     expect(caller.calls[0]?.systemPrompt).toMatch(/You are not Rohan/);
     expect(caller.calls[0]?.systemPrompt).toMatch(/7:30/);
     expect(caller.calls[0]?.systemPrompt).not.toMatch(/I am Rohan/);
-    expect(notes.map((note) => note.text)).toEqual([
-      "Booked — L'Artusi for 4 Friday at 7:45 PM under Rohan.",
-    ]);
+    expect(notes).toHaveLength(1);
     expect(notes[0]?.spaceId).toBe("space-lartusi");
+    expect(notes[0]?.text).toMatch(/^Booked — L'Artusi for 4 Friday at 7:45 PM under Rohan\./);
+    expect(notes[0]?.text).toContain("calendar.google.com");
   });
 });
 

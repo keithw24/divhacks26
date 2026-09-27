@@ -230,6 +230,7 @@ describe("Backboard identity and memory", () => {
   it("ingests a durable preference and skips lol", async () => {
     expect(classifyMemory("I hate walking through Midtown.")).toBe("DURABLE_PREFERENCE");
     expect(classifyMemory("I don't eat meat")).toBe("DURABLE_PREFERENCE");
+    expect(classifyMemory("I'm always late")).toBe("DURABLE_FACT");
     expect(classifyMemory("lol")).toBe("EPHEMERAL");
     expect(classifyMemory("see you in 5")).toBe("EPHEMERAL");
     expect(classifyMemory("what form of transportation do I prefer?")).toBe("UNCERTAIN");

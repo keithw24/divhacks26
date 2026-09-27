@@ -2,13 +2,8 @@ import { parseLatLng } from "../chat/location.js";
 import { displayName, hasCoordinates, lookupGazetteer } from "../transport/locations.js";
 import type { PlaceLocation, PlaceResolver, RoutingProvider } from "../transport/types.js";
 import { etaIso, leaveByIso, meetAtFromClock } from "./clock.js";
-import {
-  formatLateUpdate,
-  formatLeaveTimes,
-  formatNeedGroup,
-  formatNeedWhen,
-  formatNeedWhere,
-} from "./format.js";
+import { formatHabitAck, formatLateUpdate, formatLeaveTimes, formatNeedGroup, formatNeedWhen, formatNeedWhere } from "./format.js";
+import { lateHabitBufferMinutes, parseLateHabit } from "./habits.js";
 import { classifyMeetupMessage, extractHerePlace, meetupInterrupts } from "./intent.js";
 import { timeLeg } from "./legs.js";
 import { MeetupStore } from "./store.js";
@@ -50,6 +45,7 @@ export class MeetupService {
     live?: PersonLocation;
   }): void {
     if (input.live) this.store.rememberLocation(input.spaceId, input.live);
+    this.recordHabitFromText(input.senderId, input.senderName, input.text, []);
     const pin = parseLatLng(input.text);
     if (pin) {
       this.store.rememberLocation(input.spaceId, {
@@ -68,8 +64,14 @@ export class MeetupService {
     await this.captureNamedOrigin(input);
 
     const active = this.store.active(input.spaceId);
+    const habitMark = this.recordHabitFromText(input.senderId, input.senderName, input.text, input.participants ?? []);
     const classified = classifyMeetupMessage(input.text, Boolean(active));
-    if (classified.kind === "none") return { handled: false };
+    if (classified.kind === "none") {
+      if (habitMark) {
+        return { handled: true, reply: formatHabitAck(habitMark), acknowledgement: "👍" };
+      }
+      return { handled: false };
+    }
     if (!input.isGroup && classified.kind !== "late") {
       return { handled: true, reply: formatNeedGroup(), acknowledgement: "👀" };
     }
@@ -145,13 +147,17 @@ export class MeetupService {
       if (origin) {
         const leg = await timeLeg(this.routing, origin, destination);
         if (leg?.durationSeconds) {
+          const habituallyLate = this.store.isHabituallyLate(person.senderId, next.displayName);
+          const lateBufferMinutes = habituallyLate ? lateHabitBufferMinutes(leg.durationSeconds) : 0;
           next = {
             ...next,
             durationSeconds: leg.durationSeconds,
             mode: leg.mode as MeetupMember["mode"],
             summary: leg.summary,
-            leaveByIso: leaveByIso(meetAt, leg.durationSeconds),
+            leaveByIso: leaveByIso(meetAt, leg.durationSeconds, lateBufferMinutes),
             etaIso: meetAt.toISOString(),
+            habituallyLate,
+            lateBufferMinutes: lateBufferMinutes || undefined,
           };
         }
       }
@@ -181,6 +187,7 @@ export class MeetupService {
         reply: "Who’s running late? Name them and I’ll recompute that leg.",
       };
     }
+    this.store.noteLateIncident(target.senderId, target.displayName);
     const live = this.peopleForSpace(input).find((person) => person.senderId === target.senderId);
     const origin = live ? originFromLocation(live) : target.origin;
     const now = input.now ?? new Date();
@@ -234,6 +241,22 @@ export class MeetupService {
     const resolved = await this.resolver.resolve(query);
     if (resolved.status === "resolved" && resolved.places[0]) return resolved.places[0];
     return resolved.places[0];
+  }
+
+  private recordHabitFromText(
+    senderId: string,
+    senderName: string | undefined,
+    text: string,
+    participants: Array<{ id: string; displayName?: string }>,
+  ): { self: boolean; names: string[] } | undefined {
+    const mark = parseLateHabit(text);
+    if (!mark) return undefined;
+    if (mark.self) this.store.markHabituallyLate(senderId, senderName);
+    for (const name of mark.names) {
+      const match = participants.find((person) => person.displayName && person.displayName.toLowerCase() === name.toLowerCase());
+      this.store.markHabituallyLate(match?.id, name);
+    }
+    return mark;
   }
 }
 

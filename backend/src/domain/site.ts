@@ -367,6 +367,12 @@ export function createSite(deps: SiteDeps) {
       })
     },
 
+    async recordWallet(phone: string, xrplAddress: string): Promise<void> {
+      const row = await userRow(phone)
+      if (!row) throw new ServiceError('unauthorized', 'Sign in again.')
+      await patch(store, 'site_users', row.recordId, { xrplAddress })
+    },
+
     /** Removes the account and ends every session for it. */
     async deleteUser(phone: string): Promise<void> {
       const row = await userRow(phone)

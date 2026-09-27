@@ -11,11 +11,15 @@ export interface OnboardedAccount {
   customerName: string;
   xrplAddress?: string;
   createdAt: string;
+  /** DeepSpace user id when the wallet was requested from that account. */
+  userId?: string;
 }
 
 export interface EnrollAccountInput {
   photonSenderId: string;
   displayName?: string;
+  /** DeepSpace `userId` (JWT subject). Wallet customer ids are keyed by this when set. */
+  userId?: string;
   /** When true, faucet a Testnet wallet this process can sign. Never accepts a user-supplied seed. */
   provisionWallet?: boolean;
 }
@@ -26,6 +30,7 @@ export interface EnrollAccountResult {
   customerName: string;
   xrplAddress?: string;
   created: boolean;
+  userId?: string;
 }
 
 interface AccountsFile {
@@ -40,6 +45,11 @@ function normalizePhotonSender(id: string): string {
 export function customerIdForPhotonSender(photonSenderId: string): string {
   const digest = createHash("sha256").update(normalizePhotonSender(photonSenderId)).digest("hex").slice(0, 16);
   return `onboard_${digest}`;
+}
+
+export function customerIdForUser(userId: string): string {
+  const digest = createHash("sha256").update(`user:${userId.trim()}`).digest("hex").slice(0, 16);
+  return `user_${digest}`;
 }
 
 export function onboardBearerOk(expected: string | undefined, header: string | undefined): boolean {
@@ -64,6 +74,17 @@ export class AccountOnboardingStore {
   customerIdForPhoton(photonSenderId: string): string | undefined {
     const id = normalizePhotonSender(photonSenderId);
     return this.accounts.find((row) => row.photonSenderId === id)?.customerId;
+  }
+
+  findByPhoton(photonSenderId: string): OnboardedAccount | undefined {
+    const id = normalizePhotonSender(photonSenderId);
+    return this.accounts.find((row) => row.photonSenderId === id);
+  }
+
+  findByUserId(userId: string): OnboardedAccount | undefined {
+    const id = userId.trim();
+    if (!id) return undefined;
+    return this.accounts.find((row) => row.userId === id);
   }
 
   findByDisplayName(name: string): RegisteredCustomer | undefined {
@@ -91,7 +112,8 @@ export class AccountOnboardingStore {
   upsert(account: OnboardedAccount): void {
     const photonSenderId = normalizePhotonSender(account.photonSenderId);
     const next = { ...account, photonSenderId };
-    const index = this.accounts.findIndex((row) => row.photonSenderId === photonSenderId);
+    let index = next.userId ? this.accounts.findIndex((row) => row.userId === next.userId) : -1;
+    if (index === -1) index = this.accounts.findIndex((row) => row.photonSenderId === photonSenderId);
     if (index === -1) this.accounts.push(next);
     else this.accounts[index] = { ...this.accounts[index], ...next, createdAt: this.accounts[index]!.createdAt };
     registerOnboardedCustomer({ customerId: next.customerId, customerName: next.customerName });
@@ -137,12 +159,14 @@ export class AccountOnboardingService {
     if (!photonSenderId || photonSenderId.length < 8) {
       throw Object.assign(new Error("invalid_photon_sender"), { code: "invalid_photon_sender" });
     }
-    const existingId = this.store.customerIdForPhoton(photonSenderId);
-    const existing = existingId
-      ? this.store.list().find((row) => row.customerId === existingId)
-      : undefined;
-    const customerId = existingId ?? customerIdForPhotonSender(photonSenderId);
-    const created = !existingId;
+    const userId = input.userId?.trim() || undefined;
+    if (userId && (userId.length < 4 || userId.length > 80)) {
+      throw Object.assign(new Error("invalid_user_id"), { code: "invalid_user_id" });
+    }
+    const existing = (userId ? this.store.findByUserId(userId) : undefined) ?? this.store.findByPhoton(photonSenderId);
+    const customerId =
+      existing?.customerId ?? (userId ? customerIdForUser(userId) : customerIdForPhotonSender(photonSenderId));
+    const created = !existing;
     const customerName = (input.displayName?.trim() || existing?.customerName || `User ${customerId.slice(-6)}`).slice(0, 40);
     this.store.upsert({
       photonSenderId,
@@ -150,20 +174,23 @@ export class AccountOnboardingService {
       customerName,
       xrplAddress: existing?.xrplAddress,
       createdAt: existing?.createdAt ?? new Date().toISOString(),
+      userId: userId ?? existing?.userId,
     });
     let xrplAddress = this.store.list().find((row) => row.customerId === customerId)?.xrplAddress;
-    if (input.provisionWallet !== false && this.registry) {
+    if (input.provisionWallet === true && this.registry) {
       const wallet = await this.registry.ensureCustomerTestnetWallet(customerId);
       xrplAddress = wallet.xrplAddress;
       this.store.setAddress(customerId, wallet.xrplAddress);
     }
-    return { photonSenderId, customerId, customerName, xrplAddress, created };
+    return { photonSenderId, customerId, customerName, xrplAddress, created, userId: userId ?? existing?.userId };
   }
 
-  publicView(photonSenderId: string): Omit<OnboardedAccount, never> | undefined {
-    const id = this.store.customerIdForPhoton(photonSenderId);
-    if (!id) return undefined;
-    return this.store.list().find((row) => row.customerId === id);
+  publicView(photonSenderId: string): OnboardedAccount | undefined {
+    return this.store.findByPhoton(photonSenderId);
+  }
+
+  publicViewByUserId(userId: string): OnboardedAccount | undefined {
+    return this.store.findByUserId(userId);
   }
 }
 

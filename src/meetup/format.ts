@@ -1,3 +1,5 @@
+import { fromMeetup } from "../calendar/from.js";
+import { withCalendarLine } from "../calendar/links.js";
 import { displayName } from "../transport/locations.js";
 import { formatClock, formatDuration, GRACE_MS } from "./clock.js";
 import type { MeetupMember, MeetupPlan, PersonLocation } from "./types.js";
@@ -20,8 +22,12 @@ export function formatLeaveTimes(plan: MeetupPlan, timeZone: string, missing: Pe
   const timed = plan.members.filter((member) => member.leaveByIso && member.durationSeconds);
   for (const member of timed) {
     const from = member.origin?.name ? ` from ${member.origin.name}` : "";
+    const extra =
+      member.habituallyLate && member.lateBufferMinutes
+        ? `; ${member.lateBufferMinutes} min extra — often late`
+        : "";
     lines.push(
-      `${who(member)}: leave by ${formatClock(member.leaveByIso!, timeZone)} (${formatDuration(member.durationSeconds!)} ${modePhrase(member)}${from}).`,
+      `${who(member)}: leave by ${formatClock(member.leaveByIso!, timeZone)} (${formatDuration(member.durationSeconds!)} ${modePhrase(member)}${from}${extra}).`,
     );
   }
   for (const id of missing) {
@@ -31,7 +37,7 @@ export function formatLeaveTimes(plan: MeetupPlan, timeZone: string, missing: Pe
   if (!timed.length && !missing.length) {
     lines.push("I need everyone’s location pin or neighborhood to time the leaves.");
   }
-  return lines.join("\n");
+  return withCalendarLine(lines.join("\n"), fromMeetup(plan));
 }
 
 export function formatLateUpdate(input: {
@@ -74,4 +80,12 @@ export function formatNeedWhere(): string {
 
 export function formatNeedGroup(): string {
   return "Add me to the group and have everyone share a location pin (Photon location or a neighborhood) and I can time the leaves.";
+}
+
+export function formatHabitAck(mark: { self: boolean; names: string[] }): string {
+  if (mark.self && !mark.names.length) {
+    return "Got it — I'll tell you to leave extra time on meetups (at least 10 minutes, more if the trip is long).";
+  }
+  const who = mark.names.length ? mark.names.join(" and ") : "them";
+  return `Got it — I'll tell ${who} to leave extra time on meetups (at least 10 minutes, more if the trip is long).`;
 }

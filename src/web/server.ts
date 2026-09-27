@@ -1,3 +1,4 @@
+import { icsBody, parseCalendarQuery } from "../calendar/links.js";
 import type { EvidencePlan } from "../domain/evidence.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readPublicIntegrations } from "../integrations/report.js";
@@ -17,14 +18,18 @@ export interface WebApiDeps {
     photonSenderId: string;
     displayName?: string;
     provisionWallet?: boolean;
+    userId?: string;
   }): Promise<{ xrplAddress?: string }>;
   lookupPhotonUser?(photonSenderId: string): Promise<{ xrplAddress?: string } | undefined>;
   /** DeepSpace/signup server: Bearer DEEPSPACE_ONBOARDING_SECRET. */
   enrollFromDeepSpace?(
     header: string | undefined,
-    body: { photonSenderId?: string; displayName?: string; provisionWallet?: boolean },
+    body: { photonSenderId?: string; displayName?: string; provisionWallet?: boolean; wantWallet?: boolean; userId?: string },
   ): Promise<unknown>;
-  lookupFromDeepSpace?(header: string | undefined, photonSenderId: string): Promise<unknown>;
+  lookupFromDeepSpace?(
+    header: string | undefined,
+    query: { photonSenderId?: string; userId?: string },
+  ): Promise<unknown>;
   /** Email the agent's number (it is never shown on the website). */
   sendAgentNumber(email: string, name: string | undefined): Promise<void>;
   saveMemories(phone: string, name: string, sentences: string[]): Promise<void>;
@@ -122,8 +127,11 @@ export function createWebApiServer(deps: WebApiDeps): Server {
     }
     if (method === "GET" && path === "/api/deepspace/accounts") {
       if (!deps.lookupFromDeepSpace) throw new HttpError(503, "deepspace_onboarding_unconfigured");
-      const photonSenderId = new URL(req.url ?? "/", "http://localhost").searchParams.get("photonSenderId") ?? "";
-      const found = await deps.lookupFromDeepSpace(req.headers.authorization, photonSenderId);
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const found = await deps.lookupFromDeepSpace(req.headers.authorization, {
+        photonSenderId: url.searchParams.get("photonSenderId") ?? "",
+        userId: url.searchParams.get("userId") ?? "",
+      });
       if (!found || typeof found !== "object") throw new HttpError(500, "server_error");
       return orThrow(found);
     }
@@ -165,6 +173,7 @@ export function createWebApiServer(deps: WebApiDeps): Server {
           photonSenderId: user.phone,
           displayName: user.preferences?.name,
           provisionWallet: true,
+          userId: `web:${user.phone}`,
         });
         if (!enrolled.xrplAddress) throw new HttpError(503, "wallet_unavailable");
         deps.auth.recordWallet(user.phone, enrolled.xrplAddress);
@@ -223,7 +232,24 @@ export function createWebApiServer(deps: WebApiDeps): Server {
       res.writeHead(204).end();
       return;
     }
-    const path = new URL(req.url ?? "/", "http://localhost").pathname;
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const path = url.pathname;
+    if (req.method === "GET" && path === "/api/calendar.ics") {
+      const event = parseCalendarQuery(url.searchParams);
+      if (!event) {
+        res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }).end("missing calendar fields");
+        return;
+      }
+      const uid = `${event.title.slice(0, 40)}-${event.start.toISOString()}`;
+      res
+        .writeHead(200, {
+          "Content-Type": "text/calendar; charset=utf-8",
+          "Content-Disposition": 'attachment; filename="event.ics"',
+          "Cache-Control": "no-store",
+        })
+        .end(icsBody(event, uid));
+      return;
+    }
     if (req.method === "POST" && path === "/webhooks/elevenlabs" && deps.handleElevenLabsWebhook) {
       try {
         const rawBody = await readBody(req, MAX_WEBHOOK_BODY);
@@ -263,6 +289,7 @@ const STATUS: Record<string, number> = {
   unauthorized: 401,
   deepspace_onboarding_unconfigured: 503,
   invalid_photon_sender: 400,
+  invalid_user_id: 400,
   not_found: 404,
   want_wallet_required: 400,
   wallet_unavailable: 503,

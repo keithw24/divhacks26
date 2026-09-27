@@ -1,3 +1,5 @@
+import { fromTicketEvent } from "../calendar/from.js";
+import { withCalendarLine } from "../calendar/links.js";
 import { addIsoDays, zonedDateISO } from "./time.js";
 import { distinctPrices, isUsEvent, offerIsAllIn, unitPriceOf } from "./pricing.js";
 import type { TicketEvent, TicketOffer, TicketPriceQuote, TicketPurchaseRecord } from "./types.js";
@@ -87,7 +89,7 @@ export function detailsReply(event: TicketEvent, now: Date, timeZone: string): s
   const address = event.address ? ` (${event.address})` : "";
   const price = fromPrice(event);
   const priceText = price ? ` Tickets ${price.replace(/^from/, "start from")}.` : "";
-  return `${event.name} is${venue}${address}${when ? ` ${when}` : ""}.${priceText}`;
+  return withCalendarLine(`${event.name} is${venue}${address}${when ? ` ${when}` : ""}.${priceText}`, fromTicketEvent(event));
 }
 
 export function priceReply(event: TicketEvent, quote: TicketPriceQuote, checkoutUrl?: string): string {
@@ -202,29 +204,31 @@ export function linkOnlyReply(input: { event: TicketEvent; offer?: TicketOffer; 
   return `I can't complete checkout for ${input.event.name} from here, but${link}`;
 }
 
-export function completedReply(record: TicketPurchaseRecord): string {
+export function completedReply(record: TicketPurchaseRecord, event?: TicketEvent): string {
   const noun = record.quantity === 1 ? "ticket" : "tickets";
   const total = formatMoney(record.total, record.currency);
   const confirmation = record.confirmationNumber ?? record.orderId;
+  let body: string;
   if (!record.isDemo) {
-    return `Booked — ${record.quantity} ${noun} to ${record.eventName} for ${total} total.${confirmation ? `\nConfirmation: ${confirmation}` : ""}`;
+    body = `Booked — ${record.quantity} ${noun} to ${record.eventName} for ${total} total.${confirmation ? `\nConfirmation: ${confirmation}` : ""}`;
+  } else {
+    const settlement = record.settlement;
+    if (settlement?.network === "xrpl-testnet") {
+      const tx = settlement.transactionHash ? `\nTransaction: ${settlement.transactionHash}` : "";
+      const explorer = settlement.explorerUrl ? `\n${settlement.explorerUrl}` : "";
+      body =
+        `Booked — ${record.quantity} ${noun} to ${record.eventName} for ${total} total.` +
+        `${confirmation ? `\nConfirmation: ${confirmation}` : ""}` +
+        `\nPayment: validated on XRPL Testnet` +
+        `${tx}${explorer}` +
+        `\n(Demo settlement only — XRPL Testnet, not a real Ticketmaster purchase.)`;
+    } else if (settlement) {
+      body = `Done — ${record.quantity} demo ${noun} for ${record.eventName}, ${total} total.${confirmation ? ` Order ${confirmation}.` : ""} Demo payment only: no money moved and no real tickets were issued.`;
+    } else {
+      body = `Done — ${record.quantity} demo ${noun} for ${record.eventName}, ${total} total.${confirmation ? ` Order ${confirmation}.` : ""} This was a demo checkout, so no real tickets were issued.`;
+    }
   }
-  const settlement = record.settlement;
-  if (settlement?.network === "xrpl-testnet") {
-    const tx = settlement.transactionHash ? `\nTransaction: ${settlement.transactionHash}` : "";
-    const explorer = settlement.explorerUrl ? `\n${settlement.explorerUrl}` : "";
-    return (
-      `Booked — ${record.quantity} ${noun} to ${record.eventName} for ${total} total.` +
-      `${confirmation ? `\nConfirmation: ${confirmation}` : ""}` +
-      `\nPayment: validated on XRPL Testnet` +
-      `${tx}${explorer}` +
-      `\n(Demo settlement only — XRPL Testnet, not a real Ticketmaster purchase.)`
-    );
-  }
-  if (settlement) {
-    return `Done — ${record.quantity} demo ${noun} for ${record.eventName}, ${total} total.${confirmation ? ` Order ${confirmation}.` : ""} Demo payment only: no money moved and no real tickets were issued.`;
-  }
-  return `Done — ${record.quantity} demo ${noun} for ${record.eventName}, ${total} total.${confirmation ? ` Order ${confirmation}.` : ""} This was a demo checkout, so no real tickets were issued.`;
+  return withCalendarLine(body, fromTicketEvent(event));
 }
 
 export function paymentFailedReply(reason: string): string {

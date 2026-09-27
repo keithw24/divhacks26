@@ -68,6 +68,8 @@ bindings = [
 
 # --- DeepSpace detected secrets (names only; values live in `npx deepspace secrets`) ---
 #   CHANNEL_ADAPTER_SECRET
+#   AGENT_ONBOARDING_SECRET   # same value as the agent's DEEPSPACE_ONBOARDING_SECRET
+# Optional wrangler [vars]: AGENT_WALLET_URL = public agent origin (https://…)
 # --- end DeepSpace detected secrets ---
 
 [dev]

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { betaCap, createBetaInvite, isBetaMember, redeemBetaInvite } from './beta'
 import { ackOutbox, claimOutbox, handleInbound } from './channels'
 import { normalizeCode, parseLinkCommand } from './codes'
@@ -6,6 +6,7 @@ import { normalizeExternalId, resolveChannelUser, startChannelLink } from './ide
 import { createPlan, createPlanInvite, getPlan, joinPlan, leavePlan, listMyPlans, setPreferences } from './plans'
 import { ServiceError } from './store'
 import { createFakeStore } from './testing/fake-store'
+import { requestWallet } from './wallets'
 import { signaturePayload, verifyAdapterSignature } from '../server/channel-routes'
 import { computeHmacHex } from 'deepspace/worker'
 
@@ -197,5 +198,43 @@ describe('adapter signatures', () => {
     expect(await verifyAdapterSignature(secret, headers, 'POST', '/api/channels/inbound', '{"a":2}', now)).toBe(false)
     expect(await verifyAdapterSignature(secret, headers, 'POST', '/api/channels/inbound', body, now + 600)).toBe(false)
     expect(await verifyAdapterSignature(undefined, headers, 'POST', '/api/channels/inbound', body, now)).toBe(false)
+  })
+})
+
+describe('DeepSpace wallets', () => {
+  it('links a Testnet address to the signed-in userId after they opt in', async () => {
+    const store = await admitted(undefined, 'maya')
+    await linked(store, 'maya', '+19175551212')
+    const enroll = vi.fn(async (input: { userId: string; photonSenderId: string }) => {
+      expect(input.userId).toBe('maya')
+      expect(input.photonSenderId).toBe('+19175551212')
+      return {
+        userId: 'maya',
+        customerId: 'user_maya',
+        xrplAddress: 'rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH',
+        photonSenderId: input.photonSenderId,
+      }
+    })
+    await expect(requestWallet(store, 'maya', { wantWallet: false, enroll })).rejects.toMatchObject({
+      code: 'want_wallet_required',
+    })
+    const created = await requestWallet(store, 'maya', { wantWallet: true, enroll })
+    expect(created).toMatchObject({ userId: 'maya', xrplAddress: 'rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH' })
+    expect(enroll).toHaveBeenCalledTimes(1)
+    const again = await requestWallet(store, 'maya', { wantWallet: true, enroll })
+    expect(again.xrplAddress).toBe(created.xrplAddress)
+    expect(enroll).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a wallet until iMessage is linked', async () => {
+    const store = await admitted(undefined, 'maya')
+    await expect(
+      requestWallet(store, 'maya', {
+        wantWallet: true,
+        enroll: async () => {
+          throw new Error('should not enroll')
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'link_imessage_first' })
   })
 })

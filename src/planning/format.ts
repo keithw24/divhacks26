@@ -1,3 +1,5 @@
+import { fromRecommendation } from "../calendar/from.js";
+import { calendarLine } from "../calendar/links.js";
 import type { GroupPlanResult } from "./types.js";
 
 const MORE_LINE = "If none of these work, say “show more” and I’ll list the next options that still fit everyone’s hard limits.";
@@ -19,7 +21,8 @@ export function formatGroupPlans(result: GroupPlanResult): string {
           ? "Nash welfare"
           : "average satisfaction",
     ];
-    return `${index + 1}. ${plan.item.name} — ${facts.join(", ")}. ${plan.reason}${plan.item.url ? `\n${plan.item.url}` : ""}`;
+    const cal = calendarLine(fromRecommendation(plan.item));
+    return `${index + 1}. ${plan.item.name} — ${facts.join(", ")}. ${plan.reason}${plan.item.url ? `\n${plan.item.url}` : ""}${cal ? `\n${cal}` : ""}`;
   });
 
   if (result.because) lines.push(result.because);

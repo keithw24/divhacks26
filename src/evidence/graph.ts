@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { fromRecommendation } from "../calendar/from.js";
+import { googleCalendarUrl } from "../calendar/links.js";
 import type { Recommendation, RouteResult, SkillResult, Source, UserIntent } from "../domain/contracts.js";
 import type { Evidence, EvidenceCall, EvidenceNode, EvidencePlan } from "../domain/evidence.js";
 import type { BlockSafetyReport } from "../safety.js";
@@ -82,6 +84,11 @@ export function buildEvidenceGraph(input: GraphInput): EvidencePlan {
     if (price && Object.values(budgetLevels).flat().includes(price)) record("price", price.toLowerCase().replaceAll("_", " "));
     const url = publicUrl(item.url);
     if (url) record("url", url, "link");
+    const calendar = fromRecommendation(item);
+    if (calendar) {
+      const calUrl = googleCalendarUrl(calendar);
+      add(node, "calendar", `Calendar: ${calUrl}`, { name: "Generated Google Calendar link", url: calUrl }, call, "link");
+    }
     const claimFor = (field: string) => plan.claims.find(c => c.claimId === `${node.id}:${field}`);
     if (input.intent?.budget) {
       const c = claimFor("price");
@@ -160,8 +167,8 @@ export function renderEvidencePlan(plan: EvidencePlan, maxLength = 1900): string
     const prefix = node.kind === "route" ? "Route" : node.kind === "safety" ? "Historical context" : `${++index}`;
     const claims = node.claimIds.map(id => byId.get(id)).filter((c): c is Evidence => !!c &&
       plan.toolCalls.some(call => call.id === c.toolCallId && (call.status !== "unavailable" || c.basis === "link")));
-    const facts = claims.filter(c => c.field !== "url");
-    const links = claims.filter(c => c.field === "url");
+    const facts = claims.filter(c => c.field !== "url" && c.field !== "calendar");
+    const links = claims.filter(c => c.field === "url" || c.field === "calendar");
     const line = facts.map(c => `${c.claim}${c.freshness === "stale" ? " [stale source; recheck]" : ""}`).join("; ");
     if (line && !append(`${prefix}. ${line}`, facts.map(c => c.claimId))) continue;
     for (const c of links) append(c.claim, [c.claimId]);

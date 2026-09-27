@@ -108,7 +108,8 @@ describe("reservation execution router", () => {
     expect(result.status).toBe("CONFIRMED");
     expect(result.channel).toBe("online");
     expect(result.confirmationId).toBe("ABC123");
-    expect(result.reply).toBe("Booked Carbone for 4 at 8:00 PM. Confirmation: ABC123.");
+    expect(result.reply).toMatch(/^Booked Carbone for 4 at 8:00 PM\. Confirmation: ABC123\./);
+    expect(result.reply).toContain("calendar.google.com");
     expect(provider.books).toBe(1);
     expect(phone.calls).toHaveLength(0);
     expect(result.phase).toBe("CONFIRMED");
@@ -243,9 +244,10 @@ describe("reservation execution router", () => {
     expect(result.channel).toBe("phone");
     expect(result.confirmationId).toBe("PHONE1");
     expect(result.confirmedTime).toBe("20:00");
-    expect(result.reply).toBe(
-      "Online booking wasn't available, so I called the restaurant. You're booked for 4 at 8:00 PM under Rohan. Confirmation: PHONE1.",
+    expect(result.reply).toMatch(
+      /^Online booking wasn't available, so I called the restaurant\. You're booked for 4 at 8:00 PM under Rohan\. Confirmation: PHONE1\./,
     );
+    expect(result.reply).toContain("calendar.google.com");
   });
 
   it("leaves the reservation unconfirmed when the phone booking fails", async () => {
@@ -520,7 +522,8 @@ describe("reservation agent uses the router", () => {
       spaceId: "space-carbone",
       text: "Book Carbone for four tomorrow at 8 under Rohan, exactly 8.",
     });
-    expect(turn.reply).toBe("Booked Carbone for 4 at 8:00 PM. Confirmation: ABC123.");
+    expect(turn.reply).toMatch(/^Booked Carbone for 4 at 8:00 PM\. Confirmation: ABC123\./);
+    expect(turn.reply).toContain("calendar.google.com");
     expect(confirms).toBe(1);
     expect(caller.calls).toHaveLength(0);
     expect(orchestrator.reservations.active("space-carbone")?.status).toBe("BOOKED");

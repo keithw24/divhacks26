@@ -1,3 +1,5 @@
+import { fromReservation } from "../calendar/from.js";
+import { withCalendarLine } from "../calendar/links.js";
 import { isValidClassicAddress } from "xrpl";
 import { formatUsd } from "../payments/format.js";
 import { testnetExplorerLink } from "../payments/xrpl/explorer.js";
@@ -812,14 +814,18 @@ export class DepositFlow {
     const confirmation = reservation.result?.confirmationNumber ? ` Confirmation ${reservation.result.confirmationNumber}.` : "";
     const proof = deposit?.proof;
     const url = proof?.explorerUrl || testnetExplorerLink(deposit?.transactionId) || testnetExplorerLink(proof?.transactionHash ?? undefined);
+    const cal = fromReservation(reservation, reservation.result, this.host.zone());
     if (this.options.paymentMode === "ripple_test" && proof?.status === "validated") {
-      return `You're booked at ${name} for ${party} ${when}. The ${amount} ${noun} (${proof.amountXrp} test XRP) was validated on XRPL Testnet.${url ? ` ${url}` : ""}${confirmation}`;
+      return withCalendarLine(
+        `You're booked at ${name} for ${party} ${when}. The ${amount} ${noun} (${proof.amountXrp} test XRP) was validated on XRPL Testnet.${url ? ` ${url}` : ""}${confirmation}`,
+        cal,
+      );
     }
     const paid =
       this.options.paymentMode === "ripple_test"
         ? `The ${amount} ${noun} was paid successfully on XRPL Testnet${url ? ` ${url}` : shortTx(deposit?.transactionId)}.`
         : `The ${amount} ${noun} was a mock test payment, so no XRPL transaction was sent.`;
-    return `Booked ${name} for ${party} ${when}. ${paid}${confirmation}`;
+    return withCalendarLine(`Booked ${name} for ${party} ${when}. ${paid}${confirmation}`, cal);
   }
 
   private failedAfterPaymentText(reservation: ReservationRequest, canRetry: boolean): string {

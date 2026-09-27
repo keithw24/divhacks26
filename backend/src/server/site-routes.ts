@@ -15,6 +15,7 @@ import { cors } from 'hono/cors'
 import type { AppContext, Env } from '../../worker.js'
 import { createSite, type SiteUser, publicUser } from '../domain/site'
 import { ServiceError } from '../domain/store'
+import { enrollAgentWalletHttp } from '../domain/wallets'
 import { createActionTools } from './action-routes.js'
 
 /** Identity the site's writes are attributed to in `createdBy`. */
@@ -32,6 +33,7 @@ const STATUS: Record<string, number> = {
   challenge_expired: 401,
   unauthorized: 401,
   not_found: 404,
+  want_wallet_required: 400,
   wallet_unavailable: 503,
   memory_unavailable: 503,
   site_unconfigured: 503,
@@ -185,7 +187,23 @@ export function registerSiteRoutes(app: Hono<AppContext>): void {
   app.get(`${PREFIX}/me/memories`, signedIn(async () => ({ memories: [] })))
   app.delete(`${PREFIX}/me/memories/:id`, signedIn(async () => { throw new ServiceError('not_found', 'Not found.') }))
   app.get(`${PREFIX}/me/evidence`, signedIn(async () => ({ plans: [] })))
-  app.post(`${PREFIX}/me/wallet`, signedIn(async () => { throw new ServiceError('wallet_unavailable', 'Wallets are created by the agent.') }))
+  app.post(
+    `${PREFIX}/me/wallet`,
+    signedIn(async (c, user, _token, { site }) => {
+      const body = await readJson(c)
+      if (body.wantWallet !== true) throw new ServiceError('want_wallet_required', 'Say you want a wallet first.')
+      if (user.xrplAddress) return { ok: true, xrplAddress: user.xrplAddress, userId: `site:${user.phone}` }
+      const enrolled = await enrollAgentWalletHttp(c.env, {
+        userId: `site:${user.phone}`,
+        photonSenderId: user.phone,
+        displayName: user.preferences?.name,
+        wantWallet: true,
+      })
+      if (!enrolled.xrplAddress) throw new ServiceError('wallet_unavailable', 'The agent could not create a Testnet wallet.')
+      await site.recordWallet(user.phone, enrolled.xrplAddress)
+      return { ok: true, xrplAddress: enrolled.xrplAddress, userId: enrolled.userId ?? `site:${user.phone}` }
+    }),
+  )
   app.delete(
     `${PREFIX}/me`,
     signedIn(async (_c, user, _token, { site }) => {

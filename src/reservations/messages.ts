@@ -1,3 +1,5 @@
+import { fromReservation } from "../calendar/from.js";
+import { withCalendarLine } from "../calendar/links.js";
 import { weekdayNameFromIso } from "./clock.js";
 import { formatClockTime, formatTimeRange, shortTime } from "./constraints.js";
 import type { ReservationRequest, ReservationResult } from "./types.js";
@@ -74,7 +76,10 @@ export function resultText(reservation: ReservationRequest, result: ReservationR
     const name = result.confirmationName ?? reservation.customer?.name;
     const who = name ? ` under ${name}` : "";
     const number = result.confirmationNumber ? ` Confirmation ${result.confirmationNumber}.` : "";
-    return `Booked — ${reservation.restaurant.name} for ${party} ${day} at ${when}${who}.${number}`;
+    return withCalendarLine(
+      `Booked — ${reservation.restaurant.name} for ${party} ${day} at ${when}${who}.${number}`,
+      fromReservation(reservation, result),
+    );
   }
   if (result.outcome === "UNAVAILABLE") {
     return `${reservation.restaurant.name} doesn't have availability in the time range you gave me.`;

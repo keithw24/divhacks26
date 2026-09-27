@@ -69,6 +69,8 @@ membership itself. Keep it that way when you add features.
 | `createBetaInvite` | `label?`, `maxUses?`, `expiresInDays?` | Owner/admin only; returns the code once |
 | `startChannelLink` | `channel: imessage\|sms\|voice` | Returns a 6-digit code valid 10 min |
 | `myChannels` | — | Linked channels (numbers masked) |
+| `createWallet` | `wantWallet: true` | Provisions a Testnet wallet, stores the address on this `userId` |
+| `myWallet` | — | `{ status: none }` or `{ status: ready, userId, xrplAddress, … }` |
 | `createPlan` | `title`, `when?`, `area?` | Creator becomes organizer |
 | `myPlans` / `getPlan` | `planId` | `getPlan` returns members + shared preferences only |
 | `createPlanInvite` / `joinPlan` | `planId` / `code` | Any member can invite; codes last 72 h |
@@ -114,7 +116,9 @@ where you sign up and see your apps. The **owner** (one person) does this:
    ```bash
    openssl rand -hex 32                              # copy the output
    npx deepspace secrets set CHANNEL_ADAPTER_SECRET --stdin   # paste it, Enter, Ctrl+D
+   npx deepspace secrets set AGENT_ONBOARDING_SECRET --stdin  # same value as the agent's DEEPSPACE_ONBOARDING_SECRET
    ```
+   In wrangler `[vars]`, set `AGENT_WALLET_URL` to the agent's public origin (no path). The DeepSpace `createWallet` action posts `{ userId, photonSenderId, wantWallet: true }` to that host.
 5. **Deploy**:
    ```bash
    npx deepspace deploy

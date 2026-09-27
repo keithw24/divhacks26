@@ -9,6 +9,7 @@ import { errorCategory } from "./agent/turn.js";
 import { lastLocation, locationsForSpace, recordLocation, recordMessage, transcript } from "./chat/context.js";
 import { senderDisplayName } from "./chat/invoke.js";
 import { parseLatLng } from "./chat/location.js";
+import { setCalendarIcsBase } from "./calendar/links.js";
 import { config } from "./config.js";
 import { safetyChartImage } from "./safetyChart.js";
 import { createAlertService, startAreaAlertWatcher } from "./alerts/service.js";
@@ -362,6 +363,8 @@ if (config.paymentsMode === "nessie" || config.paymentsMode === "nessie_ripple")
 if (config.paymentsMode === "mock") {
   console.info("Payments: mock mode (no Nessie or Ripple transaction is submitted).");
 }
+setCalendarIcsBase(config.calendarPublicUrl);
+
 const web =
   config.webApiPort === "off"
     ? undefined
@@ -402,8 +405,10 @@ const web =
             photonSenderId: input.photonSenderId,
             displayName: input.displayName,
             provisionWallet: input.provisionWallet,
+            userId: input.userId,
           }),
         lookupPhotonUser: async (photonSenderId) => onboarding.publicView(photonSenderId),
+        lookupPhotonUserByUserId: async (userId) => onboarding.publicViewByUserId(userId),
       });
 if (!web) {
   void reservations.listen(config.reservationWebhookPort).catch((error) => {

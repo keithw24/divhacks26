@@ -1,3 +1,5 @@
+import { fromBookingFields } from "../calendar/from.js";
+import { withCalendarLine } from "../calendar/links.js";
 import { toE164 } from "../reservations/collect.js";
 import { interpretCompletion, type NormalizedCompletion } from "../reservations/result.js";
 import { logReservation } from "../reservations/log.js";
@@ -70,7 +72,14 @@ export function userMessageFor(result: RestaurantCallResult): string | undefined
     const day = result.date ? result.date : "the requested day";
     const who = result.reservationName ? ` under ${result.reservationName}` : "";
     const number = result.confirmationNumber ? ` Confirmation ${result.confirmationNumber}.` : "";
-    return `Booked — ${restaurant} for ${party} on ${day} at ${when}${who}.${number}`;
+    return withCalendarLine(
+      `Booked — ${restaurant} for ${party} on ${day} at ${when}${who}.${number}`,
+      fromBookingFields({
+        title: restaurant,
+        date: result.date,
+        time: result.time,
+      }),
+    );
   }
   if (result.reservationStatus === "DEPOSIT_REQUIRED" && result.deposit) {
     const amount = formatUsd(result.deposit.amount);

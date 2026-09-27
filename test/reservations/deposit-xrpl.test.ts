@@ -344,8 +344,9 @@ describe("restaurant deposit through xrplPayments.send", () => {
     expect(w.ledger.submitted).toHaveLength(1);
     expect(statusAtConfirm).toEqual(["validated"]);
     expect(booked).toMatch(
-      /^You're booked at Ripple Bistro for 4 tonight at 8:00 PM\. The \$100 deposit \(100 test XRP\) was validated on XRPL Testnet\. https:\/\/testnet\.xrpl\.org\/transactions\/[0-9A-F]{64} Confirmation RB-[0-9A-F]{6}\.$/,
+      /^You're booked at Ripple Bistro for 4 tonight at 8:00 PM\. The \$100 deposit \(100 test XRP\) was validated on XRPL Testnet\. https:\/\/testnet\.xrpl\.org\/transactions\/[0-9A-F]{64} Confirmation RB-[0-9A-F]{6}\./,
     );
+    expect(booked).toContain("calendar.google.com");
     expect(booked).not.toMatch(HASH);
 
     const reservation = s.active()!;

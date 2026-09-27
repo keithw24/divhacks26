@@ -77,6 +77,7 @@ export default function HomePage() {
         <>
           {isAdmin && <AdminInvites busy={busy} run={run} />}
           <LinkChannels busy={busy} run={run} />
+          <WalletSection busy={busy} run={run} />
           <Plans busy={busy} run={run} />
         </>
       )}
@@ -171,6 +172,38 @@ function LinkChannels({ busy, run }: { busy: boolean; run: Runner }) {
           Text <code className="font-mono font-semibold">LINK {pending.code}</code> to the agent from your{' '}
           {pending.channel === 'imessage' ? 'iMessage' : 'phone'} within 10 minutes, then press Refresh.
         </p>
+      )}
+    </Section>
+  )
+}
+
+function WalletSection({ busy, run }: { busy: boolean; run: Runner }) {
+  const [wallet, setWallet] = useState<Awaited<ReturnType<typeof api.myWallet>> | null>(null)
+  const refresh = useCallback(() => run(async () => setWallet(await api.myWallet())), [run])
+  useEffect(() => void refresh(), [refresh])
+  return (
+    <Section title="Testnet wallet">
+      {wallet?.status === 'ready' ? (
+        <p className="break-all text-sm">
+          Linked to your DeepSpace user. Address: <code className="font-mono">{wallet.xrplAddress}</code>
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Optional. Link iMessage first, then create a Testnet wallet. Nothing is sent until you confirm a payment in chat.
+        </p>
+      )}
+      {wallet?.status !== 'ready' && (
+        <Button
+          disabled={busy}
+          onClick={() =>
+            void run(async () => {
+              await api.createWallet()
+              await refresh()
+            })
+          }
+        >
+          I want a wallet
+        </Button>
       )}
     </Section>
   )

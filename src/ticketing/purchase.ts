@@ -108,7 +108,7 @@ export class TicketPurchaseExecutor {
     }
     if (result.status === "SOLD_OUT") return this.soldOut(record);
     if (result.status === "PURCHASED" && result.providerOrderId) {
-      return this.complete(record, { orderId: result.providerOrderId, isDemo: false });
+      return this.complete(record, { orderId: result.providerOrderId, isDemo: false }, event);
     }
     if (result.status !== "CHECKOUT_REQUIRED" || !result.checkoutUrl) {
       return this.fail(record, result.reason ?? "checkout_failed", PURCHASE_FAILED_REPLY);
@@ -175,7 +175,7 @@ export class TicketPurchaseExecutor {
     if (result.status !== "PURCHASED" || !result.providerOrderId) {
       return this.fail(record, result.reason ?? "purchase_failed", PURCHASE_FAILED_REPLY);
     }
-    return this.complete(record, { orderId: result.providerOrderId, isDemo: false });
+    return this.complete(record, { orderId: result.providerOrderId, isDemo: false }, event);
   }
 
   private async demoPurchase(record: TicketPurchaseRecord, event: TicketEvent, offer: TicketOffer): Promise<PurchaseOutcome> {
@@ -271,10 +271,10 @@ export class TicketPurchaseExecutor {
         : PURCHASE_FAILED_REPLY;
       return this.fail(current, current.settlement ? "order_failed_after_payment" : "order_failed", reply);
     }
-    return this.complete(current, { orderId, isDemo: true });
+    return this.complete(current, { orderId, isDemo: true }, event);
   }
 
-  private complete(record: TicketPurchaseRecord, result: { orderId: string; isDemo: boolean }): PurchaseOutcome {
+  private complete(record: TicketPurchaseRecord, result: { orderId: string; isDemo: boolean }, event?: TicketEvent): PurchaseOutcome {
     const saved =
       this.options.store.patch(record.id, {
         status: "COMPLETED",
@@ -298,7 +298,7 @@ export class TicketPurchaseExecutor {
       isTestTransaction: saved.isTestTransaction,
       transactionHash: saved.paymentTransactionId,
     });
-    return { outcome: "completed", record: saved, reply: completedReply(saved) };
+    return { outcome: "completed", record: saved, reply: completedReply(saved, event) };
   }
 
   private soldOut(record: TicketPurchaseRecord): PurchaseOutcome {

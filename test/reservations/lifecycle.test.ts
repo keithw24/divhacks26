@@ -84,12 +84,14 @@ describe("reservation lifecycle", () => {
     expect(response.status).toBe(200);
     expect(reservation?.status).toBe("BOOKED");
     expect(reservation?.result).toMatchObject({ outcome: "BOOKED", confirmedTime: "19:45", confirmedPartySize: 4 });
-    expect(h.notes).toEqual([
+    expect(h.notes).toHaveLength(1);
+    expect(h.notes[0]).toEqual(
       expect.objectContaining({
         spaceId: SPACE,
-        text: "Booked — L'Artusi for 4 Friday at 7:45 PM under Rohan.",
+        text: expect.stringMatching(/^Booked — L'Artusi for 4 Friday at 7:45 PM under Rohan\./),
       }),
-    ]);
+    );
+    expect(h.notes[0]?.text).toContain("calendar.google.com");
     expect(h.notes.some((note) => note.spaceId === "other-space")).toBe(false);
     expect(h.caller.calls).toHaveLength(1);
     h.orchestrator.dispose();
@@ -182,9 +184,10 @@ describe("reservation lifecycle", () => {
       const response = await post(second, buildMockCompletion("alternative_within_window", loaded!));
       expect(response.status).toBe(200);
       expect(loaded?.status).toBe("BOOKED");
-      expect(notes).toEqual([
-        { spaceId: SPACE, text: "Booked — L'Artusi for 4 Friday at 7:45 PM under Rohan." },
-      ]);
+      expect(notes).toHaveLength(1);
+      expect(notes[0]?.spaceId).toBe(SPACE);
+      expect(notes[0]?.text).toMatch(/^Booked — L'Artusi for 4 Friday at 7:45 PM under Rohan\./);
+      expect(notes[0]?.text).toContain("calendar.google.com");
 
       second.dispose();
       const thirdNotes: { spaceId: string; text: string }[] = [];

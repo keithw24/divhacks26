@@ -25,12 +25,18 @@ export interface WebRuntimeOptions {
   /** Send an iMessage to a phone number through Photon. */
   sendText(phone: string, text: string): Promise<void>;
   /** Signup / DeepSpace: Photon sender → Testnet wallet. Address only; never a seed. */
-  enrollPhotonUser?(input: { photonSenderId: string; displayName?: string; provisionWallet?: boolean }): Promise<{
+  enrollPhotonUser?(input: {
+    photonSenderId: string;
+    displayName?: string;
+    provisionWallet?: boolean;
+    userId?: string;
+  }): Promise<{
     photonSenderId: string;
     customerId: string;
     customerName: string;
     xrplAddress?: string;
     created: boolean;
+    userId?: string;
   }>;
   lookupPhotonUser?(photonSenderId: string): Promise<
     | {
@@ -39,6 +45,18 @@ export interface WebRuntimeOptions {
         customerName: string;
         xrplAddress?: string;
         createdAt: string;
+        userId?: string;
+      }
+    | undefined
+  >;
+  lookupPhotonUserByUserId?(userId: string): Promise<
+    | {
+        photonSenderId: string;
+        customerId: string;
+        customerName: string;
+        xrplAddress?: string;
+        createdAt: string;
+        userId?: string;
       }
     | undefined
   >;
@@ -90,18 +108,24 @@ export function startWebRuntime(opts: WebRuntimeOptions) {
         return await opts.enrollPhotonUser({
           photonSenderId,
           displayName: typeof body.displayName === "string" ? body.displayName : undefined,
-          provisionWallet: body.provisionWallet,
+          userId: typeof body.userId === "string" ? body.userId : undefined,
+          provisionWallet: body.wantWallet === true || body.provisionWallet === true,
         });
       } catch (err) {
         const code = err && typeof err === "object" && "code" in err ? String((err as { code: string }).code) : "invalid_photon_sender";
         return { error: code };
       }
     },
-    lookupFromDeepSpace: async (header, photonSenderId) => {
+    lookupFromDeepSpace: async (header, query) => {
       const denied = onboardHttpAuth(opts.deepspaceOnboardingSecret, header);
       if (denied) return denied;
       if (!opts.lookupPhotonUser) return { error: "deepspace_onboarding_unconfigured" };
-      const found = await opts.lookupPhotonUser(photonSenderId);
+      const userId = query.userId?.trim();
+      if (userId) {
+        const found = await opts.lookupPhotonUserByUserId?.(userId);
+        return found ?? { error: "not_found" };
+      }
+      const found = await opts.lookupPhotonUser(query.photonSenderId ?? "");
       return found ?? { error: "not_found" };
     },
     async sendAgentNumber(email, name) {

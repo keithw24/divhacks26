@@ -172,6 +172,23 @@ export const preferencesSchema: CollectionSchema = {
   permissions: readOnly('own'),
 }
 
+/**
+ * XRPL Testnet wallet opted into by a DeepSpace user. Address only; the agent
+ * holds signing keys. One row per userId.
+ */
+export const walletsSchema: CollectionSchema = {
+  name: 'wallets',
+  columns: [
+    text('userId', { required: true }),
+    text('customerId', { required: true }),
+    text('xrplAddress', { required: true }),
+    text('linkedAt', { required: true }),
+  ],
+  uniqueOn: ['userId'],
+  ownerField: 'userId',
+  permissions: readOnly('own'),
+}
+
 /** Adapter deliveries already processed, so a redelivered message is handled once. */
 export const inboundDeliveriesSchema: CollectionSchema = {
   name: 'inbound_deliveries',
@@ -213,4 +230,5 @@ export const planSchemas: CollectionSchema[] = [
   preferencesSchema,
   inboundDeliveriesSchema,
   notificationOutboxSchema,
+  walletsSchema,
 ]

@@ -518,17 +518,17 @@ In `ripple_test` and `nessie_ripple`, a chat payment between people settles betw
 
 The website asks “Want a Testnet wallet?” as the last onboarding step. `POST /api/me/start-chat` only sends the hello iMessage. `POST /api/me/wallet` with `{ "wantWallet": true }` provisions the wallet. Skipping still lets them chat.
 
-DeepSpace (once it exists) should collect the iMessage number at signup, then call the agent:
+# DeepSpace (once it exists) should collect the iMessage number at signup, then call the agent with that person's DeepSpace userId when they opt into a wallet:
 
 ```http
 POST /api/deepspace/accounts
 Authorization: Bearer <DEEPSPACE_ONBOARDING_SECRET>
 Content-Type: application/json
 
-{"photonSenderId":"+19175551212","displayName":"Maya"}
+{"userId":"ds_user_maya","photonSenderId":"+19175551212","displayName":"Maya","wantWallet":true}
 ```
 
-The response is `customerId`, `photonSenderId`, and `xrplAddress` (Testnet classic address). `GET /api/deepspace/accounts?photonSenderId=+19175551212` with the same Bearer token looks up an existing row. Website users opt in with `POST /api/me/wallet`. There is still one Spectrum listener; wallets are keyed by Photon sender id in `data/ripple-demo/accounts.json` (gitignored).
+The response is `userId`, `customerId`, `photonSenderId`, and `xrplAddress` (Testnet classic address). No seed is returned. `GET /api/deepspace/accounts?userId=ds_user_maya` (or `?photonSenderId=`) looks up the row. DeepSpace stores the address on the `wallets` collection keyed by `userId`. Website users opt in with `POST /api/me/wallet` or `POST /api/actions/createWallet` `{ "wantWallet": true }` after linking iMessage. There is still one Spectrum listener; signing keys stay in `data/ripple-demo/` (gitignored).
 
 Reservation deposits (merchant payments) still use the `XRPL_TESTNET_SEED` provider described below.
 

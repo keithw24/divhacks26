@@ -10,6 +10,7 @@ import {
   AccountOnboardingService,
   AccountOnboardingStore,
   customerIdForPhotonSender,
+  customerIdForUser,
   onboardBearerOk,
 } from "../../src/payments/xrpl/onboarding.js";
 import { CustomerWalletSettlement } from "../../src/payments/xrpl/settlement.js";
@@ -57,6 +58,31 @@ describe("Photon / DeepSpace account onboarding", () => {
       customerName: "Jules",
     });
     expect(settlement.knownNames()).toContain("Jules");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("links a Testnet wallet to a DeepSpace userId only when they ask", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "onboard-"));
+    const store = new AccountOnboardingStore(join(dir, "accounts.json"));
+    const service = new AccountOnboardingService(store);
+    const mapped = await service.enroll({
+      photonSenderId: "+19175550001",
+      displayName: "Maya",
+      userId: "ds_user_maya",
+      provisionWallet: false,
+    });
+    expect(mapped.customerId).toBe(customerIdForUser("ds_user_maya"));
+    expect(mapped.xrplAddress).toBeUndefined();
+    expect(mapped.userId).toBe("ds_user_maya");
+    expect(service.publicViewByUserId("ds_user_maya")?.photonSenderId).toBe("+19175550001");
+
+    const again = await service.enroll({
+      photonSenderId: "+19175550001",
+      userId: "ds_user_maya",
+      provisionWallet: false,
+    });
+    expect(again.created).toBe(false);
+    expect(again.customerId).toBe(mapped.customerId);
     rmSync(dir, { recursive: true, force: true });
   });
 

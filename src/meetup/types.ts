@@ -30,6 +30,9 @@ export interface MeetupMember {
   leaveByIso?: string;
   etaIso?: string;
   delayMinutes?: number;
+  /** Known to run late; leave time already includes `lateBufferMinutes`. */
+  habituallyLate?: boolean;
+  lateBufferMinutes?: number;
 }
 
 export interface MeetupPlan {
@@ -46,6 +49,8 @@ export interface MeetupPersistence {
   records: Record<string, MeetupPlan>;
   activeBySpace: Record<string, string>;
   locationsBySpace: Record<string, Record<string, PersonLocation>>;
+  /** Photon sender id or lowercase display name → late habit. */
+  habits?: Record<string, { habituallyLate: boolean; lateIncidents: number }>;
 }
 
 export interface MeetupTurnInput {

@@ -23,6 +23,7 @@ describe("evidence-constrained plans", () => {
   it("links every emitted claim to a call and source; never verbalizes model reasons or raw descriptions", () => {
     const plan = buildEvidenceGraph({ picks, route, routeTargetId: item.id, now, intent });
     const response = renderEvidencePlan(plan);
+    expect(response).toContain("calendar.google.com");
     expect(response).toContain("700 m straight-line distance");
     expect(response).toContain("14 min walk");
     expect(response).not.toMatch(/FREE|2-minute|Imaginary|min walk.*700/);

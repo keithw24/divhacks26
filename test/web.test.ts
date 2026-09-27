@@ -383,15 +383,17 @@ describe("web API server", () => {
           displayName: typeof body.displayName === "string" ? body.displayName : undefined,
         });
       },
-      lookupFromDeepSpace: async (header, photonSenderId) => {
+      lookupFromDeepSpace: async (header, query) => {
         if (header !== "Bearer ds-secret") return { error: "unauthorized" };
+        const photonSenderId = query.photonSenderId || query.userId;
         if (!photonSenderId) return { error: "not_found" };
         return {
-          photonSenderId,
+          photonSenderId: query.photonSenderId || "+19175551212",
           customerId: "onboard_abc",
           customerName: "Maya",
           xrplAddress: "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH",
           createdAt: "2026-01-01",
+          userId: query.userId || undefined,
         };
       },
     });
@@ -408,7 +410,7 @@ describe("web API server", () => {
     expect(body).toMatchObject({ customerId: "onboard_abc", xrplAddress: "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH" });
     expect(JSON.stringify(body).toLowerCase()).not.toContain("seed");
 
-    const looked = await fetch(`${base}/api/deepspace/accounts?photonSenderId=%2B19175551212`, {
+    const looked = await fetch(`${base}/api/deepspace/accounts?userId=ds_user_maya`, {
       headers: { Authorization: "Bearer ds-secret" },
     });
     expect(looked.status).toBe(200);
@@ -436,5 +438,26 @@ describe("web API server", () => {
     expect(deps.enrollPhotonUser).toHaveBeenCalledTimes(1);
     const me = await (await call("GET", "/api/me", undefined, token)).json();
     expect(me).toMatchObject({ wallet: { status: "ready", xrplAddress: "rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH" } });
+  });
+
+  it("serves a public iCal file from query fields", async () => {
+    const { call } = await start();
+    const params = new URLSearchParams({
+      title: "Park concert",
+      start: "2026-09-26T23:30:00.000Z",
+      end: "2026-09-27T01:30:00.000Z",
+      location: "Riverside Park",
+      details: "Bring a blanket",
+    });
+    const res = await call("GET", `/api/calendar.ics?${params.toString()}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/text\/calendar/);
+    const body = await res.text();
+    expect(body).toContain("BEGIN:VEVENT");
+    expect(body).toContain("SUMMARY:Park concert");
+    expect(body).toContain("LOCATION:Riverside Park");
+    expect(body).toContain("DTSTART:20260926T233000Z");
+    expect(body).toContain("DTEND:20260927T013000Z");
+    expect((await call("GET", "/api/calendar.ics")).status).toBe(400);
   });
 });

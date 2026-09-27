@@ -1,3 +1,5 @@
+import { fromBookingFields } from "../../calendar/from.js";
+import { withCalendarLine } from "../../calendar/links.js";
 import { formatClockTime } from "../constraints.js";
 
 export const FAILED_REPLY = "I couldn't complete the reservation online or by phone.";
@@ -8,11 +10,21 @@ export function confirmedOnlineReply(input: {
   partySize?: number;
   confirmedTime: string;
   confirmationId?: string;
+  requestedDate?: string;
+  location?: string;
 }): string {
   const party = input.partySize ?? "your party";
   const when = clock(input.confirmedTime);
   const confirmation = input.confirmationId ? ` Confirmation: ${input.confirmationId}.` : "";
-  return `Booked ${input.restaurantName} for ${party} at ${when}.${confirmation}`;
+  return withCalendarLine(
+    `Booked ${input.restaurantName} for ${party} at ${when}.${confirmation}`,
+    fromBookingFields({
+      title: input.restaurantName,
+      date: input.requestedDate,
+      time: input.confirmedTime,
+      location: input.location,
+    }),
+  );
 }
 
 export function confirmedPhoneReply(input: {
@@ -20,12 +32,23 @@ export function confirmedPhoneReply(input: {
   confirmedTime: string;
   confirmationName?: string;
   confirmationId?: string;
+  restaurantName?: string;
+  requestedDate?: string;
+  location?: string;
 }): string {
   const party = input.partySize ?? "your party";
   const when = clock(input.confirmedTime);
   const who = input.confirmationName ? ` under ${input.confirmationName}` : "";
   const confirmation = input.confirmationId ? ` Confirmation: ${input.confirmationId}.` : "";
-  return `Online booking wasn't available, so I called the restaurant. You're booked for ${party} at ${when}${who}.${confirmation}`;
+  return withCalendarLine(
+    `Online booking wasn't available, so I called the restaurant. You're booked for ${party} at ${when}${who}.${confirmation}`,
+    fromBookingFields({
+      title: input.restaurantName ?? "Reservation",
+      date: input.requestedDate,
+      time: input.confirmedTime,
+      location: input.location,
+    }),
+  );
 }
 
 export function alternativeReply(time: string): string {

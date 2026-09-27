@@ -11,7 +11,7 @@ const PREFERENCE =
   /\b(hate|hates|hating|like|likes|liking|love|loves|prefer|prefers|avoid|avoids|avoiding|vegetarian|vegan|always|usually|never|don't like|do not like|don't eat|do not eat|can't stand|cannot stand|would rather)\b/i;
 
 const FACT =
-  /\b(live near|live in|live at|my name is|allergic to|i'm allergic|i am allergic|leave class|leave work|leave school|i work)\b/i;
+  /\b(live near|live in|live at|my name is|allergic to|i'm allergic|i am allergic|leave class|leave work|leave school|i work|always late|habitually late|never on time)\b/i;
 
 /**
  * Conservative local classifier. Only DURABLE_* messages are eligible for memory.

@@ -13,6 +13,7 @@ import type { Env } from '../../worker'
 import { admitAdmin, betaCap, createBetaInvite, isBetaMember, redeemBetaInvite, requireBetaMember } from '../domain/beta'
 import { isAdapterChannel, isChannel } from '../domain/contracts'
 import { listIdentities, startChannelLink } from '../domain/identity'
+import { getWallet, requestWallet, enrollAgentWalletHttp } from '../domain/wallets'
 import {
   createPlan,
   createPlanInvite,
@@ -95,6 +96,20 @@ export const actions: Record<string, ActionHandler<Env>> = {
       verifiedAt,
     })),
   ),
+
+  myWallet: member(async ({ tools, userId }) => {
+    const wallet = await getWallet(tools as Store, userId)
+    return wallet ? { status: 'ready' as const, ...wallet } : { status: 'none' as const }
+  }),
+
+  createWallet: member(async (ctx) => {
+    if (ctx.params.wantWallet !== true) throw new ServiceError('want_wallet_required', 'Say you want a wallet first.')
+    return requestWallet(ctx.tools as Store, ctx.userId, {
+      wantWallet: true,
+      displayName: typeof ctx.params.displayName === 'string' ? ctx.params.displayName : undefined,
+      enroll: (input) => enrollAgentWalletHttp(ctx.env, input),
+    })
+  }),
 
   // --- Shared plans -----------------------------------------------------------
   createPlan: member(async ({ tools, userId, params }) => createPlan(tools as Store, userId, params)),

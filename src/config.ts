@@ -27,6 +27,12 @@ export const config = {
   parksEventsDataset: env("PARKS_EVENTS_DATASET", "w3wp-dpdi"),
   permittedEventsDataset: env("PERMITTED_EVENTS_DATASET", "tvpp-9vvx"),
   timezone: env("TIMEZONE", "America/New_York"),
+  /** Public hostname without scheme (DigitalOcean / ICS links). */
+  domain: env("DOMAIN"),
+  /** Origin used in iMessage iCal download links. Falls back to https://$DOMAIN. */
+  calendarPublicUrl:
+    env("CALENDAR_PUBLIC_URL") ||
+    (env("DOMAIN") ? `https://${env("DOMAIN").replace(/^https?:\/\//, "")}` : ""),
   databaseUrl: env("DATABASE_URL"),
   /** With DATABASE_URL, only one running agent answers each message. MESSAGE_CLAIMS=off disables it. */
   messageClaims: env("MESSAGE_CLAIMS", "on").toLowerCase() !== "off",

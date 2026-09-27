@@ -175,9 +175,10 @@ describe("reservation deposits", () => {
     const { say, provider, caller, orchestrator } = session();
     await say(BOOK, { messageId: "book" });
     const paid = await say("Yes", { messageId: "yes-1" });
-    expect(paid.reply).toBe(
-      "Booked Carbone for 4 tomorrow at 8:00 PM. The $50 deposit was a mock test payment, so no XRPL transaction was sent.",
+    expect(paid.reply).toMatch(
+      /^Booked Carbone for 4 tomorrow at 8:00 PM\. The \$50 deposit was a mock test payment, so no XRPL transaction was sent\./,
     );
+    expect(paid.reply).toContain("calendar.google.com");
     expect(mockProvider(provider).calls).toHaveLength(1);
     expect(mockProvider(provider).calls[0]?.amountUsd).toBe(50);
     expect(mockProvider(provider).calls[0]?.idempotencyKey).toBeTruthy();

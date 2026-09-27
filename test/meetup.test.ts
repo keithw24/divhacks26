@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifyMeetupMessage } from "../src/meetup/intent.js";
+import { lateHabitBufferMinutes, parseLateHabit } from "../src/meetup/habits.js";
 import { MeetupService } from "../src/meetup/service.js";
 import { lookupGazetteer } from "../src/transport/locations.js";
 import type { PlaceLocation, RouteResult, RoutingProvider } from "../src/transport/types.js";
@@ -51,6 +52,21 @@ describe("meetup intent", () => {
   });
 });
 
+describe("late habits", () => {
+  it("parses self and named marks", () => {
+    expect(parseLateHabit("I'm always late")).toEqual({ self: true, names: [] });
+    expect(parseLateHabit("Alan is habitually late")).toEqual({ self: false, names: ["Alan"] });
+    expect(parseLateHabit("I'm running 10 min late")).toBeUndefined();
+  });
+
+  it("uses at least 10 minutes and grows with a long trip", () => {
+    expect(lateHabitBufferMinutes(8 * 60)).toBe(10);
+    expect(lateHabitBufferMinutes(25 * 60)).toBe(10);
+    expect(lateHabitBufferMinutes(60 * 60)).toBe(12);
+    expect(lateHabitBufferMinutes(90 * 60)).toBe(18);
+  });
+});
+
 describe("group leave times", () => {
   const routing = routingFrom({
     [columbia.name]: {
@@ -83,6 +99,7 @@ describe("group leave times", () => {
     expect(result.reply).toMatch(/Times Square/);
     expect(result.reply).toMatch(/Alan: leave by 7:33 PM/);
     expect(result.reply).toMatch(/Rohan: leave by 7:40 PM/);
+    expect(result.reply).toContain("calendar.google.com");
   });
 
   it("says the plan still works when a late recompute still arrives on time", async () => {
@@ -136,5 +153,78 @@ describe("group leave times", () => {
 
     expect(late.reply).toMatch(/won’t hold|won't hold/);
     expect(late.reply).toMatch(/Alan/);
+  });
+
+  it("tells a habitually late person to leave extra time, at least 10 minutes", async () => {
+    const service = new MeetupService({ routing, timeZone: "America/New_York" });
+    const people = {
+      isGroup: true as const,
+      now,
+      participants: [
+        { id: "alan", displayName: "Alan" },
+        { id: "rohan", displayName: "Rohan" },
+      ],
+      liveLocations: [pin("alan", columbia, "Alan"), pin("rohan", wsp, "Rohan")],
+    };
+    const marked = await service.handleTurn({
+      spaceId: "group-late-habit",
+      senderId: "rohan",
+      senderName: "Rohan",
+      text: "Alan is always late",
+      ...people,
+    });
+    expect(marked.reply).toMatch(/Alan/);
+    expect(marked.reply).toMatch(/10 minutes/);
+
+    const result = await service.handleTurn({
+      spaceId: "group-late-habit",
+      senderId: "alan",
+      senderName: "Alan",
+      text: "Let's meet at Times Square at 8pm",
+      ...people,
+    });
+    expect(result.reply).toMatch(/Alan: leave by 7:23 PM/);
+    expect(result.reply).toMatch(/10 min extra — often late/);
+    expect(result.reply).toMatch(/Rohan: leave by 7:40 PM/);
+    expect(result.reply).not.toMatch(/Rohan:.*often late/);
+  });
+
+  it("learns the late habit after repeated running-late updates", async () => {
+    const service = new MeetupService({ routing, timeZone: "America/New_York" });
+    const people = {
+      isGroup: true as const,
+      now,
+      liveLocations: [pin("alan", columbia, "Alan"), pin("rohan", wsp, "Rohan")],
+    };
+    await service.handleTurn({
+      spaceId: "group-incidents",
+      senderId: "alan",
+      senderName: "Alan",
+      text: "Let's meet at Times Square at 8pm",
+      ...people,
+    });
+    await service.handleTurn({
+      spaceId: "group-incidents",
+      senderId: "alan",
+      senderName: "Alan",
+      text: "I'm running 10 min late",
+      ...people,
+    });
+    await service.handleTurn({
+      spaceId: "group-incidents",
+      senderId: "alan",
+      senderName: "Alan",
+      text: "I'm running 10 min late",
+      ...people,
+    });
+    const again = await service.handleTurn({
+      spaceId: "group-incidents",
+      senderId: "alan",
+      senderName: "Alan",
+      text: "when should we leave",
+      ...people,
+    });
+    expect(again.reply).toMatch(/Alan: leave by 7:23 PM/);
+    expect(again.reply).toMatch(/often late/);
   });
 });
