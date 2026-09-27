@@ -1,3 +1,5 @@
+import { photonSenderFromUserId } from "../identity/users.js";
+
 export interface InviteContact {
   displayName: string;
   /** Photon sender id used for `space.create`. Never log this value. */
@@ -125,7 +127,7 @@ export function mergeInviteContacts(rows: InviteContact[]): InviteContact[] {
   return uniqueBySender(rows.filter((row) => row.displayName.trim() && row.photonSenderId.trim()));
 }
 
-/** Join Tiger display names to a sendable Photon id from onboarding or DeepSpace. */
+/** Join Tiger display names to a sendable Photon id from onboarding, DeepSpace, or photon: user ids. */
 export function collectInviteContacts(input: {
   onboarded: Array<{ displayName: string; photonSenderId: string; userId?: string }>;
   directory: Array<{ displayName?: string; userId: string; photonIdentifier?: string }>;
@@ -140,12 +142,21 @@ export function collectInviteContacts(input: {
     });
   }
   for (const person of input.directory) {
-    const photonSenderId = person.photonIdentifier?.trim();
+    const photonSenderId = person.photonIdentifier?.trim() || photonSenderFromUserId(person.userId);
     if (!photonSenderId) continue;
     rows.push({
       displayName: person.displayName || person.userId,
       photonSenderId,
       userId: person.userId,
+    });
+  }
+  for (const profile of input.tiger ?? []) {
+    const photonSenderId = photonSenderFromUserId(profile.userId);
+    if (!photonSenderId) continue;
+    rows.push({
+      displayName: profile.displayName?.trim() || profile.userId,
+      photonSenderId,
+      userId: profile.userId,
     });
   }
   const merged = mergeInviteContacts(rows);
@@ -154,7 +165,8 @@ export function collectInviteContacts(input: {
     if (!name) continue;
     const match =
       merged.find((row) => row.userId && row.userId === profile.userId) ??
-      merged.find((row) => namesEqual(row.displayName, name));
+      merged.find((row) => namesEqual(row.displayName, name)) ??
+      merged.find((row) => photonSenderFromUserId(profile.userId) === row.photonSenderId);
     if (match) match.displayName = name;
   }
   return merged;

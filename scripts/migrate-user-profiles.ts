@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { TigerUserProfileStore } from "../src/profiles/tiger.js";
+import { profilesFromRippleDemo } from "../src/profiles/ripple-demo-import.js";
 
 loadEnv({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../.env") });
 
@@ -60,22 +61,28 @@ const client = new pg.Client({
 try {
   await client.connect();
   await client.query(sql);
-  // One-time bridge for wallets created before Tiger became authoritative.
-  // This file is local and gitignored; only public address metadata is copied.
+  // Bridge gitignored ripple-demo accounts (Photon handles + public wallets) into Tiger.
+  // Seeds stay local. Accounts without a photonSenderId are skipped.
   try {
     const parsed = JSON.parse(readFileSync("data/ripple-demo/accounts.json", "utf8")) as {
-      accounts?: Array<{ userId?: string; photonSenderId?: string; customerName?: string; xrplAddress?: string }>;
+      accounts?: Array<{ userId?: string; photonSenderId?: string; customerName?: string; customerId?: string; xrplAddress?: string }>;
     };
-    const profiles = new TigerUserProfileStore(client);
-    for (const account of parsed.accounts ?? []) {
-      if (!account.userId || !account.photonSenderId) continue;
-      await profiles.upsert({
-        userId: account.userId,
-        photonIdentifier: account.photonSenderId,
-        displayName: account.customerName,
-        walletAddress: account.xrplAddress ?? "0",
-      });
+    let wallets: Array<{ customerId?: string; xrplAddress?: string }> = [];
+    try {
+      wallets = JSON.parse(readFileSync("data/ripple-demo/wallets.json", "utf8")) as Array<{
+        customerId?: string;
+        xrplAddress?: string;
+      }>;
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      if (code !== "ENOENT") throw error;
     }
+    const profiles = new TigerUserProfileStore(client);
+    const rows = profilesFromRippleDemo({ accounts: parsed.accounts, wallets });
+    for (const row of rows) {
+      await profiles.upsert(row);
+    }
+    console.info(`imported ${rows.length} ripple-demo account(s) into user_profiles`);
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
     if (code !== "ENOENT") throw error;

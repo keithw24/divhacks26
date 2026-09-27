@@ -46,6 +46,15 @@ describe("plan invite parsing", () => {
     });
     expect(resolveInviteContact("Keith", contacts)?.photonSenderId).toBe("keith-id");
   });
+
+  it("texts a Tiger person whose user id is already a Photon handle", () => {
+    const contacts = collectInviteContacts({
+      onboarded: [],
+      directory: [],
+      tiger: [{ displayName: "Mike", userId: "photon:+15555550123" }],
+    });
+    expect(resolveInviteContact("Mike", contacts)?.photonSenderId).toBe("+15555550123");
+  });
 });
 
 describe("plan invite send", () => {

@@ -59,3 +59,59 @@ describe("Tiger user profiles", () => {
     expect(directory.names()).toEqual([]);
   });
 });
+
+describe("ripple-demo Tiger import", () => {
+  it("upserts Photon ids from accounts even when userId is omitted", async () => {
+    const { profilesFromRippleDemo } = await import("../src/profiles/ripple-demo-import.js");
+    const rows = profilesFromRippleDemo({
+      accounts: [
+        {
+          photonSenderId: "+1 (555) 555-0101",
+          customerName: "Mike",
+          customerId: "onboard_abc",
+        },
+      ],
+      wallets: [{ customerId: "onboard_abc", xrplAddress: "r4gmHsUDyMVexppaBPJmbMvYS8hz8vDjxk" }],
+    });
+    expect(rows).toEqual([
+      {
+        userId: "photon:+15555550101",
+        photonIdentifier: "+15555550101",
+        displayName: "Mike",
+        walletAddress: "r4gmHsUDyMVexppaBPJmbMvYS8hz8vDjxk",
+      },
+    ]);
+  });
+
+  it("skips demo wallets that have no Photon id", async () => {
+    const { profilesFromRippleDemo } = await import("../src/profiles/ripple-demo-import.js");
+    expect(
+      profilesFromRippleDemo({
+        accounts: [{ customerName: "Rohan", customerId: "rohan" }],
+        wallets: [{ customerId: "rohan", customerName: "Rohan", xrplAddress: "rUnmNdbpcnd3BKUXrqjArg4Tntzw8MqADz" }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("copies a public wallet onto a site profile that has no Photon id", async () => {
+    const { profilesFromRippleDemo } = await import("../src/profiles/ripple-demo-import.js");
+    expect(
+      profilesFromRippleDemo({
+        accounts: [
+          {
+            userId: "site:a8a3ad6d30df29e0c6404b3eb8a6c85a",
+            customerName: "Keith",
+            customerId: "keith",
+            xrplAddress: "rUnmNdbpcnd3BKUXrqjArg4Tntzw8MqADz",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        userId: "site:a8a3ad6d30df29e0c6404b3eb8a6c85a",
+        displayName: "Keith",
+        walletAddress: "rUnmNdbpcnd3BKUXrqjArg4Tntzw8MqADz",
+      },
+    ]);
+  });
+});

@@ -48,6 +48,7 @@ import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
 import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./deepspace/client.js";
 import { startSnapshotPush } from "./deepspace/snapshots.js";
 import { readPublicIntegrations } from "./integrations/report.js";
+import { photonSenderFromUserId } from "./identity/users.js";
 import { startDeepSpaceProfileSync } from "./deepspace/profile-sync.js";
 import { createDirectoryCache, mergePeopleDirectory, type PeopleDirectoryEntry } from "./deepspace/directory.js";
 import { notifyPaymentReceived } from "./payments/notify.js";
@@ -740,11 +741,15 @@ async function processMessages(items: { space: Space; message: Message }[]) {
       transport,
       peopleDirectory: async () => {
         const tigerPeople = tigerDirectory
-          ? (await tigerDirectory.refresh()).map((person) => ({
-              displayName: person.displayName,
-              userId: person.userId,
-              ...(person.walletAddress && person.walletAddress !== "0" ? { xrplAddress: person.walletAddress } : {}),
-            }))
+          ? (await tigerDirectory.refresh()).map((person) => {
+              const imessage = photonSenderFromUserId(person.userId);
+              return {
+                displayName: person.displayName,
+                userId: person.userId,
+                ...(person.walletAddress && person.walletAddress !== "0" ? { xrplAddress: person.walletAddress } : {}),
+                ...(imessage ? { imessage } : {}),
+              };
+            })
           : [];
         const merged = mergePeopleDirectory(
           [...tigerPeople, ...onboardingStore.peopleDirectory()],

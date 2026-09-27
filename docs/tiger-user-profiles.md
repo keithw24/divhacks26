@@ -12,9 +12,10 @@ Set a real Tiger connection string in the root `.env`, then run:
 npm run db:migrate:user-profiles
 ```
 
-The migration is idempotent. It creates `user_profiles` and imports public
-wallet metadata from `data/ripple-demo/accounts.json` when that file exists.
-It never copies wallet seeds or private keys.
+The migration is idempotent. It creates `user_profiles` and imports every
+`data/ripple-demo/accounts.json` row that has a `photonSenderId` (Photon id).
+A missing `userId` becomes `photon:<normalized handle>`. Public wallet
+addresses may come from that file or `wallets.json`. Seeds are never copied.
 
 ## Data contract
 

@@ -1,5 +1,6 @@
 import { createPersonalAssistant } from "../backboard/users.js";
 import type { BackboardClient } from "../backboard/client.js";
+import { isUsablePhotonPersonId } from "../chat/identity.js";
 import type { StateStore, UserProfile } from "../store/state.js";
 import { threadKey } from "../store/state.js";
 
@@ -8,6 +9,14 @@ const threadInflight = new Map<string, Promise<string>>();
 
 export function userIdFor(photonIdentifier: string): string {
   return `photon:${photonIdentifier}`;
+}
+
+/** Reverse of `userIdFor`. Only `photon:` ids are sendable; `site:` ids are not. */
+export function photonSenderFromUserId(userId: string | undefined): string | undefined {
+  const raw = userId?.trim() ?? "";
+  if (!/^photon:/i.test(raw)) return undefined;
+  const handle = raw.slice(raw.indexOf(":") + 1).trim();
+  return isUsablePhotonPersonId(handle) ? handle : undefined;
 }
 
 /**
