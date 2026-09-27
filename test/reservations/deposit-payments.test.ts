@@ -247,7 +247,7 @@ describe("restaurant deposits through the Ripple payment layer", () => {
     expect(sent.idempotencyKey).toBe(active()?.deposit?.requirement?.obligationId);
     expect(bistro.confirmations).toEqual([expect.objectContaining({ transactionHash: TX })]);
     expect(paid.reply).toMatch(
-      /^Booked Ripple Bistro for 4 tonight at 8:00 PM\. The \$100 deposit was paid successfully on XRPL Testnet \(tx AAAAAAAA\)\. Confirmation RB-[0-9A-F]{6}\.$/,
+      /^Booked Ripple Bistro for 4 tonight at 8:00 PM\. The \$100 deposit was paid successfully on XRPL Testnet (?:https:\/\/testnet\.xrpl\.org\/transactions\/[0-9A-F]{64}|\(tx AAAAAAAA\))\. Confirmation RB-[0-9A-F]{6}\.$/,
     );
     const reservation = active();
     expect(reservation?.status).toBe("BOOKED");

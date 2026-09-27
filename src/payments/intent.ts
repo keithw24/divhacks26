@@ -11,6 +11,7 @@ export type PaymentMessage =
   | { kind: "confirm" }
   | { kind: "decline" }
   | { kind: "cancel" }
+  | { kind: "dispute" }
   | { kind: "amount_only"; amount: AmountParse }
   | { kind: "query_max" }
   | { kind: "set_max"; amount: AmountParse }
@@ -86,8 +87,9 @@ export function classifyPaymentMessage(text: string): PaymentMessage {
   if (!cleaned) return { kind: "none" };
   const lower = cleaned.toLowerCase();
   if (CONFIRM.has(lower)) return { kind: "confirm" };
+  if (isDispute(lower)) return { kind: "dispute" };
   if (ZERO_OR_CANCEL.has(lower)) return { kind: "cancel" };
-  if (DECLINE.has(lower)) return { kind: "decline" };
+  if (DECLINE.has(lower)) return { kind: "cancel" };
   const limit = parseLimit(cleaned);
   if (limit) return limit;
   const change = parseChange(cleaned);
@@ -104,7 +106,14 @@ export function classifyPaymentMessage(text: string): PaymentMessage {
 /** New payment requests and edits take the turn before reservation/transport. Bare yes/no do not. */
 export function paymentInterrupts(text: string): boolean {
   const kind = classifyPaymentMessage(text).kind;
-  return kind === "request" || kind === "change" || kind === "set_max" || kind === "query_max" || kind === "amount_only";
+  return (
+    kind === "request" ||
+    kind === "change" ||
+    kind === "set_max" ||
+    kind === "query_max" ||
+    kind === "dispute" ||
+    kind === "amount_only"
+  );
 }
 
 export function shouldAskModel(text: string): boolean {
@@ -193,7 +202,9 @@ function parseChange(text: string): PaymentMessage | null {
     }
   }
 
-  const amount = text.match(/^(?:actually\s+)?(?:please\s+)?(?:make it|change it to|change the amount to|make that)\s+(.+)$/i);
+  const amount = text.match(
+    /^(?:actually\s+)?(?:please\s+)?(?:make it|change it to|change the amount to|make that|it should be|should be|that's|thats|the amount is|correct(?: amount)?(?: is)?)\s+(.+)$/i,
+  );
   if (amount?.[1]) {
     const rest = amount[1].replace(/\s+instead$/i, "").trim();
     const memoOnly = rest.match(/^for\s+(.+)$/i);
@@ -213,6 +224,15 @@ function parseChange(text: string): PaymentMessage | null {
   const memo = text.match(/^(?:actually\s+)?for\s+(.+?)\s+instead$/i) ?? text.match(/^actually\s+for\s+(.+)$/i);
   if (memo?.[1]) return { kind: "change", memo: cleanMemo(memo[1]) };
   return null;
+}
+
+function isDispute(lower: string): boolean {
+  return (
+    /^(that'?s |its |it'?s )?(wrong|incorrect|not right|not correct)$/.test(lower) ||
+    /^(wrong|incorrect) amount$/.test(lower) ||
+    /^(that'?s |its |it'?s )?(too much|too little|too high|too low)$/.test(lower) ||
+    /^not that amount$/.test(lower)
+  );
 }
 
 function cleanMemo(value: string): string | null {

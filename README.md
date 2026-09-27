@@ -494,7 +494,7 @@ iMessage
   → the same Photon space
 ```
 
-"Send Keith $20 for the Uber" asks "Send Keith $20 for the Uber?" and does not move anything. "Yes" from the same person submits. "No" drops the pending payment. "Actually make it $15" updates the pending payment and waits for a new yes. The yes that applied to $20 is not reused.
+"Send Keith $20 for the Uber" flags that a payment is about to go out and asks to confirm **$20**. Nothing moves yet. "Yes" from the same person submits that tracked amount. "That's wrong" asks for the correct amount (tracked amount stays $20 until they give a new number). "$15" or "actually make it $15" updates the pending payment and waits for a new yes. "Cancel" or "no" drops it. The yes that applied to $20 is not reused. Submit goes through a deterministic check that the sender wallet, recipient wallet, and amount still match the pending record.
 
 Gemini may extract a recipient, amount, and memo. It never chooses a wallet and never submits. Amount checks, the directory lookup, the confirmation gate, and the provider call are ordinary TypeScript.
 
@@ -504,7 +504,21 @@ Chat amounts are US dollars. XRPL Testnet does not settle bank dollars. In `ripp
 
 `mock` (the default) runs the same pending and confirmation flow and returns a fake transaction id. It does not open a socket.
 
-In `ripple_test`, a chat payment between people settles between customer wallets. The Photon sender must be mapped to a registered customer in `XRPL_CUSTOMER_SENDERS_JSON`. Display names are never trusted for this. The recipient must be a registered customer: Rohan, Keith, Ben, or Sarah. After the yes, `XrplPaymentExecutor` builds a frozen intent and runs the deterministic `PolicyEngine`. Only then does it sign with the sender's own Testnet wallet and wait for a validated ledger. The reply says "Sent" only when the result is `tesSUCCESS`, the transaction is validated, a hash exists, and the delivered amount matches. That reply links the hash on [testnet.xrpl.org](https://testnet.xrpl.org). Unmapped senders and unknown recipients are refused before confirmation, and no wallet is created for them.
+In `ripple_test` and `nessie_ripple`, a chat payment between people settles between customer wallets after both people have opted into a Testnet wallet. The Photon sender must be mapped via website **Create wallet**, `XRPL_CUSTOMER_SENDERS_JSON`, or DeepSpace. Display names are never trusted for spending. Recipients are the demo directory (Rohan, Keith, Ben, Sarah) plus onboarded users. After the yes, `XrplPaymentExecutor` builds a frozen intent and runs the deterministic `PolicyEngine`. Only then does it sign with the sender's own Testnet wallet and wait for a validated ledger. The reply says "Sent" only when the result is `tesSUCCESS`, the transaction is validated, a hash exists, and the delivered amount matches. That reply links the hash on [testnet.xrpl.org](https://testnet.xrpl.org). Unmapped senders and unknown recipients are refused before confirmation. Onboarding never accepts a user-supplied seed; this process faucets and stores the signing key itself.
+
+The website asks “Want a Testnet wallet?” as the last onboarding step. `POST /api/me/start-chat` only sends the hello iMessage. `POST /api/me/wallet` with `{ "wantWallet": true }` provisions the wallet. Skipping still lets them chat.
+
+DeepSpace (once it exists) should collect the iMessage number at signup, then call the agent:
+
+```http
+POST /api/deepspace/accounts
+Authorization: Bearer <DEEPSPACE_ONBOARDING_SECRET>
+Content-Type: application/json
+
+{"photonSenderId":"+19175551212","displayName":"Maya"}
+```
+
+The response is `customerId`, `photonSenderId`, and `xrplAddress` (Testnet classic address). `GET /api/deepspace/accounts?photonSenderId=+19175551212` with the same Bearer token looks up an existing row. Website users opt in with `POST /api/me/wallet`. There is still one Spectrum listener; wallets are keyed by Photon sender id in `data/ripple-demo/accounts.json` (gitignored).
 
 Reservation deposits (merchant payments) still use the `XRPL_TESTNET_SEED` provider described below.
 
@@ -522,7 +536,8 @@ Reservation deposits (merchant payments) still use the `XRPL_TESTNET_SEED` provi
 | `PAYMENTS_MAX_USD` | `500` | Reject larger requests before confirmation |
 | `PAYMENTS_DAILY_MAX_USD` | `1000` | Deterministic daily cap for the autonomous policy engine |
 | `XRPL_AUTO_PROVISION_TESTNET` | `false` | Fund a registered customer from the Testnet faucet when they have no wallet. Unknown names are not provisioned |
-| `XRPL_CUSTOMER_SENDERS_JSON` | | Photon sender id (phone or email) to customer id, e.g. `{"+15551234567":"rohan"}`. Required for chat payments in `ripple_test` |
+| `XRPL_CUSTOMER_SENDERS_JSON` | | Photon sender id (phone or email) to customer id, e.g. `{"+15551234567":"rohan"}`. Optional if DeepSpace/website onboarding maps senders |
+| `DEEPSPACE_ONBOARDING_SECRET` | | Bearer token for `POST/GET /api/deepspace/accounts`. Enables signup → iMessage number → Testnet wallet. Never commit it |
 | `XRPL_DASHBOARD_PORT` | `8790` | Read-only `GET /api/xrpl/dashboard` on 127.0.0.1 for the website's XRPL Testnet section |
 | `AUTONOMOUS_PAYMENTS_ENABLED` | `false` | Allow an agent payment with no human yes. Testnet only, and only under `AUTONOMOUS_MAX_USD` |
 | `AUTONOMOUS_MAX_USD` | `25` | Stricter cap for autonomous payments |

@@ -12,6 +12,19 @@ export interface WebApiDeps {
   allowedOrigins: string[];
   /** Send the "say hi" iMessage that opens the chat with the agent. */
   startChat(phone: string, name: string | undefined): Promise<void>;
+  /** Enroll this phone as a Photon sender. Wallet creation is gated by provisionWallet. */
+  enrollPhotonUser?(input: {
+    photonSenderId: string;
+    displayName?: string;
+    provisionWallet?: boolean;
+  }): Promise<{ xrplAddress?: string }>;
+  lookupPhotonUser?(photonSenderId: string): Promise<{ xrplAddress?: string } | undefined>;
+  /** DeepSpace/signup server: Bearer DEEPSPACE_ONBOARDING_SECRET. */
+  enrollFromDeepSpace?(
+    header: string | undefined,
+    body: { photonSenderId?: string; displayName?: string; provisionWallet?: boolean },
+  ): Promise<unknown>;
+  lookupFromDeepSpace?(header: string | undefined, photonSenderId: string): Promise<unknown>;
   /** Email the agent's number (it is never shown on the website). */
   sendAgentNumber(email: string, name: string | undefined): Promise<void>;
   saveMemories(phone: string, name: string, sentences: string[]): Promise<void>;
@@ -41,12 +54,20 @@ export function createWebApiServer(deps: WebApiDeps): Server {
   const startsByIp = new Map<string, number[]>();
   const startedAt = Date.now();
 
-  const publicUser = (user: WebUser) => ({
+  const publicUser = (user: WebUser, xrplAddress?: string) => ({
     phone: maskPhone(user.phone),
     email: maskEmail(user.email),
     onboarded: Boolean(user.onboardedAt),
     preferences: user.preferences ?? null,
+    wallet: xrplAddress
+      ? { status: "ready" as const, xrplAddress }
+      : { status: "none" as const },
   });
+
+  const userWalletAddress = async (user: WebUser): Promise<string | undefined> => {
+    const live = await deps.lookupPhotonUser?.(user.phone);
+    return live?.xrplAddress || user.xrplAddress;
+  };
 
   async function route(req: IncomingMessage, res: ServerResponse, path: string): Promise<unknown> {
     const method = req.method ?? "GET";
@@ -85,12 +106,26 @@ export function createWebApiServer(deps: WebApiDeps): Server {
     if (method === "POST" && path === "/api/auth/phone/verify") {
       const body = await readJson(req);
       const result = orThrow(deps.auth.verifyPhone(body.challenge, body.phone, body.code));
-      return { token: result.token, user: publicUser(result.user) };
+      return { token: result.token, user: publicUser(result.user, result.user.xrplAddress) };
     }
 
     if (method === "POST" && path === "/api/waitlist") {
       const body = await readJson(req);
       return orThrow(deps.auth.joinWaitlist(body.challenge, body.phone, body.name));
+    }
+
+    if (method === "POST" && path === "/api/deepspace/accounts") {
+      if (!deps.enrollFromDeepSpace) throw new HttpError(503, "deepspace_onboarding_unconfigured");
+      const enrolled = await deps.enrollFromDeepSpace(req.headers.authorization, await readJson(req));
+      if (!enrolled || typeof enrolled !== "object") throw new HttpError(500, "server_error");
+      return orThrow(enrolled);
+    }
+    if (method === "GET" && path === "/api/deepspace/accounts") {
+      if (!deps.lookupFromDeepSpace) throw new HttpError(503, "deepspace_onboarding_unconfigured");
+      const photonSenderId = new URL(req.url ?? "/", "http://localhost").searchParams.get("photonSenderId") ?? "";
+      const found = await deps.lookupFromDeepSpace(req.headers.authorization, photonSenderId);
+      if (!found || typeof found !== "object") throw new HttpError(500, "server_error");
+      return orThrow(found);
     }
 
     // Everything below needs a signed-in user.
@@ -101,8 +136,8 @@ export function createWebApiServer(deps: WebApiDeps): Server {
       deps.auth.signOut(token!);
       return { ok: true };
     }
+    if (method === "GET" && path === "/api/me") return publicUser(user, await userWalletAddress(user));
     if (method === "GET" && path === "/api/me/evidence") return { plans: deps.listEvidence?.(user.phone) ?? [] };
-    if (method === "GET" && path === "/api/me") return publicUser(user);
 
     if (method === "PUT" && path === "/api/me/preferences") {
       const prefs = deps.auth.savePreferences(user.phone, await readJson(req));
@@ -119,6 +154,25 @@ export function createWebApiServer(deps: WebApiDeps): Server {
         throw new HttpError(502, "send_failed");
       });
       return { ok: true };
+    }
+
+    if (method === "POST" && path === "/api/me/wallet") {
+      const body = await readJson(req);
+      if (body.wantWallet !== true) throw new HttpError(400, "want_wallet_required");
+      if (!deps.enrollPhotonUser) throw new HttpError(503, "wallet_unavailable");
+      try {
+        const enrolled = await deps.enrollPhotonUser({
+          photonSenderId: user.phone,
+          displayName: user.preferences?.name,
+          provisionWallet: true,
+        });
+        if (!enrolled.xrplAddress) throw new HttpError(503, "wallet_unavailable");
+        deps.auth.recordWallet(user.phone, enrolled.xrplAddress);
+        return { ok: true, xrplAddress: enrolled.xrplAddress };
+      } catch (err) {
+        if (err instanceof HttpError) throw err;
+        throw new HttpError(503, "wallet_unavailable");
+      }
     }
 
     if (method === "POST" && path === "/api/me/send-number") {
@@ -206,6 +260,12 @@ const STATUS: Record<string, number> = {
   full: 409,
   account_mismatch: 409,
   challenge_expired: 401,
+  unauthorized: 401,
+  deepspace_onboarding_unconfigured: 503,
+  invalid_photon_sender: 400,
+  not_found: 404,
+  want_wallet_required: 400,
+  wallet_unavailable: 503,
 };
 
 /** Unwrap an auth result, turning `{ error }` into an HTTP error. */

@@ -12,7 +12,7 @@ const LABEL: Record<IntegrationHealth, string> = {
 function tone(status: IntegrationHealth): string {
   if (status === "LIVE") return "bg-lime text-lime-foreground";
   if (status === "ERROR") return "bg-primary text-primary-foreground";
-  if (status === "MOCK") return "bg-foreground text-background";
+  if (status === "MOCK") return "bg-ink text-ink-foreground";
   return "bg-background text-foreground";
 }
 

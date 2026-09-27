@@ -23,7 +23,7 @@ export interface PaymentRuntimeEnv {
   geminiApiKey?: string;
   geminiModel?: string;
   stateStore?: StateStore;
-  /** ripple_test only. Person transfers settle between customer wallets instead of the shared seed. */
+  /** Person transfers settle between customer wallets in ripple_test and nessie_ripple. */
   settlement?: CustomerSettlementPort;
   nessieApiKey?: string;
   nessieBaseUrl?: string;
@@ -46,7 +46,7 @@ export function createPaymentRuntime(env: PaymentRuntimeEnv) {
     maxUsd: env.maxUsd,
     timeoutMs: env.timeoutMs,
     interpreter,
-    settlement: env.mode === "ripple_test" ? env.settlement : undefined,
+    settlement: env.mode === "ripple_test" || env.mode === "nessie_ripple" ? env.settlement : undefined,
     audit: env.audit,
     intentTtlMs: env.intentTtlMs,
   });

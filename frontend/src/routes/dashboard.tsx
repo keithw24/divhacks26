@@ -1,5 +1,6 @@
 import { EvidenceHistory } from "@/components/site/evidence-history";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   AppPage,
@@ -11,6 +12,7 @@ import {
 } from "@/components/site/shell";
 import { api, errorMessage } from "@/lib/api";
 import { Lock, ShieldCheck } from "lucide-react";
+import { WalletStatusCard } from "@/components/site/wallet-card";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Your @agent — plansaroundus" }] }),
@@ -37,10 +39,12 @@ type SendState = { busy?: boolean; message?: string };
  */
 function Dashboard() {
   const me = useMe({ requireOnboarded: true });
+  const queryClient = useQueryClient();
   const { welcome } = Route.useSearch();
   const [copied, setCopied] = useState<string>();
   const [email, setEmail] = useState<SendState>({});
   const [intro, setIntro] = useState<SendState>({});
+  const [wallet, setWallet] = useState<SendState>({});
 
   const copy = async (text: string) => {
     try {
@@ -96,7 +100,7 @@ function Dashboard() {
         sub="Everything happens in private 1:1 threads in iMessage. To keep the beta private, @agent's number is only sent by email."
       />
 
-      <Card className="bg-foreground text-background shadow-[var(--shadow-hard-primary)]">
+      <Card className="bg-ink text-ink-foreground shadow-[var(--shadow-hard-primary)]">
         <div className="text-xs font-bold uppercase tracking-[0.15em] opacity-70">
           @agent's number
         </div>
@@ -322,6 +326,24 @@ function Dashboard() {
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="mt-8">
+        <WalletStatusCard
+          wallet={me.wallet}
+          busy={wallet.busy}
+          message={wallet.message}
+          onCreate={() => {
+            void send(
+              async () => {
+                await api.createWallet();
+                await queryClient.invalidateQueries({ queryKey: ["me"] });
+              },
+              setWallet,
+              "Wallet created. You can pay in iMessage after a yes.",
+            );
+          }}
+        />
       </section>
 
       <section className="mt-8 bg-card outline-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">

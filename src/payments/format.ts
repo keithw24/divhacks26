@@ -1,3 +1,5 @@
+import { testnetExplorerLink } from "./xrpl/explorer.js";
+
 export function formatUsd(amount: number): string {
   const cents = Math.round(amount * 100);
   if (cents % 100 === 0) return `$${cents / 100}`;
@@ -11,7 +13,18 @@ export function forClause(memo: string | null | undefined): string {
 }
 
 export function confirmationText(input: { recipientName: string; amountUsd: number; memo: string | null }): string {
-  return `Do you want to send ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)}?`;
+  const usd = formatUsd(input.amountUsd);
+  return (
+    `I'm about to send ${input.recipientName} ${usd}${forClause(input.memo)}. ` +
+    `Confirm ${usd}? Yes to send it, cancel to stop, or tell me the correct amount.`
+  );
+}
+
+export function correctionPromptText(input: { recipientName: string; amountUsd: number }): string {
+  return (
+    `I won't send until I have the correct amount. What should I send ${input.recipientName}? ` +
+    `Tracked amount is still ${formatUsd(input.amountUsd)}. Cancel to stop.`
+  );
 }
 
 export function askNewAmountText(): string {
@@ -19,7 +32,7 @@ export function askNewAmountText(): string {
 }
 
 export function cancelledPaymentText(): string {
-  return "Okay, I cancelled the payment. Nothing was sent.";
+  return "Okay, I won't send it.";
 }
 
 export function expiredConfirmationText(input: { recipientName: string; amountUsd: number }): string {
@@ -33,27 +46,47 @@ export function successText(input: {
   transactionId?: string;
   submittedAsset?: string;
   nessiePurchaseId?: string;
+  explorerUrl?: string | null;
 }): string {
   const base = `Sent ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)}.`;
   const bits: string[] = [base];
   if (input.nessiePurchaseId) {
     const shown = input.nessiePurchaseId.length > 12 ? input.nessiePurchaseId.slice(0, 8) : input.nessiePurchaseId;
     bits.push(`Nessie sim: ${shown}.`);
-  } else if (input.submittedAsset === "USD" && input.transactionId) {
+  } else if (input.submittedAsset === "USD" && input.transactionId && !testnetExplorerLink(input.transactionId)) {
     const shown = input.transactionId.length > 12 ? input.transactionId.slice(0, 8) : input.transactionId;
     bits.push(`Nessie sim: ${shown}.`);
   }
-  if (input.submittedAsset === "XRP" && input.transactionId) {
-    bits.push(`XRPL Testnet: ${input.transactionId.slice(0, 8)}. https://testnet.xrpl.org/transactions/${input.transactionId}`);
-  } else if (!input.nessiePurchaseId && input.transactionId && input.submittedAsset !== "USD") {
-    const shown = input.transactionId.length > 12 ? input.transactionId.slice(0, 8) : input.transactionId;
-    bits.push(`Test tx: ${shown}.`);
-  }
+  const url = transactionUrl(input.explorerUrl, input.transactionId, input.submittedAsset);
+  if (url) bits.push(`XRPL Testnet: ${url}`);
   return bits.join(" ");
 }
 
-export function alreadySentText(input: { recipientName: string; amountUsd: number; memo: string | null }): string {
-  return `Already sent ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)}.`;
+export function alreadySentText(input: {
+  recipientName: string;
+  amountUsd: number;
+  memo: string | null;
+  transactionId?: string;
+  explorerUrl?: string | null;
+  submittedAsset?: string;
+}): string {
+  const base = `Already sent ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)}.`;
+  const url = transactionUrl(input.explorerUrl, input.transactionId, input.submittedAsset);
+  return url ? `${base} XRPL Testnet: ${url}` : base;
+}
+
+function transactionUrl(
+  explorerUrl: string | null | undefined,
+  transactionId: string | undefined,
+  submittedAsset?: string,
+): string | null {
+  if (explorerUrl?.includes("testnet.xrpl.org/transactions/")) return explorerUrl;
+  const fromHash = testnetExplorerLink(transactionId);
+  if (fromHash) return fromHash;
+  if (submittedAsset === "XRP" && transactionId?.trim()) {
+    return `${testnetExplorerLink(transactionId) ?? `https://testnet.xrpl.org/transactions/${transactionId.trim()}`}`;
+  }
+  return null;
 }
 
 /** User-visible line when a send is blocked or the provider fails closed. */
@@ -94,7 +127,11 @@ export function xrplSuccessText(input: {
   transactionHash: string;
 }): string {
   const base = `Sent ${formatUsd(input.amountUsd)} to ${input.recipientName}${forClause(input.memo)} as ${input.xrp} test XRP on XRPL Testnet (no real money).`;
-  return `${base} Validated: ${input.explorerUrl ?? input.transactionHash}`;
+  const url =
+    (input.explorerUrl?.includes("testnet.xrpl.org/transactions/") ? input.explorerUrl : null) ??
+    testnetExplorerLink(input.transactionHash) ??
+    input.explorerUrl;
+  return url ? `${base} ${url}` : `${base} Validated: ${input.transactionHash}`;
 }
 
 export function xrplUnconfirmedText(amountUsd: number): string {

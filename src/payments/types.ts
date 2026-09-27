@@ -58,6 +58,11 @@ export interface PaymentRecord {
   senderCustomerId?: string;
   recipientCustomerId?: string;
   explorerUrl?: string;
+  /**
+   * Person transfers: confirm_amount waits for yes / cancel / a new number.
+   * awaiting_correction means they said the amount is wrong; a number is required before send.
+   */
+  confirmationPhase?: "confirm_amount" | "awaiting_correction";
 }
 
 export interface PaymentSendInput {

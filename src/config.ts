@@ -30,6 +30,14 @@ export const config = {
   databaseUrl: env("DATABASE_URL"),
   /** With DATABASE_URL, only one running agent answers each message. MESSAGE_CLAIMS=off disables it. */
   messageClaims: env("MESSAGE_CLAIMS", "on").toLowerCase() !== "off",
+  /**
+   * DeepSpace backend (backend/). When both are set, this agent acts as the iMessage
+   * channel adapter: it forwards who is talking, lets the backend handle "LINK 123456",
+   * and delivers queued plan notifications. Unset = the agent runs exactly as before.
+   */
+  deepspaceApiUrl: env("DEEPSPACE_API_URL"),
+  deepspaceChannelSecret: env("DEEPSPACE_CHANNEL_SECRET"),
+  deepspaceOutboxPollMs: Math.max(5000, Number(env("DEEPSPACE_OUTBOX_POLL_MS", "15000")) || 15000),
   backboardApiKey: env("BACKBOARD_API_KEY"),
   backboardMemoryMode: memoryMode(env("BACKBOARD_MEMORY_MODE", "Auto")),
   backboardMemoryPro: env("BACKBOARD_MEMORY_PRO", "false").toLowerCase() === "true",
@@ -75,6 +83,11 @@ export const config = {
   autonomousMaxUsd: positiveNumber(env("AUTONOMOUS_MAX_USD", "25"), 25),
   /** Photon sender id → registered customer, e.g. {"+15551234567":"rohan"}. Unmapped senders cannot spend. */
   xrplCustomerSendersJson: env("XRPL_CUSTOMER_SENDERS_JSON"),
+  /**
+   * Shared secret so a DeepSpace (or other) signup server can enroll Photon users
+   * and receive a Testnet wallet address. Never a user seed.
+   */
+  deepspaceOnboardingSecret: env("DEEPSPACE_ONBOARDING_SECRET"),
   /** Read-only JSON for the website's XRPL Testnet section. Bound to 127.0.0.1. */
   xrplDashboardPort: positiveNumber(env("XRPL_DASHBOARD_PORT", "8790"), 8790),
   paymentsRecipientsJson: env("PAYMENTS_RECIPIENTS_JSON"),

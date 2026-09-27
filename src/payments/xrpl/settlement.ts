@@ -27,18 +27,23 @@ export interface CustomerSettlementPort {
  * A display name is never enough to spend from someone's wallet.
  */
 export class CustomerWalletSettlement implements CustomerSettlementPort {
-  private readonly senders: Map<string, string>;
+  private readonly sendersFn: () => Record<string, string>;
 
   constructor(
     private readonly executor: XrplPaymentExecutor,
-    senders: Record<string, string>,
+    senders: Record<string, string> | (() => Record<string, string>),
+    private readonly extraNames?: () => string[],
   ) {
-    this.senders = new Map(Object.entries(senders).map(([id, customerId]) => [normalizeSenderId(id), customerId]));
+    this.sendersFn = typeof senders === "function" ? senders : () => senders;
+  }
+
+  private senderMap(): Map<string, string> {
+    return new Map(Object.entries(this.sendersFn()).map(([id, customerId]) => [normalizeSenderId(id), customerId]));
   }
 
   resolveSender(input: { senderId?: string }): RegisteredCustomer | undefined {
     if (!input.senderId) return undefined;
-    const customerId = this.senders.get(normalizeSenderId(input.senderId));
+    const customerId = this.senderMap().get(normalizeSenderId(input.senderId));
     return customerId ? findRegisteredCustomer(customerId) : undefined;
   }
 
@@ -47,7 +52,7 @@ export class CustomerWalletSettlement implements CustomerSettlementPort {
   }
 
   knownNames(): string[] {
-    return REGISTERED_CUSTOMERS.map((customer) => customer.customerName);
+    return [...new Set([...REGISTERED_CUSTOMERS.map((customer) => customer.customerName), ...(this.extraNames?.() ?? [])])];
   }
 
   settle(input: SettlementRequest): Promise<PaymentExecution> {
@@ -83,7 +88,7 @@ export function parseCustomerSenders(json: string | undefined): Record<string, s
   return out;
 }
 
-function normalizeSenderId(id: string): string {
+export function normalizeSenderId(id: string): string {
   const trimmed = id.trim();
   return trimmed.includes("@") ? trimmed.toLowerCase() : trimmed.replace(/[\s().-]/g, "");
 }

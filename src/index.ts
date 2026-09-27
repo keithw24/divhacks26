@@ -22,6 +22,7 @@ import { DASHBOARD_PATH, startXrplDashboardServer } from "./payments/xrpl/dashbo
 import { xrplPayments } from "./payments/xrpl/payments.js";
 import { createLiveRippleGuard } from "./payments/xrpl/runtime.js";
 import { CustomerWalletSettlement, parseCustomerSenders } from "./payments/xrpl/settlement.js";
+import { AccountOnboardingService, AccountOnboardingStore, ONBOARDING_ACCOUNTS_PATH } from "./payments/xrpl/onboarding.js";
 import { createReservationRuntime } from "./reservations/runtime.js";
 import { geocodeNyc } from "./geocode.js";
 import { createMerchantDirectory } from "./payments/merchants.js";
@@ -37,6 +38,7 @@ import { startWebRuntime } from "./web/runtime.js";
 import { createMailer } from "./web/email.js";
 import { readSocialContext } from "./agent/social.js";
 import { INSTANCE_ID, createMessageClaimer } from "./chat/claim.js";
+import { createDeepSpaceClient, startOutboxPoller, type InboundResult } from "./deepspace/client.js";
 import { getPool } from "./safety.js";
 import { shouldSpeak } from "./voice/decide.js";
 import { sendVoiceReply, transcribeVoiceMemo, voiceEnabled } from "./voice/index.js";
@@ -63,13 +65,20 @@ const transport = createTransportationServiceFromEnv({
 });
 const spaceSenders = new Map<string, (text: string) => Promise<unknown>>();
 const agentState = openAgentStateStore(config.agentStatePath);
-const xrpl = config.paymentsMode === "ripple_test" ? createLiveRippleGuard() : undefined;
+const onboardingStore = new AccountOnboardingStore(ONBOARDING_ACCOUNTS_PATH);
+const usesCustomerWallets = config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple";
+const xrpl = usesCustomerWallets || Boolean(config.deepspaceOnboardingSecret) ? createLiveRippleGuard() : undefined;
+const onboarding = new AccountOnboardingService(onboardingStore, xrpl?.guard.registry);
 const customerSenders = parseCustomerSenders(config.xrplCustomerSendersJson);
+const liveSenders = () => ({ ...customerSenders, ...onboardingStore.senderMap() });
 // Merchant payees must be real Testnet addresses whenever the provider submits to XRPL.
 const merchantPaymentMode =
   config.paymentsMode === "ripple_test" || config.paymentsMode === "nessie_ripple" ? "ripple_test" : "mock";
 const payments = createPaymentRuntime({
-  settlement: xrpl ? new CustomerWalletSettlement(xrpl.guard.executor, customerSenders) : undefined,
+  settlement:
+    xrpl && usesCustomerWallets
+      ? new CustomerWalletSettlement(xrpl.guard.executor, liveSenders, () => onboardingStore.displayNames())
+      : undefined,
   mode: config.paymentsMode,
   maxUsd: config.paymentsMaxUsd,
   xrpPerUsd: config.paymentsXrpPerUsd,
@@ -299,11 +308,14 @@ if (xrpl) {
   console.info(
     `XRPL customer wallets: ${xrpl.guard.registry.listPublic().map((w) => `${w.customerName} ${w.xrplAddress}`).join(", ") || "none yet"}.`,
   );
-  const linked = Object.keys(customerSenders).length;
+  const linked = Object.keys(liveSenders()).length;
   if (linked === 0) {
-    console.warn("XRPL_CUSTOMER_SENDERS_JSON is empty. No Photon sender is linked to a customer wallet, so person payments will be refused.");
+    console.warn("No Photon sender is linked to a customer wallet (XRPL_CUSTOMER_SENDERS_JSON or DeepSpace onboarding). Person payments will be refused.");
   } else {
     console.info(`${linked} Photon sender(s) linked to XRPL Testnet customer wallets.`);
+  }
+  if (config.deepspaceOnboardingSecret) {
+    console.info("DeepSpace onboarding API is enabled at POST /api/deepspace/accounts (Bearer DEEPSPACE_ONBOARDING_SECRET).");
   }
   const depositWallet = reservations.payments?.senderAddress;
   if (depositWallet) {
@@ -377,6 +389,14 @@ const web =
         backboard: config.backboardApiKey ? createBackboardClient({ apiKey: config.backboardApiKey }) : undefined,
         agentState,
         handleElevenLabsWebhook: (body, signature) => reservations.orchestrator.handleWebhook(body, signature),
+        deepspaceOnboardingSecret: config.deepspaceOnboardingSecret || undefined,
+        enrollPhotonUser: (input) =>
+          onboarding.enroll({
+            photonSenderId: input.photonSenderId,
+            displayName: input.displayName,
+            provisionWallet: input.provisionWallet,
+          }),
+        lookupPhotonUser: async (photonSenderId) => onboarding.publicView(photonSenderId),
       });
 if (!web) {
   void reservations.listen(config.reservationWebhookPort).catch((error) => {
@@ -401,6 +421,44 @@ const claims = createMessageClaimer({
 });
 console.info(`agent instance ${INSTANCE_ID} (message claims: ${config.chatProvider === "imessage" && config.databaseUrl && config.messageClaims ? "database" : "this process only"})`);
 
+// DeepSpace backend: identity, shared plans and cross-channel notifications.
+const deepspace =
+  config.chatProvider === "imessage" && config.deepspaceApiUrl && config.deepspaceChannelSecret
+    ? createDeepSpaceClient({ baseUrl: config.deepspaceApiUrl, secret: config.deepspaceChannelSecret })
+    : undefined;
+console.info(deepspace ? `DeepSpace backend: ${config.deepspaceApiUrl}` : "DeepSpace backend: off (set DEEPSPACE_API_URL and DEEPSPACE_CHANNEL_SECRET).");
+if (deepspace) {
+  startOutboxPoller({
+    client: deepspace,
+    channel: "imessage",
+    intervalMs: config.deepspaceOutboxPollMs,
+    send: async (item) => {
+      const chat = await imessage(app as never).space.create(item.externalId);
+      await chat.send(item.body);
+      recordMessage(chat.id, config.agentName, item.body);
+    },
+  });
+}
+
+/** Tell the backend who is talking. Fails open: the agent still answers if DeepSpace is down. */
+async function checkInWithBackend(space: Space, message: Message, who: string, text: string): Promise<InboundResult | null> {
+  if (!deepspace || who === "someone") return null;
+  return deepspace
+    .inbound({
+      deliveryId: message.id,
+      channel: "imessage",
+      externalId: who,
+      conversationId: space.id,
+      displayName: senderDisplayName(message.sender),
+      text,
+      receivedAt: message.timestamp.toISOString(),
+    })
+    .catch((error) => {
+      console.error(`deepspace inbound failed: ${error instanceof Error ? error.message.slice(0, 160) : "Error"}`);
+      return null;
+    });
+}
+
 async function processMessages(items: { space: Space; message: Message }[]) {
   const { space, message } = items[items.length - 1]!;
 
@@ -420,6 +478,17 @@ async function processMessages(items: { space: Space; message: Message }[]) {
   }
   if (!texts.length) return;
   const text = texts.join("\n");
+
+  const backend = await checkInWithBackend(space, message, who, text);
+  if (backend?.duplicate) return;
+  if (backend?.reply) {
+    // The backend handled it (e.g. "LINK 123456"); don't also run the agent on it.
+    recordMessage(space.id, who, text);
+    const sent = await message.reply(backend.reply).catch(() => undefined);
+    if (sent == null) await space.send(backend.reply).catch(() => undefined);
+    recordMessage(space.id, config.agentName, backend.reply);
+    return;
+  }
 
   const isVoice = message.content.type === "voice";
   if (message.content.type !== "text") {

@@ -11,6 +11,7 @@ import { WalletRegistry } from "../../src/payments/xrpl/wallets.js";
 import { MemorySecretStore } from "../../src/payments/xrpl/secrets.js";
 import { formatAuditTrail, XrplDashboardBuilder } from "../../src/payments/xrpl/dashboard.js";
 import { validateConfirmationGuardrail } from "../../src/payments/guardrails.js";
+import { confirmationText, correctionPromptText } from "../../src/payments/format.js";
 import { FakeLedger, stack } from "./xrpl-support.js";
 import type { CustomerWallet, LedgerPort, TestnetFaucet } from "../../src/payments/xrpl/types.js";
 
@@ -92,7 +93,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
     const result = await say("Send Sarah $25");
 
     // Must prompt for confirmation without transferring funds
-    expect(result.reply).toBe("Do you want to send $25 to Sarah?");
+    expect(result.reply).toBe(confirmationText({ recipientName: "Sarah", amountUsd: 25, memo: null }));
     expect(ledger.submits).toHaveLength(0);
 
     // Stored as pending payment intent
@@ -127,62 +128,62 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
     expect(record?.confirmedAmount).toBe(25);
   });
 
-  it("C. User declines → zero transactions", async () => {
+  it("C. User cancels on 'no' → zero transactions", async () => {
     const { say, ledger, store } = setupHarness();
     await say("Send Sarah $25");
-    const declined = await say("no");
+    const cancelled = await say("no");
 
-    expect(declined.reply).toBe("How much would you like to send instead?");
+    expect(cancelled.reply).toBe("Okay, I won't send it.");
+    expect(ledger.submits).toHaveLength(0);
+    expect(store.active("space-1")).toBeUndefined();
+  });
+
+  it("D. User disputes amount ('that's wrong') → asks for correction", async () => {
+    const { say, ledger, store } = setupHarness();
+    await say("Send Sarah $25");
+    const disputed = await say("that's wrong");
+
+    expect(disputed.reply).toBe(correctionPromptText({ recipientName: "Sarah", amountUsd: 25 }));
     expect(ledger.submits).toHaveLength(0);
 
-    // Status is in AWAITING_NEW_AMOUNT
     const record = store.active("space-1");
-    expect(record?.status).toBe("AWAITING_NEW_AMOUNT");
+    expect(record?.status).toBe("AWAITING_CONFIRMATION");
+    expect(record?.confirmationPhase).toBe("awaiting_correction");
     expect(record?.confirmedAt).toBeUndefined();
   });
 
-  it("D. User declines and says '$0' → zero transactions", async () => {
+  it("E. User cancels during correction → zero transactions", async () => {
     const { say, ledger, store } = setupHarness();
     await say("Send Sarah $25");
-    await say("no");
-    const cancelled = await say("$0");
+    await say("that's wrong");
+    const cancelled = await say("cancel");
 
-    expect(cancelled.reply).toBe("Okay, I cancelled the payment. Nothing was sent.");
+    expect(cancelled.reply).toBe("Okay, I won't send it.");
     expect(ledger.submits).toHaveLength(0);
     expect(store.active("space-1")).toBeUndefined();
   });
 
-  it("E. User declines and says 'nothing' → zero transactions", async () => {
+  it("F. User provides corrected amount '$15' → asks for confirmation again; does NOT immediately transfer", async () => {
     const { say, ledger, store } = setupHarness();
     await say("Send Sarah $25");
-    await say("no");
-    const cancelled = await say("nothing");
-
-    expect(cancelled.reply).toBe("Okay, I cancelled the payment. Nothing was sent.");
-    expect(ledger.submits).toHaveLength(0);
-    expect(store.active("space-1")).toBeUndefined();
-  });
-
-  it("F. User declines and says '$15' → asks for confirmation again; does NOT immediately transfer", async () => {
-    const { say, ledger, store } = setupHarness();
-    await say("Send Sarah $25");
-    await say("no");
+    await say("that's wrong");
     const revised = await say("$15");
 
     // Asks for confirmation of new proposal; does NOT transfer yet
-    expect(revised.reply).toBe("Do you want to send $15 to Sarah?");
+    expect(revised.reply).toBe(confirmationText({ recipientName: "Sarah", amountUsd: 15, memo: null }));
     expect(ledger.submits).toHaveLength(0);
 
     const record = store.active("space-1");
     expect(record?.status).toBe("AWAITING_CONFIRMATION");
     expect(record?.amountUsd).toBe(15);
+    expect(record?.confirmationPhase).toBe("confirm_amount");
     expect(record?.confirmedAt).toBeUndefined();
   });
 
   it("G. User confirms revised $15 → exactly one $15 transaction", async () => {
     const { say, ledger, store } = setupHarness();
     await say("Send Sarah $25");
-    await say("no");
+    await say("that's wrong");
     await say("$15");
     const confirmed = await say("Yes");
 
@@ -201,7 +202,7 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
     await say("Send Sarah $25");
     const changed = await say("Actually send it to Keith");
 
-    expect(changed.reply).toBe("Do you want to send $25 to Keith?");
+    expect(changed.reply).toBe(confirmationText({ recipientName: "Keith", amountUsd: 25, memo: null }));
     expect(ledger.submits).toHaveLength(0);
 
     const record = store.active("space-1");
@@ -227,10 +228,10 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
 
     // User changes amount before execution takes place
     const changed = await say("Actually make it $10");
-    expect(changed.reply).toBe("Do you want to send $10 to Sarah?");
+    expect(changed.reply).toBe(confirmationText({ recipientName: "Sarah", amountUsd: 10, memo: null }));
     expect(ledger.submits).toHaveLength(0);
 
-    // Old confirmed intent is cancelled, fresh unconfirmed intent for $10 created
+    // Old confirmed intent is updated, fresh unconfirmed intent for $10 created
     const current = store.active("space-1");
     expect(current?.status).toBe("AWAITING_CONFIRMATION");
     expect(current?.amountUsd).toBe(10);
@@ -421,11 +422,11 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
     expect(store.active("space-1")?.status).toBe("SUCCEEDED");
   });
 
-  it("Audit trail reflects full conversation lifecycle: PROPOSED → DECLINED → REVISED → CONFIRMED → VALIDATED", async () => {
+  it("Audit trail reflects full conversation lifecycle: PROPOSED → REVISED → CONFIRMED → VALIDATED", async () => {
     const { say, audit, registry, ledger } = setupHarness();
 
     await say("Send Sarah $25");
-    await say("no");
+    await say("that's wrong");
     await say("$15");
     await say("yes");
 
@@ -441,7 +442,6 @@ describe("Mandatory User-Confirmation Guardrail for Ripple/XRPL Payments", () =>
     const trail = dashboard.auditTrail ?? [];
 
     expect(trail).toContain("PROPOSED: $25 → Sarah");
-    expect(trail).toContain("DECLINED");
     expect(trail).toContain("REVISED: $15 → Sarah");
     expect(trail).toContain("CONFIRMED");
     expect(trail).toContain("GUARDRAIL: ALLOW");

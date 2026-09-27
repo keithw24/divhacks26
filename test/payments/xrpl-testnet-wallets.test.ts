@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Wallet } from "xrpl";
 import { afterEach, describe, expect, it } from "vitest";
+import { confirmationText } from "../../src/payments/format.js";
 import { MockPaymentProvider } from "../../src/payments/mock.js";
 import { loadRecipientDirectory } from "../../src/payments/recipients.js";
 import { PaymentService } from "../../src/payments/service.js";
@@ -549,7 +550,7 @@ describe("Photon payment flow settles between customer wallets", () => {
   it("asks first, then pays Keith $5 from Rohan's own Testnet wallet after yes", async () => {
     const { s, provider, service, say } = chat();
     const ask = await say("Pay Keith $5 for dinner");
-    expect(ask.reply).toBe("Do you want to send $5 to Keith for dinner?");
+    expect(ask.reply).toBe(confirmationText({ recipientName: "Keith", amountUsd: 5, memo: "dinner" }));
     expect(s.ledger.submits).toHaveLength(0);
     expect(service.payments.active("group")).toMatchObject({
       settlement: "XRPL_TESTNET_CUSTOMER_WALLET",
