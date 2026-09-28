@@ -1,25 +1,14 @@
 name: Deployment CI
 
+# Checks only what ships: the MVP agent (mvp/, deployed to the droplet) and the website (frontend/).
+# deploy-droplet.yml runs after this workflow succeeds on main, so keep this name.
+
 on:
   pull_request:
   push:
     branches: [main]
 
 jobs:
-  backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npx vitest run test/web.test.ts
-      - run: docker build --tag boroughos-agent:test .
-
   mvp:
     runs-on: ubuntu-latest
     defaults:
@@ -37,23 +26,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: docker build --tag around-me-mvp:test .
+      - run: cp .env.example .env && docker compose -f compose.yaml config --quiet
 
-  deepspace-backend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-      - run: npm ci
-      - run: npm run type-check
-      - run: npm run test:unit
-      - run: npm run lint
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -66,12 +40,4 @@ jobs:
           bun-version: 1.2.22
       - run: bun install --frozen-lockfile
       - run: bun run lint
-      - run: NITRO_PRESET=node-server bun run build
-      - run: docker build --tag boroughos-frontend:test .
-
-  compose:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: cp .env.example .env
-      - run: docker compose config --quiet
+      - run: bun run build
